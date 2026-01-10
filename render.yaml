@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: universal-doc-intelligence
+    runtime: python
+    plan: starter  # Change to 'free' or 'standard' as needed
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --config gunicorn_config.py app:app
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.9"
+      - key: OPENAI_API_KEY
+        sync: false  # Must be set manually in Render dashboard
+      - key: SECRET_KEY
+        generateValue: true  # Render will auto-generate a secure key
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "5000"
+      # Optional: Add authentication if needed
+      # - key: AUTH_USER1_EMAIL
+      #   sync: false
+      # - key: AUTH_USER1_PASSWORD
+      #   sync: false
+      # - key: AUTH_USER1_NAME
+      #   sync: false

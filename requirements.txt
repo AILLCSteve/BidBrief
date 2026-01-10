@@ -1,0 +1,42 @@
+# PM Tools Suite - Python Dependencies
+
+# Web Framework
+Flask>=2.2.0,<2.3.0
+flask-cors>=4.0.0,<7.0.0
+Werkzeug>=3.0.0,<3.1.0
+
+# WSGI Server for Production
+# CRITICAL: gevent must be installed BEFORE gunicorn for SSE to work
+gevent>=24.2.1
+gunicorn>=22.0.0,<23.0.0
+
+# Document Processing (CIPP Analyzer)
+# PDF extraction - PyMuPDF (fitz) is primary, others are fallbacks
+PyMuPDF>=1.23.0,<2.0.0
+PyPDF2>=3.0.0,<4.0.0
+pdfplumber>=0.10.0,<1.0.0
+pdfminer.six>=20221105
+
+# Word document processing
+python-docx>=1.1.0,<2.0.0
+
+# RTF processing (optional)
+striprtf>=0.0.26
+
+# Environment Management
+python-dotenv>=1.0.0,<2.0.0
+
+# AI/ML - OpenAI API for HOTDOG AI
+openai>=1.0.0,<2.0.0
+
+# Excel Export with Charts
+openpyxl>=3.1.0,<4.0.0
+xlsxwriter>=3.1.9,<4.0.0
+
+# Visual Project Summary - Dash Dashboard
+dash>=2.14.0,<3.0.0
+dash-bootstrap-components>=1.5.0,<2.0.0
+plotly>=5.18.0,<6.0.0
+pandas>=2.0.0,<3.0.0
+kaleido>=0.2.1
+Pillow>=10.0.0,<11.0.0
