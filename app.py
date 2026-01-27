@@ -32,7 +32,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()  # CRITICAL: Must be called before any os.getenv() usage
 
-from flask import Flask, request, jsonify, Response, stream_with_context, send_from_directory, send_file
+from flask import Flask, request, jsonify, Response, stream_with_context, send_from_directory, send_file, redirect, make_response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -270,12 +270,120 @@ def _transform_to_legacy_format(hotdog_output: dict) -> dict:
 
 
 # ============================================================================
+# COOKIE-BASED AUTHENTICATION HELPERS
+# ============================================================================
+
+def check_auth_cookie():
+    """
+    Check if user has valid authentication cookie.
+    Returns session data if valid, None if invalid/missing.
+    """
+    token = request.cookies.get('bidbrief_auth')
+    if not token:
+        return None
+
+    session = active_sessions.get(token)
+    if not session:
+        return None
+
+    # Check expiration
+    if session.get('expires_at') and session['expires_at'] < datetime.now():
+        active_sessions.pop(token, None)
+        return None
+
+    return session
+
+
+def require_auth(f):
+    """
+    Decorator to require authentication for a route.
+    Redirects to /login if not authenticated.
+    """
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        session = check_auth_cookie()
+        if not session:
+            return redirect('/login')
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# ============================================================================
 # BASIC ROUTES
 # ============================================================================
 
 @app.route('/')
+@require_auth
 def index():
     return send_from_directory(Config.BASE_DIR, 'index.html')
+
+
+@app.route('/login')
+def login_page():
+    """Serve the login page."""
+    # If already logged in, redirect to home
+    if check_auth_cookie():
+        return redirect('/')
+    return send_from_directory(Config.BASE_DIR, 'login.html')
+
+
+@app.route('/auth/login', methods=['POST'])
+def form_login():
+    """Handle form-based login submission."""
+    username = request.form.get('username', '').strip().lower()
+    password = request.form.get('password', '')
+
+    logger.info(f"Form login attempt - Username: '{username}'")
+
+    if username not in AUTHORIZED_USERS:
+        logger.warning(f"Form login failed - user not found: {username}")
+        return redirect('/login?error=invalid')
+
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    expected_hash = AUTHORIZED_USERS[username]['password_hash']
+
+    if password_hash != expected_hash:
+        logger.warning(f"Form login failed - password mismatch for: {username}")
+        return redirect('/login?error=invalid')
+
+    # Create session token
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now() + timedelta(hours=24)
+
+    active_sessions[token] = {
+        'username': username,
+        'name': AUTHORIZED_USERS[username]['name'],
+        'expires_at': expires_at
+    }
+
+    logger.info(f"Form login successful for: {username}")
+
+    # Create response with auth cookie
+    response = make_response(redirect('/'))
+    response.set_cookie(
+        'bidbrief_auth',
+        token,
+        httponly=True,
+        secure=os.getenv('FLASK_ENV') == 'production',
+        samesite='Lax',
+        max_age=24 * 60 * 60  # 24 hours
+    )
+    return response
+
+
+@app.route('/auth/logout')
+def logout():
+    """Log out user and clear session."""
+    token = request.cookies.get('bidbrief_auth')
+    if token:
+        active_sessions.pop(token, None)
+        logger.info("User logged out")
+
+    response = make_response(redirect('/login'))
+    response.delete_cookie('bidbrief_auth')
+    return response
+
 
 @app.route('/shared/<path:filename>')
 def serve_shared_assets(filename):
@@ -1233,8 +1341,9 @@ def cipp_analyzer():
     return send_from_directory(Config.BASE_DIR, 'analyzer_rebuild.html')
 
 @app.route('/admin/sessions')
+@require_auth
 def admin_sessions():
-    """Serve admin session monitoring page"""
+    """Serve admin session monitoring page (requires authentication)"""
     return send_from_directory(Config.BASE_DIR, 'admin_sessions.html')
 
 @app.route('/api/config/questions', methods=['GET'])
