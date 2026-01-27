@@ -1,6 +1,7 @@
 """
-Gunicorn configuration for PM Tools Suite
-Production deployment with async workers for real-time SSE streaming.
+Gunicorn configuration for BidBrief
+Production deployment with sync workers + threading for concurrent requests.
+Progress updates use polling (not SSE) to avoid gevent/threading conflicts.
 """
 import multiprocessing
 import os
@@ -35,7 +36,7 @@ loglevel = os.getenv('LOG_LEVEL', 'info').lower()
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" [%(D)s µs]'
 
 # Process naming
-proc_name = 'pm-tools-suite'
+proc_name = 'bidbrief'
 
 # Server mechanics
 daemon = False
@@ -57,9 +58,9 @@ spew = False
 # Server hooks for logging
 def on_starting(server):
     """Called just before the master process is initialized."""
-    server.log.info("🚀 Starting PM Tools Suite")
-    server.log.info(f"Worker Class: {worker_class}, Workers: {workers}, Timeout: {timeout}s")
-    server.log.info("✅ Gevent async workers enabled - SSE streaming ready")
+    server.log.info("🚀 Starting BidBrief")
+    server.log.info(f"Worker Class: {worker_class}, Workers: {workers}, Threads: {threads}, Timeout: {timeout}s")
+    server.log.info("✅ Sync workers with threading enabled - polling-based progress")
 
 def on_reload(server):
     """Called to recycle workers during a reload via SIGHUP."""
@@ -75,7 +76,7 @@ def worker_abort(worker):
 
 def post_fork(server, worker):
     """Called just after a worker has been forked."""
-    server.log.info(f"👶 Worker {worker.pid} spawned (gevent)")
+    server.log.info(f"👶 Worker {worker.pid} spawned (sync+threaded)")
 
 def when_ready(server):
     """Called just after the server is started."""

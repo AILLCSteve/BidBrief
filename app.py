@@ -5,18 +5,15 @@ HOTDOG AI Document Analysis with Real-Time Progress Tracking
 Architecture: Threading-based (simple, proven, works)
 Powered by Additional Intelligence LLC
 """
-# CRITICAL: Gevent monkey patching MUST be first (before any other imports)
-# This makes socket work with gevent workers
-# thread=False prevents conflicts with threading.Thread in analysis
-# queue=False prevents conflicts with concurrent.futures.ThreadPoolExecutor (LoopExit errors)
-# subprocess=False prevents conflicts with subprocess calls
-try:
-    from gevent import monkey
-    monkey.patch_all(thread=False, select=False, queue=False, subprocess=False)
-    GEVENT_PATCHED = True
-except ImportError:
-    # Gevent not installed (development mode) - continue without patching
-    GEVENT_PATCHED = False
+# GEVENT MONKEY PATCHING DISABLED
+# Previously used for SSE streaming, but now using polling-based progress updates.
+# Gevent monkey patching conflicts with gunicorn's sync+threaded workers, causing
+# "greenlet.error: Cannot switch to a different thread" on file uploads.
+# See: https://github.com/gevent/gevent/issues/1697
+#
+# If SSE streaming is re-enabled in the future, switch gunicorn to gevent workers:
+#   worker_class = 'gevent' (not 'sync' with threads)
+GEVENT_PATCHED = False
 
 import os
 import sys
@@ -52,16 +49,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Diagnostic: Log Python and gevent environment
+# Diagnostic: Log Python environment
 logger.info(f"🐍 Python {sys.version.split()[0]} at {sys.executable}")
-if GEVENT_PATCHED:
-    try:
-        import gevent
-        logger.info(f"✅ gevent {gevent.__version__} installed and patched (thread=False, queue=False)")
-    except:
-        logger.warning(f"⚠️ Gevent patch attempted but module import failed")
-else:
-    logger.warning(f"⚠️ gevent NOT installed - SSE will not work with sync workers!")
+logger.info("✅ Using sync workers with threading (gevent patching disabled)")
+logger.info("📡 Progress updates via polling (/api/events/<session_id>)")
 
 # Configuration
 class Config:
