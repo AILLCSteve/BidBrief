@@ -100,29 +100,37 @@ logger.info("🔒 Session lock initialized for thread-safe dict access")
 
 # Authentication - Load from environment variables
 def load_authorized_users():
-    """Load authorized users from environment variables for security."""
+    """
+    Load authorized users from environment variables for security.
+
+    Roles:
+    - AUTH_USER1 = Admin (full access including /admin/sessions)
+    - AUTH_USER2 = User (basic app access only)
+    """
     users = {}
 
-    # User 1
+    # User 1 - ADMIN role (full access)
     user1_email = os.getenv('AUTH_USER1_EMAIL')
     user1_password = os.getenv('AUTH_USER1_PASSWORD')
-    user1_name = os.getenv('AUTH_USER1_NAME', 'User 1')
+    user1_name = os.getenv('AUTH_USER1_NAME', 'Admin')
 
     if user1_email and user1_password:
-        users[user1_email.lower()] = {  # Lowercase for case-insensitive matching
+        users[user1_email.lower()] = {
             'password_hash': hashlib.sha256(user1_password.encode()).hexdigest(),
-            'name': user1_name
+            'name': user1_name,
+            'role': 'admin'
         }
 
-    # User 2
+    # User 2 - USER role (basic access only)
     user2_email = os.getenv('AUTH_USER2_EMAIL')
     user2_password = os.getenv('AUTH_USER2_PASSWORD')
-    user2_name = os.getenv('AUTH_USER2_NAME', 'User 2')
+    user2_name = os.getenv('AUTH_USER2_NAME', 'User')
 
     if user2_email and user2_password:
-        users[user2_email.lower()] = {  # Lowercase for case-insensitive matching
+        users[user2_email.lower()] = {
             'password_hash': hashlib.sha256(user2_password.encode()).hexdigest(),
-            'name': user2_name
+            'name': user2_name,
+            'role': 'user'
         }
 
     if not users:
@@ -309,6 +317,24 @@ def require_auth(f):
     return decorated_function
 
 
+def require_admin(f):
+    """
+    Decorator to require admin role for a route.
+    Redirects to /login if not authenticated, or / if not admin.
+    """
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        session = check_auth_cookie()
+        if not session:
+            return redirect('/login')
+        if session.get('role') != 'admin':
+            logger.warning(f"Non-admin user '{session.get('username')}' attempted to access admin route")
+            return redirect('/')  # Redirect non-admins to home
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 # ============================================================================
 # BASIC ROUTES
 # ============================================================================
@@ -350,14 +376,16 @@ def form_login():
     # Create session token
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=24)
+    user_role = AUTHORIZED_USERS[username].get('role', 'user')
 
     active_sessions[token] = {
         'username': username,
         'name': AUTHORIZED_USERS[username]['name'],
+        'role': user_role,
         'expires_at': expires_at
     }
 
-    logger.info(f"Form login successful for: {username}")
+    logger.info(f"Form login successful for: {username} (role: {user_role})")
 
     # Create response with auth cookie
     response = make_response(redirect('/'))
@@ -437,17 +465,19 @@ def authenticate():
 
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=24)
+    user_role = AUTHORIZED_USERS[username].get('role', 'user')
 
     active_sessions[token] = {
         'username': username,
         'name': AUTHORIZED_USERS[username]['name'],
+        'role': user_role,
         'expires_at': expires_at
     }
 
     return jsonify({
         'success': True,
         'token': token,
-        'user': {'email': username, 'name': AUTHORIZED_USERS[username]['name']}
+        'user': {'email': username, 'name': AUTHORIZED_USERS[username]['name'], 'role': user_role}
     })
 
 @app.route('/api/verify-session', methods=['POST'])
@@ -1341,9 +1371,9 @@ def cipp_analyzer():
     return send_from_directory(Config.BASE_DIR, 'analyzer_rebuild.html')
 
 @app.route('/admin/sessions')
-@require_auth
+@require_admin
 def admin_sessions():
-    """Serve admin session monitoring page (requires authentication)"""
+    """Serve admin session monitoring page (requires admin role)"""
     return send_from_directory(Config.BASE_DIR, 'admin_sessions.html')
 
 @app.route('/api/config/questions', methods=['GET'])
