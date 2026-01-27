@@ -470,7 +470,7 @@
             <div class="btn-group" style="display: inline-block; position: relative;">
                 <button class="btn btn-secondary" onclick="showExportMenu()" id="exportBtn" disabled>📊 Export Results ▼</button>
                 <div id="exportMenu" style="display: none; position: absolute; background: white; border: 2px solid #ddd; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; min-width: 280px; top: 100%; left: 0; margin-top: 5px;">
-                    <button onclick="exportResults('excel-simple')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">✨ Excel (Styled Table)</button>
+                    <button onclick="exportResults('excel-simple')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">✨ Excel Dashboard (3-Sheet)</button>
                     <button onclick="exportResults('csv')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">📄 CSV (Simple)</button>
                     <button onclick="exportResults('html')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">🌐 HTML Report</button>
                     <button onclick="exportResults('json')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer;">📋 JSON Data</button>
@@ -1262,13 +1262,14 @@ function exportResults(format) {
     Logger.info(`📤 Exporting as ${format}...`);
 
     if (format === 'json') {
-        downloadJSON(currentAnalysisResult, 'cipp_analysis.json');
+        downloadJSON(currentAnalysisResult, 'bidbrief_analysis.json');
     }
     else if (format === 'csv') {
         downloadCSV(currentAnalysisResult);
     }
     else if (format === 'excel-simple') {
-        exportExcelSimple(currentAnalysisResult);
+        // Use server-side 3-sheet Excel export
+        exportExcelDashboard();
     }
     else if (format === 'html') {
         exportHTML(currentAnalysisResult);
@@ -1305,35 +1306,22 @@ function downloadCSV(data) {
     a.click();
 }
 
-function exportExcelSimple(data) {
-    const wb = XLSX.utils.book_new();
-    const wsData = [['Section', '#', 'Question', 'Answer', 'PDF Pages']];
+function exportExcelDashboard() {
+    /**
+     * Export using server-side 3-sheet Excel dashboard generator.
+     * Sheets: Summary, Detailed Results, By Section
+     */
+    if (!currentSessionId) {
+        Logger.error('No session ID available for export');
+        alert('No analysis session available. Please run an analysis first.');
+        return;
+    }
 
-    data.sections.forEach(section => {
-        section.questions.forEach((q, index) => {
-            wsData.push([
-                section.section_name,
-                index + 1,
-                q.question,
-                q.answer || 'Not found in document',
-                q.page_citations ? q.page_citations.join(', ') : ''
-            ]);
-        });
-    });
+    Logger.info(`📊 Requesting 3-sheet Excel export for session: ${currentSessionId}`);
 
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-    ws['!cols'] = [
-        {wch: 35},  // Section
-        {wch: 5},   // #
-        {wch: 70},  // Question
-        {wch: 90},  // Answer
-        {wch: 22}   // Pages
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Analysis Results');
-    XLSX.writeFile(wb, 'cipp_analysis.xlsx');
-    Logger.success('✅ Excel file downloaded');
+    // Open the server-side export endpoint in a new tab/download
+    window.open(`/api/export/excel-dashboard/${currentSessionId}`, '_blank');
+    Logger.success('✅ Excel dashboard export initiated');
 }
 
 function exportHTML(data) {
