@@ -297,7 +297,13 @@
             font-weight: 600;
         }
 
-        .mpt-navbar .home-link {
+        .mpt-navbar .nav-buttons {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .mpt-navbar .nav-link {
             color: white;
             text-decoration: none;
             padding: 8px 20px;
@@ -305,11 +311,88 @@
             border-radius: 5px;
             transition: all 0.3s;
             font-weight: 500;
+            font-size: 14px;
         }
 
-        .mpt-navbar .home-link:hover {
+        .mpt-navbar .nav-link:hover {
             background-color: white;
             color: #1E3A8A;
+        }
+
+        .mpt-navbar .logout-link {
+            background: rgba(255,255,255,0.1);
+        }
+
+        /* About Modal */
+        .about-modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .about-modal-content {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            max-width: 600px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .about-modal-content h2 {
+            color: #1E3A8A;
+            margin-bottom: 20px;
+        }
+
+        .about-modal-content p {
+            color: #374151;
+            line-height: 1.7;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .about-modal-content .patent-info {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 20px 0;
+            padding: 15px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            line-height: 1.6;
+        }
+
+        .about-modal-content a {
+            color: #5B7FCC;
+            text-decoration: none;
+        }
+
+        .about-modal-content a:hover {
+            text-decoration: underline;
+        }
+
+        .about-modal-content .close-about {
+            background: linear-gradient(135deg, #1E3A8A 0%, #5B7FCC 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        .about-modal-content .close-about:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(30, 58, 138, 0.3);
         }
     </style>
 </head>
@@ -319,13 +402,17 @@
             <img src="/pics/AILLCLogoNOBG.png" alt="BidBrief">
             <span class="app-title">BidBrief - AI Document Analysis</span>
         </div>
-        <a href="/" class="home-link">← Home</a>
+        <div class="nav-buttons">
+            <a href="#" class="nav-link" onclick="openAboutModal(); return false;">About</a>
+            <a href="/auth/logout" class="nav-link logout-link">Logout</a>
+        </div>
     </nav>
 
     <div class="container">
         <div class="header">
-            <h1>📄 BidBrief</h1>
+            <h1>BidBrief</h1>
             <p>AI-Powered Document Analysis by Additional Intelligence LLC</p>
+            <p style="font-style: italic; font-size: 0.75em; color: rgba(255,255,255,0.8); margin-top: 8px;">Patent Pending - Additional Intelligence, LLC</p>
         </div>
 
         <!-- File Upload Section -->
@@ -2032,18 +2119,59 @@ materials,Materials & Standards,Q12,What ASTM standards apply?,false,technical_s
     Logger.info('Template downloaded');
 }
 
+// ============================================================================
+// ABOUT MODAL
+// ============================================================================
+
+function openAboutModal() {
+    document.getElementById('aboutModal').style.display = 'flex';
+}
+
+function closeAboutModal() {
+    document.getElementById('aboutModal').style.display = 'none';
+}
+
+// Close modal on outside click
+window.addEventListener('click', function(event) {
+    const aboutModal = document.getElementById('aboutModal');
+    if (event.target === aboutModal) {
+        closeAboutModal();
+    }
+});
+
     </script>
 
     <!-- Question Manager Modal -->
     <div id="questionManagerModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center;">
         <div style="background: white; width: 90%; max-width: 1200px; max-height: 90vh; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
             <div style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
-                <h2 style="margin: 0;">⚙️ Question Manager</h2>
-                <button onclick="closeQuestionManager()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px;">✕ Close</button>
+                <h2 style="margin: 0;">Question Manager</h2>
+                <button onclick="closeQuestionManager()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px;">Close</button>
             </div>
             <div id="questionManagerContent" style="padding: 20px; overflow-y: auto; flex: 1;">
                 <!-- Content rendered by JavaScript -->
             </div>
+        </div>
+    </div>
+
+    <!-- About Modal -->
+    <div id="aboutModal" class="about-modal">
+        <div class="about-modal-content">
+            <h2>BidBrief</h2>
+            <p>AI Document Analysis for CIPP and Construction Specifications</p>
+
+            <div class="patent-info">
+                <strong>Patent Pending</strong><br>
+                U.S. Provisional Application No. 63/892,871<br>
+                371(c) Date: October 3, 2025<br><br>
+                <em>"System and Method for Automated Analysis of Construction Specification Documents in Various Domains Including CIPP Pipe Rehabilitation and Other Construction Using Large Language Models"</em>
+            </div>
+
+            <p>
+                Developed by <a href="https://additionalintel.com" target="_blank">Additional Intelligence, LLC</a>
+            </p>
+
+            <button class="close-about" onclick="closeAboutModal()">Close</button>
         </div>
     </div>
 </body>
