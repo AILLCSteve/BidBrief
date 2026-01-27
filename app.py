@@ -1108,12 +1108,17 @@ def export_excel_dashboard(session_id):
         # Lazy import to prevent app crash if openpyxl not installed
         from services.excel_dashboard import ExcelDashboardGenerator
 
+        # CRITICAL: Transform to legacy format for Excel generator
+        # The Excel generator expects {'question': ..., 'answer': ..., 'page_citations': ...}
+        # but browser_output has {'question_text': ..., 'primary_answer': {'text': ..., 'pages': ...}}
+        legacy_result = _transform_to_legacy_format(browser_output)
+
         # Generate Excel dashboard (now works with both complete and partial)
-        generator = ExcelDashboardGenerator(browser_output, is_partial=is_partial)
+        generator = ExcelDashboardGenerator(legacy_result, is_partial=is_partial)
         excel_file = generator.generate()
 
         # Use different filename for partial exports
-        filename = 'CIPP_Executive_Dashboard_PARTIAL.xlsx' if is_partial else 'CIPP_Executive_Dashboard.xlsx'
+        filename = 'BidBrief_Analysis_PARTIAL.xlsx' if is_partial else 'BidBrief_Analysis.xlsx'
 
         return send_file(
             excel_file,
