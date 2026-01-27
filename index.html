@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Document Analyzer - AI-Powered Document Intelligence</title>
+    <title>BidBrief - AI Document Analysis</title>
+    <link rel="icon" type="image/png" href="/pics/AILLCfavicon.png">
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <style>
         * {
@@ -26,12 +27,12 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            background-size: cover;
+            background-image: url('/pics/AILLCLogo.png');
+            background-size: 40%;
             background-position: center center;
             background-repeat: no-repeat;
             background-attachment: fixed;
-            filter: brightness(0.75);
+            filter: brightness(0.15) opacity(0.5);
             z-index: -2;
         }
 
@@ -315,16 +316,16 @@
 <body>
     <nav class="mpt-navbar">
         <div class="logo-container">
-            <img src="/shared/assets/images/logo.png" alt="Universal Document Analyzer">
-            <span class="app-title">Document Analyzer</span>
+            <img src="/pics/AILLCLogoNOBG.png" alt="BidBrief">
+            <span class="app-title">BidBrief - AI Document Analysis</span>
         </div>
         <a href="/" class="home-link">← Home</a>
     </nav>
 
     <div class="container">
         <div class="header">
-            <h1>📄 Universal Document Analyzer</h1>
-            <p>Professional bid specification analysis powered by HOTDOG AI</p>
+            <h1>📄 BidBrief</h1>
+            <p>AI-Powered Document Analysis by Additional Intelligence LLC</p>
         </div>
 
         <!-- File Upload Section -->
@@ -348,8 +349,9 @@
                 <label>Question Sections (Click to enable/disable):</label>
                 <div id="questionSections" class="question-sections"></div>
             </div>
-            <div class="form-group">
+            <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
                 <label>Active Questions: <span id="activeQuestionCount">0</span> questions selected</label>
+                <button class="btn btn-secondary" onclick="openQuestionManager()" style="margin: 0;">⚙️ Manage Questions</button>
             </div>
 
             <!-- Context Guardrails Input -->
@@ -1324,7 +1326,7 @@ function clearResults() {
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    Logger.info('🚀 Universal Document Analyzer initialized (HOTDOG AI)');
+    Logger.info('🚀 BidBrief initialized (HOTDOG AI)');
     Logger.info('✅ Ready for document analysis');
 
     // Load question configuration
@@ -1591,6 +1593,458 @@ function renderFootnotesSection() {
     `;
 }
 
+// ============================================================================
+// QUESTION MANAGER - Full CRUD functionality
+// ============================================================================
+
+let questionManagerOpen = false;
+let editingQuestionId = null;
+
+function openQuestionManager() {
+    questionManagerOpen = true;
+    renderQuestionManager();
+    document.getElementById('questionManagerModal').style.display = 'flex';
+}
+
+function closeQuestionManager() {
+    questionManagerOpen = false;
+    document.getElementById('questionManagerModal').style.display = 'none';
+    editingQuestionId = null;
+    // Refresh main question sections display
+    displayQuestionSections();
+    updateActiveQuestionCount();
+}
+
+function renderQuestionManager() {
+    const container = document.getElementById('questionManagerContent');
+
+    let html = `
+        <div style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+            <button class="btn" onclick="showUploadDialog()">📤 Upload from Spreadsheet</button>
+            <button class="btn btn-secondary" onclick="showAddSectionDialog()">➕ Add Section</button>
+            <button class="btn btn-secondary" onclick="downloadQuestionsTemplate()">📥 Download Template</button>
+        </div>
+
+        <div id="uploadArea" style="display: none; margin-bottom: 20px; padding: 20px; border: 2px dashed #5B7FCC; border-radius: 8px; background: #f8f9ff;">
+            <h4 style="margin-bottom: 10px;">Upload Questions from Spreadsheet</h4>
+            <p style="color: #666; margin-bottom: 10px;">Upload a CSV or Excel file with columns: section_id, section_name, question_id, question_text, required, expected_type, enabled</p>
+            <input type="file" id="questionUploadInput" accept=".csv,.xlsx,.xls" onchange="handleQuestionUpload(event)" style="margin-bottom: 10px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('uploadArea').style.display='none'">Cancel</button>
+        </div>
+    `;
+
+    // Render sections
+    questionConfig.sections.forEach((section, sectionIndex) => {
+        const enabledCount = section.questions.filter(q => q.enabled !== false).length;
+        const totalCount = section.questions.length;
+
+        html += `
+            <div class="qm-section" style="margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                <div class="qm-section-header" style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button onclick="toggleSectionExpand('${section.section_id}')" style="background: none; border: none; color: white; cursor: pointer; font-size: 1.2em;">
+                            <span id="expand-${section.section_id}">▶</span>
+                        </button>
+                        <strong>${section.section_name}</strong>
+                        <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 12px;">${enabledCount}/${totalCount} enabled</span>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button onclick="showAddQuestionDialog('${section.section_id}')" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">➕ Add Q</button>
+                        <button onclick="editSection('${section.section_id}')" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">✏️</button>
+                        <button onclick="deleteSection('${section.section_id}')" style="background: rgba(220,53,69,0.8); border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">🗑️</button>
+                    </div>
+                </div>
+                <div id="questions-${section.section_id}" style="display: none; background: white;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 10px; text-align: center; width: 60px;">Enabled</th>
+                                <th style="padding: 10px; text-align: left; width: 60px;">ID</th>
+                                <th style="padding: 10px; text-align: left;">Question</th>
+                                <th style="padding: 10px; text-align: center; width: 80px;">Required</th>
+                                <th style="padding: 10px; text-align: center; width: 100px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+
+        section.questions.forEach((q, qIndex) => {
+            const isEnabled = q.enabled !== false;
+            html += `
+                <tr style="border-bottom: 1px solid #eee; ${!isEnabled ? 'opacity: 0.5; background: #f5f5f5;' : ''}">
+                    <td style="padding: 10px; text-align: center;">
+                        <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleQuestionEnabled('${q.id}')" style="width: 18px; height: 18px; cursor: pointer;">
+                    </td>
+                    <td style="padding: 10px; font-weight: bold; color: #5B7FCC;">${q.id}</td>
+                    <td style="padding: 10px;" id="qtext-${q.id}">
+                        ${editingQuestionId === q.id ? `
+                            <input type="text" id="edit-input-${q.id}" value="${q.text.replace(/"/g, '&quot;')}" style="width: 100%; padding: 8px; border: 2px solid #5B7FCC; border-radius: 4px;">
+                        ` : q.text}
+                    </td>
+                    <td style="padding: 10px; text-align: center;">
+                        <span style="color: ${q.required ? '#28a745' : '#6c757d'};">${q.required ? 'Yes' : 'No'}</span>
+                    </td>
+                    <td style="padding: 10px; text-align: center;">
+                        ${editingQuestionId === q.id ? `
+                            <button onclick="saveQuestionEdit('${q.id}')" style="background: #28a745; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; margin-right: 5px;">Save</button>
+                            <button onclick="cancelQuestionEdit()" style="background: #6c757d; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Cancel</button>
+                        ` : `
+                            <button onclick="startEditQuestion('${q.id}')" style="background: #5B7FCC; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; margin-right: 5px;">✏️</button>
+                            <button onclick="deleteQuestion('${q.id}')" style="background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">🗑️</button>
+                        `}
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function toggleSectionExpand(sectionId) {
+    const questionsDiv = document.getElementById(`questions-${sectionId}`);
+    const expandIcon = document.getElementById(`expand-${sectionId}`);
+
+    if (questionsDiv.style.display === 'none') {
+        questionsDiv.style.display = 'block';
+        expandIcon.textContent = '▼';
+    } else {
+        questionsDiv.style.display = 'none';
+        expandIcon.textContent = '▶';
+    }
+}
+
+async function toggleQuestionEnabled(questionId) {
+    try {
+        const resp = await fetch(`/api/config/questions/question/${questionId}/toggle`, { method: 'POST' });
+        const data = await resp.json();
+
+        if (data.success) {
+            // Update local state
+            for (const section of questionConfig.sections) {
+                const q = section.questions.find(q => q.id === questionId);
+                if (q) {
+                    q.enabled = data.enabled;
+                    break;
+                }
+            }
+            renderQuestionManager();
+            Logger.info(`Question ${questionId} ${data.enabled ? 'enabled' : 'disabled'}`);
+        } else {
+            Logger.error(`Failed to toggle question: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error toggling question: ${error.message}`);
+    }
+}
+
+function startEditQuestion(questionId) {
+    editingQuestionId = questionId;
+    renderQuestionManager();
+    // Focus the input
+    setTimeout(() => {
+        const input = document.getElementById(`edit-input-${questionId}`);
+        if (input) input.focus();
+    }, 50);
+}
+
+function cancelQuestionEdit() {
+    editingQuestionId = null;
+    renderQuestionManager();
+}
+
+async function saveQuestionEdit(questionId) {
+    const input = document.getElementById(`edit-input-${questionId}`);
+    if (!input) return;
+
+    const newText = input.value.trim();
+    if (!newText) {
+        alert('Question text cannot be empty');
+        return;
+    }
+
+    try {
+        const resp = await fetch(`/api/config/questions/question/${questionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: newText })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            // Update local state
+            for (const section of questionConfig.sections) {
+                const q = section.questions.find(q => q.id === questionId);
+                if (q) {
+                    q.text = newText;
+                    break;
+                }
+            }
+            editingQuestionId = null;
+            renderQuestionManager();
+            Logger.success(`Question ${questionId} updated`);
+        } else {
+            Logger.error(`Failed to update question: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error updating question: ${error.message}`);
+    }
+}
+
+async function deleteQuestion(questionId) {
+    if (!confirm(`Delete question ${questionId}? This cannot be undone.`)) return;
+
+    try {
+        const resp = await fetch(`/api/config/questions/question/${questionId}`, { method: 'DELETE' });
+        const data = await resp.json();
+
+        if (data.success) {
+            // Update local state
+            for (const section of questionConfig.sections) {
+                section.questions = section.questions.filter(q => q.id !== questionId);
+            }
+            renderQuestionManager();
+            Logger.success(`Question ${questionId} deleted`);
+        } else {
+            Logger.error(`Failed to delete question: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error deleting question: ${error.message}`);
+    }
+}
+
+async function deleteSection(sectionId) {
+    const section = questionConfig.sections.find(s => s.section_id === sectionId);
+    if (!confirm(`Delete section "${section?.section_name}" and all its questions? This cannot be undone.`)) return;
+
+    try {
+        const resp = await fetch(`/api/config/questions/section/${sectionId}`, { method: 'DELETE' });
+        const data = await resp.json();
+
+        if (data.success) {
+            questionConfig.sections = questionConfig.sections.filter(s => s.section_id !== sectionId);
+            renderQuestionManager();
+            Logger.success(`Section ${sectionId} deleted`);
+        } else {
+            Logger.error(`Failed to delete section: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error deleting section: ${error.message}`);
+    }
+}
+
+function showUploadDialog() {
+    document.getElementById('uploadArea').style.display = 'block';
+}
+
+async function handleQuestionUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        Logger.info(`Uploading questions from ${file.name}...`);
+        const resp = await fetch('/api/config/questions/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            // Preview the uploaded config
+            if (confirm(`Parsed ${data.config.totalQuestions} questions in ${data.config.sections.length} sections. Replace current configuration?`)) {
+                // Save the uploaded config
+                const saveResp = await fetch('/api/config/questions', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sections: data.config.sections })
+                });
+                const saveData = await saveResp.json();
+
+                if (saveData.success) {
+                    questionConfig = data.config;
+                    renderQuestionManager();
+                    Logger.success(`Uploaded and saved ${data.config.totalQuestions} questions`);
+                } else {
+                    Logger.error(`Failed to save: ${saveData.error}`);
+                }
+            }
+        } else {
+            Logger.error(`Upload failed: ${data.error}`);
+            alert(`Upload failed: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error uploading: ${error.message}`);
+        alert(`Error uploading: ${error.message}`);
+    }
+
+    document.getElementById('uploadArea').style.display = 'none';
+    event.target.value = '';
+}
+
+function showAddSectionDialog() {
+    const sectionId = prompt('Enter Section ID (e.g., "custom_section"):');
+    if (!sectionId) return;
+
+    const sectionName = prompt('Enter Section Name (e.g., "Custom Questions"):');
+    if (!sectionName) return;
+
+    addSection(sectionId.trim(), sectionName.trim());
+}
+
+async function addSection(sectionId, sectionName) {
+    try {
+        const resp = await fetch('/api/config/questions/section', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                section_id: sectionId,
+                section_name: sectionName,
+                description: '',
+                questions: []
+            })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            questionConfig.sections.push({
+                section_id: sectionId,
+                section_name: sectionName,
+                description: '',
+                questions: []
+            });
+            renderQuestionManager();
+            Logger.success(`Section "${sectionName}" added`);
+        } else {
+            Logger.error(`Failed to add section: ${data.error}`);
+            alert(`Failed to add section: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error adding section: ${error.message}`);
+    }
+}
+
+function showAddQuestionDialog(sectionId) {
+    const questionText = prompt('Enter the question text:');
+    if (!questionText) return;
+
+    const isRequired = confirm('Is this question required?');
+
+    addQuestion(sectionId, questionText.trim(), isRequired);
+}
+
+async function addQuestion(sectionId, text, required) {
+    try {
+        const resp = await fetch('/api/config/questions/question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                section_id: sectionId,
+                text: text,
+                required: required,
+                expected_type: 'string',
+                enabled: true
+            })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            // Find section and add question
+            const section = questionConfig.sections.find(s => s.section_id === sectionId);
+            if (section) {
+                section.questions.push({
+                    id: data.question_id,
+                    text: text,
+                    required: required,
+                    expected_type: 'string',
+                    enabled: true
+                });
+            }
+            renderQuestionManager();
+            Logger.success(`Question ${data.question_id} added to ${sectionId}`);
+        } else {
+            Logger.error(`Failed to add question: ${data.error}`);
+            alert(`Failed to add question: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error adding question: ${error.message}`);
+    }
+}
+
+function editSection(sectionId) {
+    const section = questionConfig.sections.find(s => s.section_id === sectionId);
+    if (!section) return;
+
+    const newName = prompt('Enter new section name:', section.section_name);
+    if (!newName || newName === section.section_name) return;
+
+    updateSection(sectionId, { section_name: newName.trim() });
+}
+
+async function updateSection(sectionId, updates) {
+    try {
+        const resp = await fetch(`/api/config/questions/section/${sectionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            // Update local state
+            const section = questionConfig.sections.find(s => s.section_id === sectionId);
+            if (section) {
+                Object.assign(section, updates);
+            }
+            renderQuestionManager();
+            Logger.success(`Section ${sectionId} updated`);
+        } else {
+            Logger.error(`Failed to update section: ${data.error}`);
+        }
+    } catch (error) {
+        Logger.error(`Error updating section: ${error.message}`);
+    }
+}
+
+function downloadQuestionsTemplate() {
+    const template = `section_id,section_name,question_id,question_text,required,expected_type,enabled
+general_info,General Project Information,Q1,What is the project name and location?,true,string,true
+general_info,General Project Information,Q2,What is the total project duration?,true,string,true
+materials,Materials & Standards,Q11,What material specifications are required?,true,technical_spec,true
+materials,Materials & Standards,Q12,What ASTM standards apply?,false,technical_spec,true`;
+
+    const blob = new Blob([template], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'questions_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    Logger.info('Template downloaded');
+}
+
     </script>
+
+    <!-- Question Manager Modal -->
+    <div id="questionManagerModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center;">
+        <div style="background: white; width: 90%; max-width: 1200px; max-height: 90vh; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0;">⚙️ Question Manager</h2>
+                <button onclick="closeQuestionManager()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px;">✕ Close</button>
+            </div>
+            <div id="questionManagerContent" style="padding: 20px; overflow-y: auto; flex: 1;">
+                <!-- Content rendered by JavaScript -->
+            </div>
+        </div>
+    </div>
 </body>
 </html>

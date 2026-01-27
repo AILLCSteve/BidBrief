@@ -1,16 +1,18 @@
 """
-Universal Document Intelligence Platform
-HOTDOG AI Document Analysis with Real-Time SSE Progress
+BidBrief - AI Document Analysis Platform
+HOTDOG AI Document Analysis with Real-Time Progress Tracking
 
 Architecture: Threading-based (simple, proven, works)
-Clean, unbranded version ready for customization
+Powered by Additional Intelligence LLC
 """
 # CRITICAL: Gevent monkey patching MUST be first (before any other imports)
-# This makes socket/queue work with gevent workers
+# This makes socket work with gevent workers
 # thread=False prevents conflicts with threading.Thread in analysis
+# queue=False prevents conflicts with concurrent.futures.ThreadPoolExecutor (LoopExit errors)
+# subprocess=False prevents conflicts with subprocess calls
 try:
     from gevent import monkey
-    monkey.patch_all(thread=False, select=False)
+    monkey.patch_all(thread=False, select=False, queue=False, subprocess=False)
     GEVENT_PATCHED = True
 except ImportError:
     # Gevent not installed (development mode) - continue without patching
@@ -55,7 +57,7 @@ logger.info(f"🐍 Python {sys.version.split()[0]} at {sys.executable}")
 if GEVENT_PATCHED:
     try:
         import gevent
-        logger.info(f"✅ gevent {gevent.__version__} installed and patched (thread=False)")
+        logger.info(f"✅ gevent {gevent.__version__} installed and patched (thread=False, queue=False)")
     except:
         logger.warning(f"⚠️ Gevent patch attempted but module import failed")
 else:
@@ -293,9 +295,14 @@ def serve_shared_assets(filename):
 def health():
     return jsonify({
         'status': 'healthy',
-        'service': 'Universal Document Intelligence',
-        'version': '2.0.0-clean'
+        'service': 'BidBrief - AI Document Analysis',
+        'version': '2.0.0'
     })
+
+@app.route('/pics/<path:filename>')
+def serve_pics(filename):
+    """Serve pics assets (logo, favicon, etc.)"""
+    return send_from_directory(Config.BASE_DIR / 'pics', filename)
 
 
 # ============================================================================
@@ -1273,6 +1280,371 @@ def get_question_config():
             'error': str(e)
         }), 500
 
+
+@app.route('/api/config/questions', methods=['PUT'])
+def save_question_config():
+    """Save entire question configuration to JSON file"""
+    try:
+        data = request.get_json()
+        if not data or 'sections' not in data:
+            return jsonify({'success': False, 'error': 'Invalid configuration data'}), 400
+
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        # Build config structure
+        config_data = {
+            "config_name": data.get('config_name', 'BidBrief Document Analysis'),
+            "version": data.get('version', '1.0'),
+            "description": data.get('description', 'Question configuration for document analysis'),
+            "sections": data['sections']
+        }
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        total_questions = sum(len(s.get('questions', [])) for s in data['sections'])
+        logger.info(f'✅ Question config saved: {len(data["sections"])} sections, {total_questions} questions')
+
+        return jsonify({
+            'success': True,
+            'message': f'Saved {len(data["sections"])} sections with {total_questions} questions'
+        })
+
+    except Exception as e:
+        logger.error(f'Failed to save question config: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/upload', methods=['POST'])
+def upload_questions_from_spreadsheet():
+    """Upload questions from CSV or Excel spreadsheet"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+        filename = file.filename.lower()
+
+        # Read spreadsheet based on format
+        if filename.endswith('.csv'):
+            import csv
+            import io
+            content = file.read().decode('utf-8-sig')  # Handle BOM
+            reader = csv.DictReader(io.StringIO(content))
+            rows = list(reader)
+        elif filename.endswith(('.xlsx', '.xls')):
+            import pandas as pd
+            df = pd.read_excel(file)
+            rows = df.to_dict('records')
+        else:
+            return jsonify({'success': False, 'error': 'Unsupported file format. Use CSV or Excel (.xlsx)'}), 400
+
+        # Parse rows into sections and questions
+        # Expected columns: section_id, section_name, question_id, question_text, required, expected_type
+        sections_map = {}
+
+        for row in rows:
+            section_id = str(row.get('section_id', '')).strip()
+            section_name = str(row.get('section_name', '')).strip()
+            question_id = str(row.get('question_id', row.get('id', ''))).strip()
+            question_text = str(row.get('question_text', row.get('text', ''))).strip()
+            required = str(row.get('required', 'false')).lower() in ('true', '1', 'yes')
+            expected_type = str(row.get('expected_type', 'string')).strip() or 'string'
+            enabled = str(row.get('enabled', 'true')).lower() in ('true', '1', 'yes', '')
+
+            if not section_id or not question_text:
+                continue  # Skip invalid rows
+
+            if section_id not in sections_map:
+                sections_map[section_id] = {
+                    'section_id': section_id,
+                    'section_name': section_name or section_id,
+                    'description': str(row.get('section_description', '')).strip(),
+                    'questions': []
+                }
+
+            sections_map[section_id]['questions'].append({
+                'id': question_id or f"Q{len(sections_map[section_id]['questions']) + 1}",
+                'text': question_text,
+                'required': required,
+                'expected_type': expected_type,
+                'enabled': enabled
+            })
+
+        sections = list(sections_map.values())
+        total_questions = sum(len(s['questions']) for s in sections)
+
+        logger.info(f'📤 Uploaded questions: {len(sections)} sections, {total_questions} questions from {file.filename}')
+
+        return jsonify({
+            'success': True,
+            'config': {
+                'sections': sections,
+                'totalQuestions': total_questions
+            },
+            'message': f'Parsed {total_questions} questions in {len(sections)} sections'
+        })
+
+    except Exception as e:
+        logger.error(f'Failed to parse question spreadsheet: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/section/<section_id>', methods=['PUT'])
+def update_section(section_id):
+    """Update a specific section"""
+    try:
+        data = request.get_json()
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        # Find and update section
+        for i, section in enumerate(config_data['sections']):
+            if section['section_id'] == section_id:
+                config_data['sections'][i] = {**section, **data}
+                break
+        else:
+            return jsonify({'success': False, 'error': 'Section not found'}), 404
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f'✅ Updated section: {section_id}')
+        return jsonify({'success': True, 'message': f'Section {section_id} updated'})
+
+    except Exception as e:
+        logger.error(f'Failed to update section: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/section/<section_id>', methods=['DELETE'])
+def delete_section(section_id):
+    """Delete a section"""
+    try:
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        original_count = len(config_data['sections'])
+        config_data['sections'] = [s for s in config_data['sections'] if s['section_id'] != section_id]
+
+        if len(config_data['sections']) == original_count:
+            return jsonify({'success': False, 'error': 'Section not found'}), 404
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f'🗑️ Deleted section: {section_id}')
+        return jsonify({'success': True, 'message': f'Section {section_id} deleted'})
+
+    except Exception as e:
+        logger.error(f'Failed to delete section: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/question/<question_id>', methods=['PUT'])
+def update_question(question_id):
+    """Update a specific question"""
+    try:
+        data = request.get_json()
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        # Find and update question
+        found = False
+        for section in config_data['sections']:
+            for i, question in enumerate(section['questions']):
+                if question['id'] == question_id:
+                    section['questions'][i] = {**question, **data}
+                    found = True
+                    break
+            if found:
+                break
+
+        if not found:
+            return jsonify({'success': False, 'error': 'Question not found'}), 404
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f'✅ Updated question: {question_id}')
+        return jsonify({'success': True, 'message': f'Question {question_id} updated'})
+
+    except Exception as e:
+        logger.error(f'Failed to update question: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/question/<question_id>', methods=['DELETE'])
+def delete_question(question_id):
+    """Delete a question"""
+    try:
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        found = False
+        for section in config_data['sections']:
+            original_count = len(section['questions'])
+            section['questions'] = [q for q in section['questions'] if q['id'] != question_id]
+            if len(section['questions']) < original_count:
+                found = True
+                break
+
+        if not found:
+            return jsonify({'success': False, 'error': 'Question not found'}), 404
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f'🗑️ Deleted question: {question_id}')
+        return jsonify({'success': True, 'message': f'Question {question_id} deleted'})
+
+    except Exception as e:
+        logger.error(f'Failed to delete question: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/question/<question_id>/toggle', methods=['POST'])
+def toggle_question(question_id):
+    """Toggle a question's enabled status"""
+    try:
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        found = False
+        new_status = None
+        for section in config_data['sections']:
+            for question in section['questions']:
+                if question['id'] == question_id:
+                    # Toggle enabled status (default to True if not set)
+                    current = question.get('enabled', True)
+                    question['enabled'] = not current
+                    new_status = question['enabled']
+                    found = True
+                    break
+            if found:
+                break
+
+        if not found:
+            return jsonify({'success': False, 'error': 'Question not found'}), 404
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f'🔄 Toggled question {question_id}: enabled={new_status}')
+        return jsonify({'success': True, 'enabled': new_status, 'message': f'Question {question_id} {"enabled" if new_status else "disabled"}'})
+
+    except Exception as e:
+        logger.error(f'Failed to toggle question: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/section', methods=['POST'])
+def add_section():
+    """Add a new section"""
+    try:
+        data = request.get_json()
+        if not data.get('section_id') or not data.get('section_name'):
+            return jsonify({'success': False, 'error': 'section_id and section_name are required'}), 400
+
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        # Check if section_id already exists
+        if any(s['section_id'] == data['section_id'] for s in config_data['sections']):
+            return jsonify({'success': False, 'error': 'Section ID already exists'}), 400
+
+        new_section = {
+            'section_id': data['section_id'],
+            'section_name': data['section_name'],
+            'description': data.get('description', ''),
+            'questions': data.get('questions', [])
+        }
+
+        config_data['sections'].append(new_section)
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f'➕ Added section: {data["section_id"]}')
+        return jsonify({'success': True, 'message': f'Section {data["section_id"]} added'})
+
+    except Exception as e:
+        logger.error(f'Failed to add section: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/question', methods=['POST'])
+def add_question():
+    """Add a new question to a section"""
+    try:
+        data = request.get_json()
+        section_id = data.get('section_id')
+        if not section_id or not data.get('text'):
+            return jsonify({'success': False, 'error': 'section_id and text are required'}), 400
+
+        config_path = Config.BASE_DIR / 'config' / 'cipp_questions_default.json'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        # Find section
+        found = False
+        for section in config_data['sections']:
+            if section['section_id'] == section_id:
+                # Generate ID if not provided
+                question_id = data.get('id')
+                if not question_id:
+                    existing_ids = [q['id'] for q in section['questions']]
+                    max_num = 0
+                    for eid in existing_ids:
+                        if eid.startswith('Q'):
+                            try:
+                                max_num = max(max_num, int(eid[1:]))
+                            except ValueError:
+                                pass
+                    question_id = f'Q{max_num + 1}'
+
+                new_question = {
+                    'id': question_id,
+                    'text': data['text'],
+                    'required': data.get('required', False),
+                    'expected_type': data.get('expected_type', 'string'),
+                    'enabled': data.get('enabled', True)
+                }
+
+                section['questions'].append(new_question)
+                found = True
+                break
+
+        if not found:
+            return jsonify({'success': False, 'error': 'Section not found'}), 404
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f'➕ Added question {question_id} to section {section_id}')
+        return jsonify({'success': True, 'question_id': question_id, 'message': f'Question added to {section_id}'})
+
+    except Exception as e:
+        logger.error(f'Failed to add question: {str(e)}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/progress-estimator')
 def progress_estimator():
     """Serve CIPP Production Estimator (Comprehensive - All Penalties/Boosts/Pipe Sizes)"""
@@ -1436,7 +1808,7 @@ logger.info("🧹 Session cleanup scheduler started (15-minute intervals)")
 
 if __name__ == '__main__':
     logger.info("="*60)
-    logger.info("Universal Document Intelligence - HOTDOG AI Platform")
+    logger.info("BidBrief - AI Document Analysis Platform")
     logger.info("="*60)
 
     # Get port and debug from environment (Render compatibility)
@@ -1447,4 +1819,4 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=port, debug=debug, threaded=True)
 else:
     # For gunicorn
-    logger.info("Universal Document Intelligence loaded (gunicorn mode)")
+    logger.info("BidBrief loaded (gunicorn mode)")
