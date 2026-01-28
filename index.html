@@ -470,7 +470,7 @@
             <div class="btn-group" style="display: inline-block; position: relative;">
                 <button class="btn btn-secondary" onclick="showExportMenu()" id="exportBtn" disabled>📊 Export Results ▼</button>
                 <div id="exportMenu" style="display: none; position: absolute; background: white; border: 2px solid #ddd; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; min-width: 280px; top: 100%; left: 0; margin-top: 5px;">
-                    <button onclick="exportResults('excel-simple')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">✨ Excel Dashboard (3-Sheet)</button>
+                    <button onclick="exportResults('excel-simple')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">✨ Excel Report Package</button>
                     <button onclick="exportResults('csv')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">📄 CSV (Simple)</button>
                     <button onclick="exportResults('html')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer; border-bottom: 1px solid #eee;">🌐 HTML Report</button>
                     <button onclick="exportResults('json')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer;">📋 JSON Data</button>
@@ -1268,7 +1268,7 @@ function exportResults(format) {
         downloadCSV(currentAnalysisResult);
     }
     else if (format === 'excel-simple') {
-        // Use server-side 3-sheet Excel export
+        // Use server-side Excel Report Package export
         exportExcelDashboard();
     }
     else if (format === 'html') {
@@ -1308,8 +1308,8 @@ function downloadCSV(data) {
 
 function exportExcelDashboard() {
     /**
-     * Export using server-side 3-sheet Excel dashboard generator.
-     * Sheets: Summary, Detailed Results, By Section
+     * Export using server-side Excel Report Package generator.
+     * Sheets: Executive Summary, Detailed Results, By Section, Footnotes
      */
     if (!currentSessionId) {
         Logger.error('No session ID available for export');
@@ -1317,7 +1317,7 @@ function exportExcelDashboard() {
         return;
     }
 
-    Logger.info(`📊 Requesting 3-sheet Excel export for session: ${currentSessionId}`);
+    Logger.info(`📊 Requesting Excel Report Package for session: ${currentSessionId}`);
 
     // Open the server-side export endpoint in a new tab/download
     window.open(`/api/export/excel-dashboard/${currentSessionId}`, '_blank');
