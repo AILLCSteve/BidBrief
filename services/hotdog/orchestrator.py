@@ -40,6 +40,7 @@ from .smart_accumulator import SmartAccumulator
 from .output_compiler import OutputCompiler
 from .second_pass_processor import SecondPassProcessor
 from .token_optimizer import TokenOptimizer
+from .key_requirements_extractor import KeyRequirementsExtractor
 from .models import (
     AnalysisResult,
     ParsedConfig,
@@ -127,6 +128,13 @@ class HotdogOrchestrator:
         )
         self.layer6_compiler = OutputCompiler()
 
+        # Key Requirements Extractor - ALWAYS runs regardless of selected sections
+        self.key_requirements_extractor = KeyRequirementsExtractor(
+            api_key=openai_api_key,
+            model=self.model
+        )
+        self.extracted_key_requirements = {}  # Store extracted requirements
+
         # Store windows and experts for second pass
         self.cached_windows = []
         self.cached_experts = {}
@@ -195,6 +203,30 @@ class HotdogOrchestrator:
             self.cached_windows = windows
 
             # ============================================================
+            # KEY REQUIREMENTS EXTRACTION (runs ALWAYS, regardless of sections)
+            # ============================================================
+            logger.info("🔑 Extracting Key Project Requirements...")
+            self._emit_progress('key_requirements_start', {'layer': 'Key Requirements Extraction'})
+
+            try:
+                # Build pages data for extractor
+                pages_for_extraction = [
+                    {'page_num': p.page_num, 'text': p.text}
+                    for p in pages
+                ]
+                self.extracted_key_requirements = await self.key_requirements_extractor.extract_from_document(
+                    pages_for_extraction
+                )
+                logger.info(f"  ✅ Extracted {len(self.extracted_key_requirements)} key requirements")
+                self._emit_progress('key_requirements_complete', {
+                    'count': len(self.extracted_key_requirements),
+                    'requirements': self.key_requirements_extractor.get_summary_data()
+                })
+            except Exception as e:
+                logger.warning(f"  ⚠️ Key requirements extraction failed (non-fatal): {e}")
+                self._emit_progress('key_requirements_failed', {'error': str(e)})
+
+            # ============================================================
             # LAYER 1: CONFIGURATION LOADING
             # ============================================================
             logger.info("⚙️  Layer 1: Configuration Loading")
@@ -234,6 +266,10 @@ class HotdogOrchestrator:
 
             # Cache config for potential second pass
             self.cached_config = config
+
+            # Register question texts with accumulator for Key Requirement detection
+            for question_id, question in config.question_map.items():
+                self.layer4_accumulator.register_question_text(question_id, question.text)
 
             # ============================================================
             # LAYER 2: EXPERT PERSONA GENERATION
@@ -675,7 +711,10 @@ class HotdogOrchestrator:
         Returns:
             Dict ready to serialize to JSON for frontend
         """
-        return self.layer6_compiler.format_for_browser(result, config)
+        output = self.layer6_compiler.format_for_browser(result, config)
+        # Add extracted key requirements (from Key Requirements Extractor)
+        output['key_requirements'] = self.key_requirements_extractor.get_summary_data()
+        return output
 
     def get_excel_output(self, result: AnalysisResult, config: ParsedConfig) -> dict:
         """
@@ -754,7 +793,10 @@ class HotdogOrchestrator:
 
             sections.append(section_data)
 
-        return {'sections': sections}
+        return {
+            'sections': sections,
+            'key_requirements': self.key_requirements_extractor.get_summary_data()
+        }
 
 
 # =============================================================================

@@ -160,44 +160,42 @@ class Answer:
         Merge another answer into this one.
 
         Strategy:
-        - Combine unique information (keep more specific)
-        - Aggregate all page citations
+        - APPEND all text (never discard information)
+        - PRESERVE individual page citations (don't aggregate into one)
         - Use highest confidence
         - Track merge history
+        - Concatenate all footnotes
         """
         if self.question_id != other.question_id:
             raise ValueError(f"Cannot merge answers for different questions: {self.question_id} vs {other.question_id}")
 
-        # Determine which text is more specific (longer, more detail)
-        if len(other.text) > len(self.text) * 1.2:
-            # Other answer is significantly more detailed
-            base_text = other.text
-            supplemental = self.text
-        else:
-            base_text = self.text
-            supplemental = other.text
+        # CRITICAL: Append text instead of discarding
+        # Add separator and the other answer's text
+        if other.text and other.text.strip():
+            # Check if the other text contains substantially different info
+            # by comparing normalized versions
+            import re
+            norm_self = re.sub(r'\s+', ' ', self.text.lower().strip())
+            norm_other = re.sub(r'\s+', ' ', other.text.lower().strip())
 
-        # Merge texts (simplified - production would use NLP)
-        # For now, just use the more detailed version
-        self.text = base_text
+            # Only append if not a near-duplicate (avoid exact repeats)
+            if norm_other not in norm_self and norm_self not in norm_other:
+                self.text = f"{self.text}\n\n[Additional reference]: {other.text}"
 
         # Aggregate page citations (remove duplicates, sort)
+        # But DON'T replace citations in text - preserve individual markers
         all_pages = sorted(set(self.pages + other.pages))
         self.pages = all_pages
-
-        # Update citation markers in text
-        pages_str = ', '.join(map(str, all_pages))
-        # Replace old citation with new aggregated one
-        import re
-        self.text = re.sub(r'<PDF pg [0-9, ]+>', f'<PDF pg {pages_str}>', self.text)
 
         # Use highest confidence
         self.confidence = max(self.confidence, other.confidence)
 
-        # Merge footnotes (keep both if different)
-        if other.footnote and other.footnote != self.footnote:
+        # Merge footnotes (keep ALL, never discard)
+        if other.footnote and other.footnote.strip():
             if self.footnote:
-                self.footnote = f"{self.footnote} | {other.footnote}"
+                # Check for duplicate footnotes before appending
+                if other.footnote not in self.footnote:
+                    self.footnote = f"{self.footnote}\n---\n{other.footnote}"
             else:
                 self.footnote = other.footnote
 

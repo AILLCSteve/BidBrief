@@ -101,7 +101,9 @@ class OutputCompiler:
         """
         Compile all unique footnotes from answers.
 
-        Extracts all <PDF pg X> citations and creates numbered footnote list.
+        Extracts:
+        1. All <PDF pg X> citations from answer text
+        2. All content from the footnote field (bidding context, section refs)
 
         Returns:
             List of footnote strings with page citations
@@ -114,7 +116,7 @@ class OutputCompiler:
             answers = accumulation[question_id]
 
             for answer in answers:
-                # Extract all page citations from this answer
+                # Extract all page citations from answer text
                 citations = self._extract_citations(answer.text)
 
                 for citation in citations:
@@ -122,7 +124,16 @@ class OutputCompiler:
                         footnotes.append(citation)
                         seen_citations.add(citation)
 
-        logger.info(f"📝 Compiled {len(footnotes)} unique footnotes")
+                # ALSO include the footnote field content (often has bidding context)
+                if answer.footnote and answer.footnote.strip():
+                    # Split by separator in case multiple footnotes concatenated
+                    for fn_part in answer.footnote.split('---'):
+                        fn_part = fn_part.strip()
+                        if fn_part and fn_part not in seen_citations:
+                            footnotes.append(fn_part)
+                            seen_citations.add(fn_part)
+
+        logger.info(f"📝 Compiled {len(footnotes)} unique footnotes (including footnote field content)")
         return footnotes
 
     def _extract_citations(self, text: str) -> List[str]:

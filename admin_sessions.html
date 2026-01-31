@@ -606,6 +606,9 @@
 
         // Key requirement patterns for extraction
         const KEY_REQUIREMENT_PATTERNS = {
+            'Project Name': ['project name', 'project title', 'contract name', 'project no', 'project number'],
+            'Owner/Agency': ['owner', 'agency', 'municipality', 'city of', 'county of', 'district'],
+            'Engineer': ['engineer', 'designer', 'architect', 'design firm', 'engineering firm'],
             'Timeline': ['timeline', 'project duration', 'start date', 'completion date', 'schedule', 'substantial completion'],
             'Scope': ['scope', 'linear feet', 'pipe diameter', 'total footage', 'project scope', 'lf of'],
             'Bid Deadline': ['bid deadline', 'bid due', 'submission deadline', 'bid opening', 'bids due'],
@@ -615,7 +618,7 @@
             'Bonding': ['bond', 'bid bond', 'performance bond', 'payment bond'],
             'Certifications': ['certification', 'nassco', 'pacp', 'required certifications'],
             'Insurance': ['insurance', 'liability', 'coverage requirements'],
-            'Location': ['location', 'project location', 'city', 'municipality']
+            'Location': ['location', 'project location', 'city', 'municipality', 'address']
         };
 
         function extractKeyRequirements(sections) {
@@ -722,7 +725,7 @@
             `;
 
             // Add key requirements rows
-            const reqOrder = ['Timeline', 'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance', 'Location'];
+            const reqOrder = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline', 'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance'];
             reqOrder.forEach(reqName => {
                 const value = keyReqs[reqName] || '<em style="color: #999;">Not found in document</em>';
                 html += `

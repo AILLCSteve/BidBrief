@@ -39,7 +39,26 @@ class SmartAccumulator:
     - Semantic Understanding: Uses similarity, not exact matching
 
     CRITICAL: Preserves and aggregates ALL PDF page citations.
+    CRITICAL: All answers are concatenated into one (no variants) EXCEPT for Key Project Requirements.
     """
+
+    # Key Project Requirements question patterns - these get special handling
+    # (similarity-based dedup instead of always-append to avoid repetition)
+    KEY_REQUIREMENT_PATTERNS = [
+        'project name', 'project title', 'contract name',
+        'project location', 'location', 'city', 'municipality', 'address',
+        'owner', 'agency', 'district',
+        'engineer', 'designer', 'architect', 'design firm',
+        'bid deadline', 'bid opening', 'bid due',
+        'completion date', 'timeline', 'schedule', 'contract days', 'duration',
+        'liquidated damages', 'delay damages', 'penalty',
+        'bond', 'bid bond', 'performance bond', 'payment bond',
+        'insurance', 'liability', 'coverage',
+        'warranty', 'guarantee',
+        'retention', 'payment terms', 'progress payment',
+        'certification', 'nassco', 'pacp',
+        'scope', 'linear feet', 'pipe diameter'
+    ]
 
     def __init__(self, similarity_threshold: float = 0.75):
         """
@@ -53,6 +72,7 @@ class SmartAccumulator:
         self.accumulation: AnswerAccumulation = defaultdict(list)  # question_id -> List[Answer]
         self.total_merges = 0
         self.total_variants = 0
+        self.question_texts: dict = {}  # Store question text for pattern matching
 
     def accumulate_window(self, window_result: WindowResult) -> Dict[str, int]:
         """
@@ -60,10 +80,10 @@ class SmartAccumulator:
 
         Strategy:
         1. For each answer in the window
-        2. Check if similar answer already exists for that question
-        3. If similar: merge with existing answer
-        4. If different: add as answer variant
-        5. If first answer: add to accumulation
+        2. ALWAYS merge with existing answer (append text, preserve all citations)
+        3. EXCEPTION: Key Project Requirements questions use similarity-based dedup
+           (we don't need 10 references to the project name)
+        4. If first answer: add to accumulation
 
         Args:
             window_result: Results from processing a window
@@ -72,7 +92,7 @@ class SmartAccumulator:
             Statistics dict with merge/variant counts
         """
         merges = 0
-        variants = 0
+        appends = 0
         new_answers = 0
 
         logger.info(f"📥 Accumulating {len(window_result.answers)} answers from Window {window_result.window_num}")
@@ -87,40 +107,68 @@ class SmartAccumulator:
                 logger.debug(f"✨ {question_id}: First answer (pages: {new_answer.pages})")
 
             else:
-                # Check similarity against all existing answers
-                best_match, similarity = self._find_most_similar(new_answer, existing_answers)
+                # Check if this is a Key Project Requirement question
+                is_key_requirement = self._is_key_requirement_question(question_id)
 
-                if similarity >= self.similarity_threshold:
-                    # Merge with existing similar answer
-                    best_match.merge_with(new_answer)
-                    merges += 1
+                if is_key_requirement:
+                    # For Key Requirements: use similarity-based dedup (don't want 50 project names)
+                    best_match, similarity = self._find_most_similar(new_answer, existing_answers)
+
+                    if similarity >= self.similarity_threshold:
+                        # Similar enough - merge but preserve unique info
+                        best_match.merge_with(new_answer)
+                        merges += 1
+                        self.total_merges += 1
+                        logger.debug(
+                            f"🔄 {question_id} (Key Req): Merged (similarity: {similarity:.2f})"
+                        )
+                    else:
+                        # Different info - still merge to keep single answer
+                        existing_answers[0].merge_with(new_answer)
+                        merges += 1
+                        self.total_merges += 1
+                        logger.debug(
+                            f"🔄 {question_id} (Key Req): Force merged different info"
+                        )
+                else:
+                    # For regular questions: ALWAYS append (never create variants)
+                    # Merge into the first/primary answer
+                    existing_answers[0].merge_with(new_answer)
+                    appends += 1
                     self.total_merges += 1
                     logger.debug(
-                        f"🔄 {question_id}: Merged (similarity: {similarity:.2f}, "
-                        f"pages now: {best_match.pages})"
-                    )
-
-                else:
-                    # Different answer - add as variant
-                    self.accumulation[question_id].append(new_answer)
-                    variants += 1
-                    self.total_variants += 1
-                    logger.debug(
-                        f"🔀 {question_id}: Added variant #{len(existing_answers) + 1} "
-                        f"(similarity: {similarity:.2f}, pages: {new_answer.pages})"
+                        f"📎 {question_id}: Appended (pages now: {existing_answers[0].pages})"
                     )
 
         logger.info(
             f"✅ Window {window_result.window_num} accumulated: "
-            f"{new_answers} new, {merges} merged, {variants} variants"
+            f"{new_answers} new, {merges} merged, {appends} appended"
         )
 
         return {
             'window_num': window_result.window_num,
             'new_answers': new_answers,
             'merges': merges,
-            'variants': variants
+            'appends': appends
         }
+
+    def _is_key_requirement_question(self, question_id: str) -> bool:
+        """
+        Check if a question is a Key Project Requirement question.
+
+        These get special handling - similarity-based dedup instead of always-append.
+        """
+        question_text = self.question_texts.get(question_id, '').lower()
+
+        for pattern in self.KEY_REQUIREMENT_PATTERNS:
+            if pattern in question_text:
+                return True
+
+        return False
+
+    def register_question_text(self, question_id: str, question_text: str):
+        """Register question text for pattern matching."""
+        self.question_texts[question_id] = question_text
 
     def _find_most_similar(
         self,

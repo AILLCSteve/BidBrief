@@ -62,6 +62,9 @@ class ExcelDashboardGenerator:
 
     # Key requirement mappings - questions to look for
     KEY_REQUIREMENT_PATTERNS = {
+        'Project Name': ['project name', 'project title', 'contract name', 'project no', 'project number'],
+        'Owner/Agency': ['owner', 'agency', 'municipality', 'city of', 'county of', 'district'],
+        'Engineer': ['engineer', 'designer', 'architect', 'design firm', 'engineering firm'],
         'Timeline': ['timeline', 'project duration', 'start date', 'completion date', 'schedule'],
         'Scope': ['scope', 'linear feet', 'pipe diameter', 'total footage', 'project scope'],
         'Bid Deadline': ['bid deadline', 'bid due', 'submission deadline', 'bid opening'],
@@ -71,7 +74,7 @@ class ExcelDashboardGenerator:
         'Bonding': ['bond', 'bid bond', 'performance bond', 'payment bond'],
         'Certifications': ['certification', 'nassco', 'pacp', 'required certifications', 'operator certification'],
         'Insurance': ['insurance', 'liability', 'coverage requirements'],
-        'Location': ['location', 'project location', 'city', 'municipality'],
+        'Location': ['location', 'project location', 'city', 'municipality', 'address'],
     }
 
     def __init__(self, analysis_result, is_partial=False):
@@ -246,8 +249,9 @@ class ExcelDashboardGenerator:
             row += 1
 
             # Sort requirements by a preferred order
-            preferred_order = ['Timeline', 'Scope', 'Location', 'Bid Deadline', 'Payment',
-                             'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance']
+            preferred_order = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline',
+                             'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages',
+                             'Bonding', 'Certifications', 'Insurance']
 
             sorted_reqs = []
             for key in preferred_order:

@@ -1,0 +1,177 @@
+{
+  "name": "Engineering Thermodynamics - Comprehensive Question Set",
+  "description": "100 questions covering fundamental thermodynamic concepts from systems and states through second law analysis",
+  "totalQuestions": 100,
+  "sections": [
+    {
+      "section_id": "SEC1",
+      "section_name": "Systems, States, Processes, and Cycles",
+      "description": "Fundamental concepts of thermodynamic systems, boundaries, states, processes, and cycles",
+      "questions": [
+        {"id": "S1Q1", "text": "★ For a piston-cylinder undergoing compression with heat transfer, define the system/boundary, identify heat/work interactions, write the closed-system energy balance, then discuss what the second law implies about irreversibility/entropy generation for real compression.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q2", "text": "Define system, surroundings, boundary, and give one example each of a fixed/movable and real/imaginary boundary.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q3", "text": "Distinguish closed, open (control volume), and isolated systems and explain what can cross the boundary in each case.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q4", "text": "★ Using the vapor-compression refrigeration cycle example (system modeling) and the control-volume framework, classify each major component (compressor, condenser, expansion valve, evaporator) as an open system, and identify which energy terms (heat/work/enthalpy) dominate in each.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q5", "text": "Explain what it means for a system to be in equilibrium and list the common equilibrium types discussed (thermal, mechanical, chemical, phase).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q6", "text": "Define state, process, and cycle; explain why a process path must be specified to determine heat/work.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q7", "text": "★ Compare how a P-v diagram (work/area) and a T-s diagram (entropy) are each used to analyze a cycle; connect the diagram choice to what you can infer from the first vs second law.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q8", "text": "Define and contrast isobaric, isochoric, isothermal, adiabatic, isentropic processes; give a physical example for any two.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q9", "text": "Explain quasi-equilibrium (quasi-static) processes and why the text emphasizes them for analysis.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S1Q10", "text": "★ Explain why the first law alone cannot impose a maximum heat-to-work conversion limit, and how the second law supplies an efficiency bound for heat engines.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC2",
+      "section_name": "Thermodynamic Properties: Meaning, Units, and Measurement",
+      "description": "Understanding pressure, temperature, specific volume, internal energy, and their measurement",
+      "questions": [
+        {"id": "S2Q1", "text": "★ Explain how pressure, temperature, specific volume, and internal energy are used to define a state, and then describe how those properties appear differently in closed-system vs control-volume energy analyses.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q2", "text": "Define pressure as force per area; distinguish absolute pressure from gauge/vacuum pressure, and state when each is used.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q3", "text": "Describe how a pressure gauge and a U-tube manometer measure pressure; explain what physical balance is being used.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q4", "text": "★ Using the zeroth law (temperature measurement) and the second law (direction of processes), explain why \"equal temperature\" is meaningful and why energy transfer has a preferred direction in real systems.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q5", "text": "Define density and specific volume; explain how each typically varies with T and P for gases vs liquids.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q6", "text": "Define internal energy and describe (microscopically and macroscopically) why it is strongly tied to temperature.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q7", "text": "Define enthalpy and explain why it is especially useful in open systems with mass flow (flow work concept).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q8", "text": "★ Distinguish entropy (state function) from entropy generation (path/irreversibility measure), and explain how each appears in second-law analyses of devices and cycles.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q9", "text": "Explain what makes a property extensive vs intensive, and why specific properties are always intensive.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S2Q10", "text": "★ A fluid passes through a turbine (steady flow) and also undergoes a closed-system compression in a piston cylinder elsewhere. Compare which properties (u, h, s) and which conservation equations you would prioritize for each, and why.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC3",
+      "section_name": "Pure Substances, Phase Change, and Phase Diagrams",
+      "description": "Phase behavior of pure substances including phase diagrams and property determination",
+      "questions": [
+        {"id": "S3Q1", "text": "★ For water undergoing heating at constant pressure from compressed liquid → saturated mixture → superheated vapor, describe how you would locate states on a phase diagram, then explain what additional data you'd need from tables to compute energy/entropy changes.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q2", "text": "Define pure substance and explain why air can sometimes be treated as a pure substance even though it's a mixture.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q3", "text": "Describe the three phases of a pure substance and the conditions under which phase change occurs.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q4", "text": "★ Explain how the concepts of quality (x) in saturated mixtures and control-volume enthalpy combine when analyzing a boiler or condenser section of a power/refrigeration cycle.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q5", "text": "Identify and interpret key features on a typical P-v or T-v phase diagram (saturation lines, two-phase region, critical point conceptually).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q6", "text": "Explain the difference between a compressed (subcooled) liquid, saturated liquid, saturated vapor, and superheated vapor.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q7", "text": "★ Compare an Otto cycle description (P-v focus) to a vapor-compression cycle description (phase change focus). What does each cycle require you to track (properties/diagrams) to evaluate performance?", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q8", "text": "Explain how phase equilibrium relates to the idea of an equilibrium state and why that matters for table lookups.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q9", "text": "Using the book's phase-diagram logic, describe how you would determine whether a state at given P and T is single-phase or two-phase (conceptual procedure).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S3Q10", "text": "★ A working fluid transitions through two-phase regions in one device but stays single-phase gas in another. Explain how your property-determination strategy changes, and how that change affects first-law and second-law calculations.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC4",
+      "section_name": "Thermodynamic Tables and Property Retrieval",
+      "description": "Using thermodynamic tables and appendices for property determination",
+      "questions": [
+        {"id": "S4Q1", "text": "★ Outline a full workflow for solving a real device problem that requires: identifying system type, selecting appropriate tables (Appendices), obtaining u/h/s, and applying both energy and entropy balances.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q2", "text": "Explain how thermodynamic tables are organized (e.g., saturated vs superheated/compressed regions) and what inputs you typically need to use them.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q3", "text": "Using Appendix-style tables (water or a refrigerant), describe how you would determine quality given two independent properties in the two-phase region.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q4", "text": "★ A throttling (expansion) device is modeled as steady, adiabatic, negligible KE/PE. Explain why h_in ≈ h_out, then describe how you'd use tables to find the exit state and then assess entropy generation qualitatively.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q5", "text": "Describe when interpolation is needed in tables and why it is valid (within limits).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q6", "text": "Explain how you would extract properties for a superheated vapor state given (P, T), and which properties you can directly read.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q7", "text": "★ Compare property evaluation for water vs R134a when analyzing a refrigeration cycle component: what is common, what differs, and how do the appendices support both?", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q8", "text": "Define what \"state has a unique set of properties\" means operationally when using tables (two independent properties idea).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q9", "text": "Explain the role of critical properties and triple point data in appendices: what decisions do they support in modeling/validation?", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S4Q10", "text": "★ Construct a coherent explanation for why table-based property lookup is foundational to both (i) first-law energy accounting and (ii) second-law entropy accounting, using examples of at least one closed system and one control volume.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC5",
+      "section_name": "Ideal Gas Modeling and Property Relations",
+      "description": "Ideal gas equation of state, specific heats, and property calculations",
+      "questions": [
+        {"id": "S5Q1", "text": "★ Describe a scenario where you would model a working fluid as an ideal gas in one part of a system but require real-fluid tables elsewhere; justify the modeling switch and its impact on energy/entropy calculations.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q2", "text": "State the ideal gas equation of state and explain what \"equation of state\" means in this context.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q3", "text": "Explain the physical meaning of the gas constant (R) and how it relates to units and state variables.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q4", "text": "★ Connect the ideal-gas EOS to the definitions of specific volume/density, and then show how those link into the control-volume continuity equation for steady flow.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q5", "text": "Define constant-pressure and constant-volume specific heats conceptually and explain what they quantify.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q6", "text": "Explain the relationship between k = cp/cv, R, cp, and cv (conceptual and/or algebraic).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q7", "text": "★ A steady-flow device experiences measurable temperature change across it. Explain how you would estimate Δh (ideal gas with constant cp approximation) and then discuss what the second law suggests about irreversibility depending on device type.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q8", "text": "Explain why \"ideal gas\" is a model and identify conditions where it becomes less accurate (conceptually).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q9", "text": "Describe how absolute temperature is used in gas relations and why Celsius/Fahrenheit are not appropriate in certain equations.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S5Q10", "text": "★ Compare how you'd compute energy changes for (i) a closed-system ideal-gas process and (ii) a steady-flow ideal-gas process, emphasizing which property (u or h) is most convenient and why.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC6",
+      "section_name": "Real Gases and Compressibility Factor",
+      "description": "Deviations from ideal gas behavior and compressibility factor corrections",
+      "questions": [
+        {"id": "S6Q1", "text": "★ Explain how the compressibility factor (Z) modifies the ideal-gas EOS, and describe how errors in Z propagate into calculated work/heat estimates in a first-law analysis.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q2", "text": "Define real gas behavior and list the key physical reasons real gases deviate from ideality (conceptual).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q3", "text": "Describe what Z represents physically and what Z ≈ 1 implies.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q4", "text": "★ Build a coherent decision rule: given a gas at certain P and T, decide whether to use ideal-gas relations, Z-corrected relations, or tables; then explain how that choice affects entropy calculations.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q5", "text": "Explain how real-gas effects can influence density/specific volume calculations in flow problems.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q6", "text": "Describe how state and equation of state concepts extend from ideal to real gases.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q7", "text": "★ A nozzle accelerates a high-pressure gas to high velocity. Explain why density modeling (ideal vs real gas) matters, and connect it to steady-flow energy terms (KE change) and irreversibility sources.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q8", "text": "Compare the use of tables for real fluids (like refrigerants) vs compressibility factor approaches for gases (conceptual comparison).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q9", "text": "Explain how critical properties (appendix concept) relate to expected real-gas behavior near the critical region.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S6Q10", "text": "★ Propose a cohesive explanation for why \"real gas modeling\" is not just a property issue but also a device-performance issue (turbines/compressors/nozzles), linking to both first-law and second-law viewpoints.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC7",
+      "section_name": "First Law for Closed Systems: Heat, Work, and Energy Accounting",
+      "description": "Energy balance for closed systems including heat transfer and boundary work",
+      "questions": [
+        {"id": "S7Q1", "text": "★ For a closed system undergoing a process, explain how you would determine ΔU using tables or specific heats, compute boundary work from a P-V path, and then assess whether the process could be reversible based on entropy considerations.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q2", "text": "Distinguish heat transfer vs work as boundary phenomena; explain why neither is a property.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q3", "text": "State the closed-system first-law relation conceptually and list the major energy forms considered in the text.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q4", "text": "★ Explain (with a coherent narrative) how internal energy depends primarily on temperature for many substances, how that enables simplified calculations, and where that simplification breaks down.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q5", "text": "Explain boundary work as the area under the process curve on P-V (or p-v) diagrams, and what information is required to compute it.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q6", "text": "Describe what an adiabatic closed-system process implies for the energy balance and what it does not guarantee about reversibility.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q7", "text": "★ Compare a polytropic compression/expansion model to an isothermal model in terms of work and heat transfer, then connect expected irreversibility to entropy generation.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q8", "text": "Explain the conceptual difference between total energy and internal energy and when KE/PE can be neglected.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q9", "text": "Describe the purpose of \"key equations\" sections and how you'd use them to structure a solution.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S7Q10", "text": "★ Construct a full problem-setup checklist for a closed-system first-law problem: system definition, property evaluation method (tables vs ideal-gas heat capacities), process path characterization, work/heat sign conventions, and sanity checks.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC8",
+      "section_name": "Control Volumes: Continuity and Energy Equation",
+      "description": "Mass and energy balances for open systems with steady flow emphasis",
+      "questions": [
+        {"id": "S8Q1", "text": "★ For a generic steady-flow device, show how you would simplify the general control-volume energy equation using appropriate assumptions, then explain how you would detect missing terms (KE/PE/work/heat) by inspecting the physical device.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q2", "text": "State the meaning of the continuity equation for control volumes and explain what \"steady flow\" implies.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q3", "text": "Explain the three mechanisms of energy transfer for a control volume: heat, work, and mass transfer.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q4", "text": "★ Explain why enthalpy naturally appears in the steady-flow energy equation, linking it to flow work and internal energy.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q5", "text": "Define mass flow rate and volume flow rate and explain how velocity and area enter these relations.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q6", "text": "Describe when KE and PE terms in the steady-flow energy equation are important (give device examples).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q7", "text": "★ Compare a steady-flow turbine and a steady-flow compressor in terms of signs/directions of work and expected property changes; then explain how the second law constrains ideal performance.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q8", "text": "Explain what \"steady-state, steady-flow (SSSF)\" means and why it is a common engineering approximation.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q9", "text": "Describe how you would choose and draw a control volume for a device with multiple inlets/outlets.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S8Q10", "text": "★ Build a coherent \"solution template\" for control-volume problems that includes: control-volume sketch, assumptions, continuity, energy equation, property retrieval strategy (tables/ideal gas), and interpretation of results.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC9",
+      "section_name": "Steady-Flow Devices Analysis",
+      "description": "Analysis of turbines, compressors, nozzles, valves, heat exchangers, and mixing chambers",
+      "questions": [
+        {"id": "S9Q1", "text": "★ For each of the following devices—turbine, compressor, nozzle/diffuser, throttling valve, heat exchanger, mixing chamber—state the standard simplifying assumptions, then explain how violating one assumption changes the energy balance.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q2", "text": "Explain the energy-conversion role of a turbine and what typical trends in P and T are expected across it.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q3", "text": "Explain the purpose of a compressor and how its work input relates to fluid enthalpy changes (conceptual).", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q4", "text": "★ Explain throttling in an expansion valve: why work is negligible, why it is often modeled as adiabatic, what happens to h, and why entropy generation is expected.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q5", "text": "Describe the main energy transformation in a nozzle and in a diffuser and which energy term (KE) dominates.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q6", "text": "Explain what makes a heat exchanger different from devices with shaft work, and how you'd set up control volumes for each stream.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q7", "text": "★ A mixing chamber combines two inlet streams into one outlet. Describe the mass/energy balance setup, then explain how you'd reason about the sign of entropy generation in real mixing.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q8", "text": "Explain why \"derived equations\" for devices must be checked against assumptions before use.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q9", "text": "Describe how pipes/ducts are treated in steady-flow analysis and what effects might be neglected or included depending on the problem framing.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S9Q10", "text": "★ Design a cohesive, step-wise plan for analyzing a complete steady-flow subsystem (e.g., compressor → heat exchanger → expansion valve) including property lookup, energy balances per device, and second-law checks for irreversibility hotspots.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    },
+    {
+      "section_id": "SEC10",
+      "section_name": "Second Law, Carnot Limits, and Entropy Methods",
+      "description": "Second law principles, heat engines, refrigerators, and entropy analysis",
+      "questions": [
+        {"id": "S10Q1", "text": "★ Explain how the Kelvin-Planck and Clausius statements rule out \"perfect\" heat-to-work conversion and spontaneous heat flow direction reversal, then connect those statements to entropy generation.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q2", "text": "Define heat engine, and identify the roles of heat source, heat sink, net work, and waste heat.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q3", "text": "Define refrigerator and heat pump, and explain what COP represents conceptually.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q4", "text": "★ For a Carnot cycle, explain why it provides a theoretical performance limit, then describe what \"reversible\" means operationally and how entropy generation alters attainable performance.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q5", "text": "Explain the difference between a reversible and irreversible process and list common sources of irreversibility.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q6", "text": "State the entropy relation form that includes entropy generation, and explain the meaning of the inequality for real processes.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q7", "text": "★ Build a coherent entropy-balance approach for (i) a closed system undergoing heating/cooling and (ii) a steady-flow control volume; highlight what changes and what stays the same.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q8", "text": "Explain how the text uses the \"universe as an isolated system\" idea to interpret the direction of real processes.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q9", "text": "Describe how you would determine the specific entropy of a state using tables and what inputs are typically required.", "required": true, "expected_type": "string", "enabled": true},
+        {"id": "S10Q10", "text": "★ Provide a structured method to evaluate a real device's \"distance from ideal\" using both laws: first-law performance metric (work/heat/Δh) plus second-law metric (entropy generation), including what data you would need from appendices/tables.", "required": true, "expected_type": "string", "enabled": true}
+      ]
+    }
+  ]
+}

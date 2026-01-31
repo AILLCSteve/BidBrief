@@ -1117,8 +1117,17 @@ def export_excel_dashboard(session_id):
         generator = ExcelDashboardGenerator(legacy_result, is_partial=is_partial)
         excel_file = generator.generate()
 
-        # Use different filename for partial exports
-        filename = 'BidBrief_Analysis_PARTIAL.xlsx' if is_partial else 'BidBrief_Analysis.xlsx'
+        # Build filename from document name and date
+        from datetime import datetime
+        import re
+        doc_name = legacy_result.get('document_name', 'Analysis')
+        # Clean the document name for filename use
+        doc_name = re.sub(r'\.pdf$', '', doc_name, flags=re.IGNORECASE)
+        doc_name = re.sub(r'[^\w\s-]', '', doc_name).strip()
+        doc_name = re.sub(r'\s+', '_', doc_name)[:50]  # Limit length
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        partial_suffix = '_PARTIAL' if is_partial else ''
+        filename = f'{doc_name}_{date_str}{partial_suffix}.xlsx'
 
         return send_file(
             excel_file,
