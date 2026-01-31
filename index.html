@@ -1651,10 +1651,16 @@ function renderUnitaryTable() {
     const questionsList = Object.values(allQuestions);
     const answeredCount = questionsList.filter(q => q.status === 'found').length;
     const totalCount = questionsList.length;
+    const totalFragments = questionsList.reduce((sum, q) => sum + (q.fragment_count || 0), 0);
 
     let html = `
         <div style="background: white; padding: 20px; border-radius: 8px;">
-            <h3 style="color: #1E3A8A; margin-bottom: 15px;">📊 Unitary Log - Live Analysis</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="color: #1E3A8A; margin: 0;">📊 Unitary Log - Live Analysis</h3>
+                <button onclick="openFullViewModal()" style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                    📋 View Full Results
+                </button>
+            </div>
 
             <!-- Progress Stats -->
             <div style="background: #f0f4ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
@@ -1662,7 +1668,7 @@ function renderUnitaryTable() {
                     Answered: ${answeredCount}/${totalCount} questions (${((answeredCount/totalCount)*100).toFixed(1)}%)
                 </div>
                 <div style="margin-top: 5px; color: #666;">
-                    Footnotes: ${allFootnotes.length}
+                    Footnotes: ${allFootnotes.length}${currentAnalysisMode === 'bestprep' ? ` | Fragments: ${totalFragments}` : ''}
                 </div>
             </div>
 
@@ -2257,6 +2263,7 @@ window.addEventListener('click', function(event) {
     if (event.target === answerModal) {
         closeAnswerDetailModal();
     }
+    // fullViewModal has its own onclick handler in the HTML
 });
 
 // ============================================================================
@@ -2331,6 +2338,377 @@ function closeAnswerDetailModal() {
     document.getElementById('answerDetailModal').style.display = 'none';
 }
 
+// ============================================================================
+// FULL VIEW MODAL - Comprehensive results view (like admin modal)
+// ============================================================================
+
+function openFullViewModal() {
+    const modal = document.getElementById('fullViewModal');
+    modal.style.display = 'flex';
+
+    // Render all tabs
+    renderFullViewSummaryTab();
+    renderFullViewDetailedTab();
+    renderFullViewBySectionTab();
+    if (currentAnalysisMode === 'bestprep') {
+        document.getElementById('fullViewFragmentsTabBtn').style.display = 'inline-block';
+        document.getElementById('fullViewPageIndexTabBtn').style.display = 'inline-block';
+        renderFullViewFragmentsTab();
+        renderFullViewPageIndexTab();
+    } else {
+        document.getElementById('fullViewFragmentsTabBtn').style.display = 'none';
+        document.getElementById('fullViewPageIndexTabBtn').style.display = 'none';
+    }
+    renderFullViewFootnotesTab();
+
+    // Set default tab
+    switchFullViewTab('summary');
+}
+
+function closeFullViewModal() {
+    document.getElementById('fullViewModal').style.display = 'none';
+}
+
+function switchFullViewTab(tabName) {
+    document.querySelectorAll('.fv-tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.fv-tab-content').forEach(content => content.classList.remove('active'));
+
+    document.querySelector(`[onclick="switchFullViewTab('${tabName}')"]`).classList.add('active');
+    document.getElementById(`fv-tab-${tabName}`).classList.add('active');
+}
+
+function renderFullViewSummaryTab() {
+    const questionsList = Object.values(allQuestions);
+    const totalQuestions = questionsList.length;
+    const answeredQuestions = questionsList.filter(q => q.status === 'found').length;
+    const answerRate = totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0;
+    const totalFragments = questionsList.reduce((sum, q) => sum + (q.fragment_count || 0), 0);
+    const avgFragsPerQ = answeredQuestions > 0 ? (totalFragments / answeredQuestions).toFixed(1) : '0';
+
+    // Collect all pages
+    const allPages = new Set();
+    questionsList.forEach(q => {
+        if (q.pages) q.pages.forEach(p => allPages.add(p));
+    });
+
+    let html = '';
+
+    if (currentAnalysisMode === 'bestprep') {
+        html = `
+            <div style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
+                <h3 style="margin: 0 0 8px 0; font-size: 16px;">BestPrep/TestPrep Analysis</h3>
+                <p style="margin: 0; opacity: 0.9; font-size: 13px;">Exhaustive analysis mode - all answer fragments preserved</p>
+            </div>
+
+            <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Info</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                <tbody>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb; width: 220px;">Analysis Mode</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;"><span style="background: #22c55e; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px;">BestPrep</span></td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Generated</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${new Date().toLocaleString()}</td></tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Document Statistics</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                <tbody>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb; width: 220px;">Total Pages Referenced</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${allPages.size}</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Page Range</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${allPages.size > 0 ? Math.min(...allPages) + ' - ' + Math.max(...allPages) : 'N/A'}</td></tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Question & Answer Statistics</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                <tbody>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb; width: 220px;">Total Questions</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${totalQuestions}</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Questions Answered</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb; color: #22c55e; font-weight: 600;">${answeredQuestions}</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Answer Rate</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${answerRate}%</td></tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin: 0 0 15px 0; color: #e65100; font-size: 16px;">Fragment & Citation Statistics</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                <tbody>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #fff3e0; color: #e65100; border: 1px solid #e5e7eb; width: 220px;">Total Fragments Collected</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #e65100;">${totalFragments}</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #fff3e0; color: #e65100; border: 1px solid #e5e7eb;">Total Citations/Footnotes</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #e65100;">${allFootnotes.length}</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #fff3e0; color: #e65100; border: 1px solid #e5e7eb;">Avg Fragments/Question</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #e65100;">${avgFragsPerQ}</td></tr>
+                </tbody>
+            </table>
+        `;
+    } else {
+        html = `
+            <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                <tbody>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb; width: 200px;">Analysis Mode</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;"><span style="background: #3b82f6; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px;">Bid/Spec</span></td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Total Questions</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${totalQuestions}</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Questions Answered</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb; color: #22c55e; font-weight: 600;">${answeredQuestions}</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Answer Rate</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${answerRate}%</td></tr>
+                    <tr><td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Total Pages Referenced</td>
+                        <td style="padding: 10px; border: 1px solid #e5e7eb;">${allPages.size}</td></tr>
+                </tbody>
+            </table>
+        `;
+    }
+
+    document.getElementById('fv-summaryContent').innerHTML = html;
+}
+
+function renderFullViewDetailedTab() {
+    const questionsList = Object.values(allQuestions);
+
+    let html = `
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+                <tr style="background: #1E3A8A; color: white;">
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 40px;">#</th>
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 150px;">Section</th>
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 220px;">Question</th>
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Answer</th>
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 100px;">Pages</th>
+                    ${currentAnalysisMode === 'bestprep' ? '<th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 70px;">Frags</th>' : ''}
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 60px;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    let num = 1;
+    questionsList.forEach(q => {
+        const hasAnswer = q.answer && q.answer.trim();
+        const pages = q.pages && q.pages.length > 0 ? q.pages.join(', ') : '-';
+        const fragCount = q.fragment_count || 0;
+
+        html += `
+            <tr style="background: ${num % 2 === 0 ? '#f9fafb' : 'white'};">
+                <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">${num}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.section_name}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.question_text}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb; max-width: 400px; word-wrap: break-word;">${hasAnswer ? q.answer : '<em style="color: #999;">Not found</em>'}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #1E3A8A; text-align: center;">${pages}</td>
+                ${currentAnalysisMode === 'bestprep' ? `<td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;"><span style="background: ${fragCount > 1 ? '#ff9800' : '#e0e0e0'}; color: ${fragCount > 1 ? 'white' : '#666'}; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${fragCount}</span></td>` : ''}
+                <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center; background: ${hasAnswer ? '#d4edda' : '#f8d7da'}; color: ${hasAnswer ? '#155724' : '#721c24'}; font-weight: 600;">${hasAnswer ? 'Yes' : 'No'}</td>
+            </tr>
+        `;
+        num++;
+    });
+
+    html += '</tbody></table>';
+    document.getElementById('fv-detailedContent').innerHTML = html;
+}
+
+function renderFullViewBySectionTab() {
+    const questionsList = Object.values(allQuestions);
+
+    // Group by section
+    const sections = {};
+    questionsList.forEach(q => {
+        if (!sections[q.section_name]) {
+            sections[q.section_name] = [];
+        }
+        sections[q.section_name].push(q);
+    });
+
+    let html = '';
+
+    Object.entries(sections).forEach(([sectionName, questions]) => {
+        const answered = questions.filter(q => q.status === 'found').length;
+        const totalFrags = questions.reduce((sum, q) => sum + (q.fragment_count || 0), 0);
+
+        html += `
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #1E3A8A; margin-bottom: 15px; padding: 10px 15px; background: #e8eef7; border-radius: 6px;">
+                    ${sectionName}
+                    <span style="float: right; font-size: 14px; color: #5B7FCC;">
+                        ${answered}/${questions.length} answered
+                        ${currentAnalysisMode === 'bestprep' ? `<span style="margin-left: 10px; background: #ff9800; color: white; padding: 2px 8px; border-radius: 4px;">${totalFrags} frags</span>` : ''}
+                    </span>
+                </h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <thead>
+                        <tr style="background: #f8f9fa;">
+                            <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb; width: 40px;">#</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb;">Question</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb;">Answer</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb; width: 100px;">Pages</th>
+                            <th style="padding: 10px; text-align: center; border: 1px solid #e5e7eb; width: 60px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        questions.forEach((q, idx) => {
+            const hasAnswer = q.answer && q.answer.trim();
+            const pages = q.pages && q.pages.length > 0 ? q.pages.join(', ') : '-';
+
+            html += `
+                <tr style="background: ${idx % 2 === 0 ? 'white' : '#f9fafb'};">
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">${idx + 1}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.question_text}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">${hasAnswer ? q.answer : '<em style="color: #999;">Not found</em>'}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #1E3A8A; text-align: center;">${pages}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center; background: ${hasAnswer ? '#d4edda' : '#f8d7da'}; color: ${hasAnswer ? '#155724' : '#721c24'}; font-weight: 600;">${hasAnswer ? 'Yes' : 'No'}</td>
+                </tr>
+            `;
+        });
+
+        html += '</tbody></table></div>';
+    });
+
+    document.getElementById('fv-bySectionContent').innerHTML = html;
+}
+
+function renderFullViewFragmentsTab() {
+    const questionsList = Object.values(allQuestions);
+    const questionsWithFragments = questionsList.filter(q => q.fragment_count > 0);
+
+    if (questionsWithFragments.length === 0) {
+        document.getElementById('fv-fragmentsContent').innerHTML = `
+            <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                <p style="font-size: 18px; margin-bottom: 10px;">No fragment data available</p>
+                <p style="font-size: 14px;">Fragment details are shown in the detailed answers.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let totalFrags = questionsList.reduce((sum, q) => sum + (q.fragment_count || 0), 0);
+
+    let html = `
+        <div style="margin-bottom: 20px; padding: 15px; background: #fff3e0; border-radius: 8px;">
+            <strong style="color: #e65100;">${totalFrags} Answer Fragments</strong>
+            <span style="color: #666; margin-left: 10px;">All answer fragments preserved with full provenance</span>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+                <tr style="background: #5B7FCC; color: white;">
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Question</th>
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Answer (with accumulated fragments)</th>
+                    <th style="padding: 12px; text-align: center; border: 1px solid #ddd; width: 80px;">Pages</th>
+                    <th style="padding: 12px; text-align: center; border: 1px solid #ddd; width: 70px;">Frags</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    questionsWithFragments.forEach((q, idx) => {
+        const pages = q.pages && q.pages.length > 0 ? q.pages.join(', ') : '-';
+
+        html += `
+            <tr style="background: ${idx % 2 === 0 ? 'white' : '#f9fafb'};">
+                <td style="padding: 10px; border: 1px solid #e5e7eb; vertical-align: top; max-width: 200px;">${q.question_text}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb; vertical-align: top; max-width: 400px; word-wrap: break-word;">${q.answer || '-'}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center; font-weight: 600; color: #1E3A8A;">${pages}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">
+                    <span style="background: #ff9800; color: white; padding: 2px 10px; border-radius: 10px; font-size: 12px;">${q.fragment_count || 0}</span>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table>';
+    document.getElementById('fv-fragmentsContent').innerHTML = html;
+}
+
+function renderFullViewPageIndexTab() {
+    const questionsList = Object.values(allQuestions);
+
+    // Build page -> questions mapping
+    const pageMap = {};
+    questionsList.forEach(q => {
+        if (q.pages) {
+            q.pages.forEach(page => {
+                if (!pageMap[page]) {
+                    pageMap[page] = [];
+                }
+                if (!pageMap[page].includes(q.question_id)) {
+                    pageMap[page].push(q.question_id);
+                }
+            });
+        }
+    });
+
+    const sortedPages = Object.keys(pageMap).map(Number).sort((a, b) => a - b);
+
+    if (sortedPages.length === 0) {
+        document.getElementById('fv-pageIndexContent').innerHTML = `
+            <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                <p style="font-size: 18px; margin-bottom: 10px;">No page references found</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px;">
+            <strong style="color: #1565c0;">${sortedPages.length} Pages Referenced</strong>
+            <span style="color: #666; margin-left: 10px;">Shows which questions cite each page</span>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+                <tr style="background: #1E3A8A; color: white;">
+                    <th style="padding: 12px; text-align: center; border: 1px solid #ddd; width: 80px;">Page</th>
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Questions Referencing This Page</th>
+                    <th style="padding: 12px; text-align: center; border: 1px solid #ddd; width: 100px;">Count</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    sortedPages.forEach((page, idx) => {
+        const questionIds = pageMap[page];
+        html += `
+            <tr style="background: ${idx % 2 === 0 ? 'white' : '#f9fafb'};">
+                <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center; font-weight: 600; color: #1E3A8A;">${page}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb;">${questionIds.join(', ')}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">${questionIds.length}</td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table>';
+    document.getElementById('fv-pageIndexContent').innerHTML = html;
+}
+
+function renderFullViewFootnotesTab() {
+    if (allFootnotes.length === 0) {
+        document.getElementById('fv-footnotesContent').innerHTML = `
+            <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                <p style="font-size: 18px; margin-bottom: 10px;">No footnotes available</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div style="margin-bottom: 20px; padding: 15px; background: #E8EEF7; border-radius: 8px;">
+            <strong style="color: #1E3A8A;">${allFootnotes.length} Footnotes</strong>
+            <span style="color: #6b7280; margin-left: 10px;">Additional context and citations</span>
+        </div>
+        <ol style="margin: 0; padding-left: 25px; line-height: 1.8;">
+    `;
+
+    allFootnotes.forEach(fn => {
+        html += `<li style="margin-bottom: 12px; padding: 10px; background: #fffaeb; border-radius: 4px; border-left: 3px solid #ff9800;">${fn}</li>`;
+    });
+
+    html += '</ol>';
+    document.getElementById('fv-footnotesContent').innerHTML = html;
+}
+
     </script>
 
     <!-- Question Manager Modal -->
@@ -2358,6 +2736,55 @@ function closeAnswerDetailModal() {
             </div>
         </div>
     </div>
+
+    <!-- Full View Modal - Comprehensive results view -->
+    <div id="fullViewModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center;" onclick="if(event.target === this) closeFullViewModal();">
+        <div style="background: white; width: 95%; max-width: 1400px; max-height: 90vh; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0; font-size: 1.3em;">Analysis Results</h2>
+                <button onclick="closeFullViewModal()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px;">Close</button>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div style="border-bottom: 2px solid #e5e7eb; background: #f9fafb;">
+                <div style="display: flex; gap: 0;">
+                    <button class="fv-tab-btn active" onclick="switchFullViewTab('summary')" style="padding: 15px 25px; background: white; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #1E3A8A; border-bottom: 3px solid #1E3A8A;">Summary</button>
+                    <button class="fv-tab-btn" onclick="switchFullViewTab('detailed')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent;">Detailed Results</button>
+                    <button class="fv-tab-btn" onclick="switchFullViewTab('bySection')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent;">By Section</button>
+                    <button class="fv-tab-btn" id="fullViewFragmentsTabBtn" onclick="switchFullViewTab('fragments')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">All Fragments</button>
+                    <button class="fv-tab-btn" onclick="switchFullViewTab('footnotes')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent;">Footnotes</button>
+                    <button class="fv-tab-btn" id="fullViewPageIndexTabBtn" onclick="switchFullViewTab('pageIndex')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">Page Index</button>
+                </div>
+            </div>
+
+            <!-- Tab Content -->
+            <div style="flex: 1; overflow-y: auto;">
+                <div id="fv-tab-summary" class="fv-tab-content active" style="display: block; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-summaryContent"></div>
+                </div>
+                <div id="fv-tab-detailed" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-detailedContent"></div>
+                </div>
+                <div id="fv-tab-bySection" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-bySectionContent"></div>
+                </div>
+                <div id="fv-tab-fragments" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-fragmentsContent"></div>
+                </div>
+                <div id="fv-tab-footnotes" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-footnotesContent"></div>
+                </div>
+                <div id="fv-tab-pageIndex" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-pageIndexContent"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .fv-tab-btn:hover { background: #f3f4f6; color: #1E3A8A; }
+        .fv-tab-btn.active { background: white; color: #1E3A8A; border-bottom-color: #1E3A8A; }
+    </style>
 
     <!-- About Modal -->
     <div id="aboutModal" class="about-modal">

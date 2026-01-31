@@ -445,6 +445,7 @@
                     <button class="tab-btn" onclick="switchTab('bySection')">By Section</button>
                     <button class="tab-btn" id="fragmentsTabBtn" style="display: none;" onclick="switchTab('fragments')">All Fragments</button>
                     <button class="tab-btn" onclick="switchTab('footnotes')">Footnotes</button>
+                    <button class="tab-btn" id="pageIndexTabBtn" style="display: none;" onclick="switchTab('pageIndex')">Page Index</button>
                 </div>
             </div>
 
@@ -463,6 +464,9 @@
             </div>
             <div id="tab-footnotes" class="tab-content">
                 <div id="footnotesContent"></div>
+            </div>
+            <div id="tab-pageIndex" class="tab-content">
+                <div id="pageIndexContent"></div>
             </div>
         </div>
     </div>
@@ -616,11 +620,13 @@
             const modalTitle = document.getElementById('modalTitle');
             if (mode === 'bestprep') {
                 modalTitle.innerHTML += ' <span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px;">BestPrep Mode</span>';
-                // Show Fragments tab for BestPrep mode
+                // Show Fragments and Page Index tabs for BestPrep mode
                 document.getElementById('fragmentsTabBtn').style.display = 'inline-block';
+                document.getElementById('pageIndexTabBtn').style.display = 'inline-block';
             } else {
-                // Hide Fragments tab for Bid/Spec mode
+                // Hide BestPrep-specific tabs for Bid/Spec mode
                 document.getElementById('fragmentsTabBtn').style.display = 'none';
+                document.getElementById('pageIndexTabBtn').style.display = 'none';
             }
 
             renderSummaryTab(data, sessionId, mode);
@@ -628,6 +634,7 @@
             renderBySectionTab(data, mode);
             if (mode === 'bestprep') {
                 renderFragmentsTab(data);
+                renderPageIndexTab(data);
             }
             renderFootnotesTab(data);
         }
@@ -698,6 +705,7 @@
             let confidenceCount = 0;
             let totalFragments = 0;
             let totalFootnotes = 0;
+            let allPages = new Set();
 
             sections.forEach(section => {
                 const questions = section.questions || [];
@@ -717,102 +725,168 @@
                     if (q.footnote_count) {
                         totalFootnotes += q.footnote_count;
                     }
+                    // Collect all pages
+                    if (q.page_citations) {
+                        q.page_citations.forEach(p => allPages.add(p));
+                    }
                 });
             });
 
             const answerRate = totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0;
             const avgConfidence = confidenceCount > 0 ? Math.round(totalConfidence / confidenceCount) : 'N/A';
-
-            // Extract key project requirements
-            const keyReqs = extractKeyRequirements(sections);
+            const avgFragsPerQ = answeredQuestions > 0 ? (totalFragments / answeredQuestions).toFixed(1) : '0';
+            const avgFootnotesPerQ = answeredQuestions > 0 ? (totalFootnotes / answeredQuestions).toFixed(1) : '0';
 
             let html = '';
 
-            // BestPrep mode banner
+            // Mode-specific banner and summary
             if (mode === 'bestprep') {
+                // BestPrep mode - Comprehensive analysis info (like Excel Summary sheet)
                 html += `
                     <div style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
                         <h3 style="margin: 0 0 8px 0; font-size: 16px;">BestPrep/TestPrep Analysis</h3>
                         <p style="margin: 0; opacity: 0.9; font-size: 13px;">Exhaustive analysis mode - all answer fragments preserved with full provenance</p>
                     </div>
+
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Info</h3>
+                    <table class="results-table" style="margin-bottom: 25px;">
+                        <tbody>
+                            <tr>
+                                <td style="width: 220px; font-weight: 600; background: #f9fafb;">Analysis Mode</td>
+                                <td><span style="background: #22c55e; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px;">BestPrep</span></td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Generated</td>
+                                <td>${new Date().toLocaleString()}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Processing Time</td>
+                                <td>${stats.processing_time ? stats.processing_time.toFixed(1) + 's' : 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Est. Cost</td>
+                                <td>${stats.estimated_cost || 'N/A'}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Document Statistics</h3>
+                    <table class="results-table" style="margin-bottom: 25px;">
+                        <tbody>
+                            <tr>
+                                <td style="width: 220px; font-weight: 600; background: #f9fafb;">Total Pages Referenced</td>
+                                <td>${allPages.size}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Page Range</td>
+                                <td>${allPages.size > 0 ? Math.min(...allPages) + ' - ' + Math.max(...allPages) : 'N/A'}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Question & Answer Statistics</h3>
+                    <table class="results-table" style="margin-bottom: 25px;">
+                        <tbody>
+                            <tr>
+                                <td style="width: 220px; font-weight: 600; background: #f9fafb;">Total Questions</td>
+                                <td>${totalQuestions}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Questions Answered</td>
+                                <td style="color: #22c55e; font-weight: 600;">${answeredQuestions}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Answer Rate</td>
+                                <td>${answerRate}%</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Average Confidence</td>
+                                <td>${typeof avgConfidence === 'number' ? avgConfidence + '%' : avgConfidence}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="margin: 0 0 15px 0; color: #e65100; font-size: 16px;">Fragment & Citation Statistics</h3>
+                    <table class="results-table" style="margin-bottom: 25px;">
+                        <tbody>
+                            <tr>
+                                <td style="width: 220px; font-weight: 600; background: #fff3e0; color: #e65100;">Total Fragments Collected</td>
+                                <td style="font-weight: 600; color: #e65100;">${totalFragments || bestprepData.total_fragments || 0}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Total Citations/Footnotes</td>
+                                <td style="font-weight: 600; color: #e65100;">${totalFootnotes || bestprepData.total_footnotes || 0}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Avg Fragments/Question</td>
+                                <td style="font-weight: 600; color: #e65100;">${avgFragsPerQ}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Avg Citations/Question</td>
+                                <td style="font-weight: 600; color: #e65100;">${avgFootnotesPerQ}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 `;
+            } else {
+                // Bid/Spec mode - Key Project Requirements
+                const keyReqs = extractKeyRequirements(sections);
+
+                html += `
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
+                    <table class="results-table" style="margin-bottom: 25px;">
+                        <tbody>
+                            <tr>
+                                <td style="width: 200px; font-weight: 600; background: #f9fafb;">Analysis Mode</td>
+                                <td><span style="background: #3b82f6; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px;">Bid/Spec</span></td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Total Questions</td>
+                                <td>${totalQuestions}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Questions Answered</td>
+                                <td style="color: #22c55e; font-weight: 600;">${answeredQuestions}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Answer Rate</td>
+                                <td>${answerRate}%</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Average Confidence</td>
+                                <td>${typeof avgConfidence === 'number' ? avgConfidence + '%' : avgConfidence}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Processing Time</td>
+                                <td>${stats.processing_time ? stats.processing_time.toFixed(1) + 's' : 'N/A'}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 600; background: #f9fafb;">Est. Cost</td>
+                                <td>${stats.estimated_cost || 'N/A'}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Key Project Requirements</h3>
+                    <table class="results-table">
+                        <tbody>
+                `;
+
+                // Add key requirements rows
+                const reqOrder = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline', 'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance'];
+                reqOrder.forEach(reqName => {
+                    const value = keyReqs[reqName] || '<em style="color: #999;">Not found in document</em>';
+                    html += `
+                        <tr>
+                            <td style="width: 200px; font-weight: 600; background: #f9fafb;">${reqName}</td>
+                            <td>${value}</td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table>';
             }
 
-            html += `
-                <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
-                <table class="results-table" style="margin-bottom: 25px;">
-                    <tbody>
-                        <tr>
-                            <td style="width: 200px; font-weight: 600; background: #f9fafb;">Analysis Mode</td>
-                            <td><span style="background: ${mode === 'bestprep' ? '#22c55e' : '#3b82f6'}; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px;">${mode === 'bestprep' ? 'BestPrep' : 'Bid/Spec'}</span></td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 600; background: #f9fafb;">Total Questions</td>
-                            <td>${totalQuestions}</td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 600; background: #f9fafb;">Questions Answered</td>
-                            <td style="color: #22c55e; font-weight: 600;">${answeredQuestions}</td>
-                        </tr>
-            `;
-
-            // BestPrep-specific stats
-            if (mode === 'bestprep') {
-                const synthStats = bestprepData.synthesis_stats || {};
-                html += `
-                        <tr>
-                            <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Total Fragments Collected</td>
-                            <td style="font-weight: 600; color: #e65100;">${totalFragments || bestprepData.total_fragments || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Total Citations</td>
-                            <td style="font-weight: 600; color: #e65100;">${totalFootnotes || bestprepData.total_footnotes || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 600; background: #e8f5e9; color: #2e7d32;">Synthesized Answers</td>
-                            <td style="font-weight: 600; color: #2e7d32;">${synthStats.synthesized_count || 'Pending'}</td>
-                        </tr>
-                `;
-            }
-
-            html += `
-                        <tr>
-                            <td style="font-weight: 600; background: #f9fafb;">Answer Rate</td>
-                            <td>${answerRate}%</td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 600; background: #f9fafb;">Average Confidence</td>
-                            <td>${typeof avgConfidence === 'number' ? avgConfidence + '%' : avgConfidence}</td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 600; background: #f9fafb;">Processing Time</td>
-                            <td>${stats.processing_time ? stats.processing_time.toFixed(1) + 's' : 'N/A'}</td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 600; background: #f9fafb;">Est. Cost</td>
-                            <td>${stats.estimated_cost || 'N/A'}</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Key Project Requirements</h3>
-                <table class="results-table">
-                    <tbody>
-            `;
-
-            // Add key requirements rows
-            const reqOrder = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline', 'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance'];
-            reqOrder.forEach(reqName => {
-                const value = keyReqs[reqName] || '<em style="color: #999;">Not found in document</em>';
-                html += `
-                    <tr>
-                        <td style="width: 200px; font-weight: 600; background: #f9fafb;">${reqName}</td>
-                        <td>${value}</td>
-                    </tr>
-                `;
-            });
-
-            html += '</tbody></table>';
             html += `<p style="margin-top: 20px; color: #6b7280; font-size: 12px;">Session ID: ${sessionId}</p>`;
 
             document.getElementById('summaryContent').innerHTML = html;
@@ -1009,6 +1083,68 @@
 
             html += '</tbody></table>';
             document.getElementById('fragmentsContent').innerHTML = html;
+        }
+
+        function renderPageIndexTab(data) {
+            const sections = data.result?.sections || [];
+
+            // Build page -> questions mapping
+            const pageMap = {};
+            sections.forEach(section => {
+                (section.questions || []).forEach(q => {
+                    const pages = q.page_citations || [];
+                    pages.forEach(page => {
+                        if (!pageMap[page]) {
+                            pageMap[page] = [];
+                        }
+                        if (!pageMap[page].includes(q.question_id)) {
+                            pageMap[page].push(q.question_id);
+                        }
+                    });
+                });
+            });
+
+            const sortedPages = Object.keys(pageMap).map(Number).sort((a, b) => a - b);
+
+            if (sortedPages.length === 0) {
+                document.getElementById('pageIndexContent').innerHTML = `
+                    <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                        <p style="font-size: 18px; margin-bottom: 10px;">No page references found</p>
+                        <p style="font-size: 14px;">Page index is built from question citations during analysis.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px;">
+                    <strong style="color: #1565c0;">${sortedPages.length} Pages Referenced</strong>
+                    <span style="color: #666; margin-left: 10px;">Shows which questions cite each page in the document</span>
+                </div>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">Page</th>
+                            <th>Questions Referencing This Page</th>
+                            <th style="width: 100px;">Reference Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            sortedPages.forEach(page => {
+                const questionIds = pageMap[page];
+                html += `
+                    <tr>
+                        <td style="text-align: center; font-weight: 600; color: #1E3A8A;">${page}</td>
+                        <td>${questionIds.join(', ')}</td>
+                        <td style="text-align: center;">${questionIds.length}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            document.getElementById('pageIndexContent').innerHTML = html;
         }
 
         function renderFootnotesTab(data) {

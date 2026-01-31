@@ -917,13 +917,23 @@ def get_results(session_id):
         result = session_data['result']
         orchestrator = session_data['orchestrator']
 
-        parsed_config = config_loader.load_from_json(session_data['config_path'])
+        # CRITICAL: Use cached_config from orchestrator (filtered to analyzed sections/questions)
+        # NOT the full config from JSON file
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            # Fallback to loading from file if cached_config not available
+            parsed_config = config_loader.load_from_json(session_data['config_path'])
+
         browser_output = orchestrator.get_browser_output(result, parsed_config)
         legacy_result = _transform_to_legacy_format(browser_output)
+
+        # Get mode for response
+        mode = session_data.get('mode', 'bid_spec')
 
         return jsonify({
             'success': True,
             'result': legacy_result,
+            'mode': mode,
             'statistics': {
                 'processing_time': result.processing_time_seconds,
                 'total_tokens': result.total_tokens,
@@ -938,13 +948,20 @@ def get_results(session_id):
         result = session_data['result']
         orchestrator = session_data['orchestrator']
 
-        parsed_config = config_loader.load_from_json(session_data['config_path'])
+        # CRITICAL: Use cached_config from orchestrator (filtered to analyzed sections/questions)
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            parsed_config = config_loader.load_from_json(session_data['config_path'])
+
         browser_output = orchestrator.get_browser_output(result, parsed_config)
         legacy_result = _transform_to_legacy_format(browser_output)
+
+        mode = session_data.get('mode', 'bid_spec')
 
         return jsonify({
             'success': True,
             'result': legacy_result,
+            'mode': mode,
             'statistics': {
                 'processing_time': result.processing_time_seconds,
                 'total_tokens': result.total_tokens,
@@ -985,7 +1002,10 @@ def get_results(session_id):
         else:
             accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
 
-        parsed_config = config_loader.load_from_json(config_path)
+        # CRITICAL: Use cached_config (filtered) instead of full config from JSON
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            parsed_config = config_loader.load_from_json(config_path)
 
         # Build partial browser output
         partial_browser_output = orchestrator._build_partial_browser_output(
@@ -1041,7 +1061,10 @@ def get_results(session_id):
         else:
             accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
 
-        parsed_config = config_loader.load_from_json(config_path)
+        # CRITICAL: Use cached_config (filtered) instead of full config from JSON
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            parsed_config = config_loader.load_from_json(config_path)
 
         # Build partial browser output
         partial_browser_output = orchestrator._build_partial_browser_output(
@@ -1205,40 +1228,62 @@ def export_bestprep_excel(session_id):
     """Generate comprehensive BestPrep Excel report with all fragments and footnotes"""
     from services.hotdog.mode_config import AnalysisMode
 
-    # Find session in completed or partial analyses
+    logger.info(f"BestPrep Excel export requested for session: {session_id}")
+
+    # Find session in completed, partial, active, or legacy analyses
     session_data = None
     is_partial = False
+    session_type = None
 
     with session_lock:
         if session_id in completed_analyses:
             session_data = completed_analyses[session_id]
+            session_type = 'completed'
         elif session_id in partial_analyses:
             session_data = partial_analyses[session_id]
             is_partial = True
+            session_type = 'partial'
         elif session_id in active_analyses:
             session_data = active_analyses[session_id]
             is_partial = True
+            session_type = 'active'
+        elif session_id in analysis_results:
+            session_data = analysis_results[session_id]
+            session_type = 'legacy'
 
     if not session_data:
+        logger.error(f"BestPrep export failed: Session not found: {session_id}")
         return jsonify({'success': False, 'error': 'Session not found'}), 404
 
-    orchestrator = session_data['orchestrator']
+    logger.info(f"Found session in {session_type} analyses")
+
+    orchestrator = session_data.get('orchestrator')
+    if not orchestrator:
+        logger.error(f"BestPrep export failed: No orchestrator in session data")
+        return jsonify({'success': False, 'error': 'Session data incomplete - no orchestrator'}), 400
 
     # Verify this is a BestPrep analysis
-    if orchestrator.mode != AnalysisMode.BESTPREP:
-        return jsonify({
-            'success': False,
-            'error': 'Not a BestPrep analysis. Use standard Excel export instead.'
-        }), 400
+    try:
+        if orchestrator.mode != AnalysisMode.BESTPREP:
+            logger.warning(f"Not a BestPrep analysis - mode is: {orchestrator.mode}")
+            return jsonify({
+                'success': False,
+                'error': 'Not a BestPrep analysis. Use standard Excel export instead.'
+            }), 400
+    except Exception as e:
+        logger.error(f"Error checking mode: {e}")
+        return jsonify({'success': False, 'error': f'Could not determine analysis mode: {e}'}), 400
 
     if not orchestrator.bestprep_accumulator:
-        return jsonify({'success': False, 'error': 'No BestPrep accumulator data available'}), 400
+        logger.error(f"BestPrep export failed: No accumulator data")
+        return jsonify({'success': False, 'error': 'No BestPrep accumulator data available. Analysis may not have collected any answers yet.'}), 400
 
     try:
         from services.bestprep_excel import BestPrepExcelGenerator
 
         # Get accumulator data
         accumulator_data = orchestrator.bestprep_accumulator.to_dict()
+        logger.info(f"Accumulator data retrieved: {len(accumulator_data.get('cumulative_answers', {}))} questions")
 
         # Build result dict for generator
         result_dict = {
@@ -1262,6 +1307,8 @@ def export_bestprep_excel(session_id):
         date_str = datetime.now().strftime('%Y-%m-%d')
         partial_suffix = '_PARTIAL' if is_partial else ''
         filename = f'{doc_name}_BestPrep_{date_str}{partial_suffix}.xlsx'
+
+        logger.info(f"BestPrep Excel export successful: {filename}")
 
         return send_file(
             excel_file,
