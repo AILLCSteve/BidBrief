@@ -443,6 +443,7 @@
                     <button class="tab-btn active" onclick="switchTab('summary')">Summary</button>
                     <button class="tab-btn" onclick="switchTab('detailed')">Detailed Results</button>
                     <button class="tab-btn" onclick="switchTab('bySection')">By Section</button>
+                    <button class="tab-btn" id="fragmentsTabBtn" style="display: none;" onclick="switchTab('fragments')">All Fragments</button>
                     <button class="tab-btn" onclick="switchTab('footnotes')">Footnotes</button>
                 </div>
             </div>
@@ -456,6 +457,9 @@
             </div>
             <div id="tab-bySection" class="tab-content">
                 <div id="bySectionContent"></div>
+            </div>
+            <div id="tab-fragments" class="tab-content">
+                <div id="fragmentsContent"></div>
             </div>
             <div id="tab-footnotes" class="tab-content">
                 <div id="footnotesContent"></div>
@@ -485,6 +489,7 @@
 
             let html = '<table><thead><tr>';
             html += '<th>PDF File</th>';
+            html += '<th>Mode</th>';
             html += '<th>Status</th>';
             html += '<th>Questions</th>';
             html += '<th>Pages</th>';
@@ -495,8 +500,14 @@
             html += '</tr></thead><tbody>';
 
             sessions.forEach(session => {
+                const mode = session.mode || 'bid_spec';
+                const modeBadge = mode === 'bestprep'
+                    ? '<span style="background: #22c55e; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px;">BestPrep</span>'
+                    : '<span style="background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px;">Bid/Spec</span>';
+
                 html += '<tr>';
                 html += `<td style="font-weight: 600; color: #1E3A8A;" title="${session.pdf_path || 'N/A'}">${session.pdf_filename || 'Unknown.pdf'}</td>`;
+                html += `<td>${modeBadge}</td>`;
                 html += `<td><span class="status-badge status-${statusClass}">${session.status}</span></td>`;
                 html += `<td>${session.questions_answered || 'N/A'}</td>`;
                 html += `<td>${session.total_pages || 'N/A'}</td>`;
@@ -505,7 +516,7 @@
                 html += `<td>${formatDateTime(session.completed_at || session.stopped_at)}</td>`;
                 html += `<td>
                     <button class="action-btn" onclick="viewAnalysis('${session.session_id}', '${session.pdf_filename || 'Unknown.pdf'}')">View</button>
-                    <button class="action-btn export" onclick="exportAnalysis('${session.session_id}')">Excel Report Package</button>
+                    <button class="action-btn export" onclick="exportAnalysis('${session.session_id}', '${mode}')">Export</button>
                 </td>`;
                 html += '</tr>';
             });
@@ -604,12 +615,20 @@
             // Add mode indicator to modal title
             const modalTitle = document.getElementById('modalTitle');
             if (mode === 'bestprep') {
-                modalTitle.innerHTML += ' <span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px;">BestPrep</span>';
+                modalTitle.innerHTML += ' <span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px;">BestPrep Mode</span>';
+                // Show Fragments tab for BestPrep mode
+                document.getElementById('fragmentsTabBtn').style.display = 'inline-block';
+            } else {
+                // Hide Fragments tab for Bid/Spec mode
+                document.getElementById('fragmentsTabBtn').style.display = 'none';
             }
 
-            renderSummaryTab(data, sessionId);
-            renderDetailedTab(data);
-            renderBySectionTab(data);
+            renderSummaryTab(data, sessionId, mode);
+            renderDetailedTab(data, mode);
+            renderBySectionTab(data, mode);
+            if (mode === 'bestprep') {
+                renderFragmentsTab(data);
+            }
             renderFootnotesTab(data);
         }
 
@@ -668,14 +687,17 @@
             return requirements;
         }
 
-        function renderSummaryTab(data, sessionId) {
+        function renderSummaryTab(data, sessionId, mode) {
             const stats = data.statistics || {};
             const sections = data.result?.sections || [];
+            const bestprepData = data.bestprep_data || {};  // BestPrep-specific data
 
             let totalQuestions = 0;
             let answeredQuestions = 0;
             let totalConfidence = 0;
             let confidenceCount = 0;
+            let totalFragments = 0;
+            let totalFootnotes = 0;
 
             sections.forEach(section => {
                 const questions = section.questions || [];
@@ -688,6 +710,13 @@
                             confidenceCount++;
                         }
                     }
+                    // Count fragments for BestPrep
+                    if (q.fragment_count) {
+                        totalFragments += q.fragment_count;
+                    }
+                    if (q.footnote_count) {
+                        totalFootnotes += q.footnote_count;
+                    }
                 });
             });
 
@@ -697,18 +726,56 @@
             // Extract key project requirements
             const keyReqs = extractKeyRequirements(sections);
 
-            let html = `
+            let html = '';
+
+            // BestPrep mode banner
+            if (mode === 'bestprep') {
+                html += `
+                    <div style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h3 style="margin: 0 0 8px 0; font-size: 16px;">BestPrep/TestPrep Analysis</h3>
+                        <p style="margin: 0; opacity: 0.9; font-size: 13px;">Exhaustive analysis mode - all answer fragments preserved with full provenance</p>
+                    </div>
+                `;
+            }
+
+            html += `
                 <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
                 <table class="results-table" style="margin-bottom: 25px;">
                     <tbody>
                         <tr>
-                            <td style="width: 200px; font-weight: 600; background: #f9fafb;">Total Questions</td>
+                            <td style="width: 200px; font-weight: 600; background: #f9fafb;">Analysis Mode</td>
+                            <td><span style="background: ${mode === 'bestprep' ? '#22c55e' : '#3b82f6'}; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px;">${mode === 'bestprep' ? 'BestPrep' : 'Bid/Spec'}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600; background: #f9fafb;">Total Questions</td>
                             <td>${totalQuestions}</td>
                         </tr>
                         <tr>
                             <td style="font-weight: 600; background: #f9fafb;">Questions Answered</td>
                             <td style="color: #22c55e; font-weight: 600;">${answeredQuestions}</td>
                         </tr>
+            `;
+
+            // BestPrep-specific stats
+            if (mode === 'bestprep') {
+                const synthStats = bestprepData.synthesis_stats || {};
+                html += `
+                        <tr>
+                            <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Total Fragments Collected</td>
+                            <td style="font-weight: 600; color: #e65100;">${totalFragments || bestprepData.total_fragments || 'N/A'}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Total Citations</td>
+                            <td style="font-weight: 600; color: #e65100;">${totalFootnotes || bestprepData.total_footnotes || 'N/A'}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600; background: #e8f5e9; color: #2e7d32;">Synthesized Answers</td>
+                            <td style="font-weight: 600; color: #2e7d32;">${synthStats.synthesized_count || 'Pending'}</td>
+                        </tr>
+                `;
+            }
+
+            html += `
                         <tr>
                             <td style="font-weight: 600; background: #f9fafb;">Answer Rate</td>
                             <td>${answerRate}%</td>
@@ -751,19 +818,23 @@
             document.getElementById('summaryContent').innerHTML = html;
         }
 
-        function renderDetailedTab(data) {
+        function renderDetailedTab(data, mode) {
             const sections = data.result?.sections || [];
+
+            // BestPrep has additional column for fragment count
+            const isBestPrep = mode === 'bestprep';
 
             let html = `
                 <table class="results-table">
                     <thead>
                         <tr>
                             <th style="width: 40px;">#</th>
-                            <th style="width: 180px;">Section</th>
-                            <th style="width: 250px;">Question</th>
-                            <th>Answer</th>
-                            <th style="width: 80px;">Pages</th>
-                            <th style="width: 70px;">Status</th>
+                            <th style="width: 150px;">Section</th>
+                            <th style="width: 220px;">Question</th>
+                            <th>Answer${isBestPrep ? ' (Synthesized)' : ''}</th>
+                            <th style="width: 100px;">Pages</th>
+                            ${isBestPrep ? '<th style="width: 70px;">Frags</th>' : ''}
+                            <th style="width: 60px;">Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -774,14 +845,22 @@
                 (section.questions || []).forEach(q => {
                     const hasAnswer = q.answer && q.answer.trim();
                     const pages = (q.page_citations || []).join(', ') || '-';
+                    const fragmentCount = q.fragment_count || 0;
+
+                    // For BestPrep, show synthesized answer if available, otherwise show combined fragments
+                    let displayAnswer = hasAnswer ? q.answer : '<em style="color: #999;">Not found in document</em>';
+                    if (isBestPrep && q.synthesized_answer) {
+                        displayAnswer = q.synthesized_answer;
+                    }
 
                     html += `
                         <tr>
                             <td style="text-align: center;">${num}</td>
                             <td>${section.section_name}</td>
                             <td>${q.question}</td>
-                            <td class="answer-cell">${hasAnswer ? q.answer : '<em style="color: #999;">Not found in document</em>'}</td>
+                            <td class="answer-cell">${displayAnswer}</td>
                             <td class="pages-cell">${pages}</td>
+                            ${isBestPrep ? `<td style="text-align: center;"><span style="background: ${fragmentCount > 1 ? '#ff9800' : '#e0e0e0'}; color: ${fragmentCount > 1 ? 'white' : '#666'}; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${fragmentCount}</span></td>` : ''}
                             <td class="${hasAnswer ? 'status-yes' : 'status-no'}">${hasAnswer ? 'Yes' : 'No'}</td>
                         </tr>
                     `;
@@ -790,22 +869,38 @@
             });
 
             html += '</tbody></table>';
+
+            // BestPrep legend
+            if (isBestPrep) {
+                html += `
+                    <div style="margin-top: 15px; padding: 12px; background: #fff3e0; border-radius: 6px; font-size: 12px; color: #e65100;">
+                        <strong>BestPrep Mode:</strong> "Frags" shows how many answer fragments were found across all document windows.
+                        Multiple fragments indicate the answer was found in multiple locations. All fragments are preserved in the "All Fragments" tab.
+                    </div>
+                `;
+            }
+
             document.getElementById('detailedContent').innerHTML = html;
         }
 
-        function renderBySectionTab(data) {
+        function renderBySectionTab(data, mode) {
             const sections = data.result?.sections || [];
+            const isBestPrep = mode === 'bestprep';
             let html = '';
 
             sections.forEach(section => {
                 const questions = section.questions || [];
                 const answered = questions.filter(q => q.answer && q.answer.trim()).length;
+                const totalFrags = questions.reduce((sum, q) => sum + (q.fragment_count || 0), 0);
 
                 html += `
                     <div style="margin-bottom: 30px;">
                         <h3 style="color: #1E3A8A; margin-bottom: 15px; padding: 10px 15px; background: #e8eef7; border-radius: 6px;">
                             ${section.section_name}
-                            <span style="float: right; font-size: 14px; color: #5B7FCC;">${answered}/${questions.length} answered</span>
+                            <span style="float: right; font-size: 14px; color: #5B7FCC;">
+                                ${answered}/${questions.length} answered
+                                ${isBestPrep ? `<span style="margin-left: 10px; background: #ff9800; color: white; padding: 2px 8px; border-radius: 4px;">${totalFrags} frags</span>` : ''}
+                            </span>
                         </h3>
                         <table class="results-table">
                             <thead>
@@ -813,7 +908,8 @@
                                     <th style="width: 40px;">#</th>
                                     <th>Question</th>
                                     <th>Answer</th>
-                                    <th style="width: 80px;">Pages</th>
+                                    <th style="width: 100px;">Pages</th>
+                                    ${isBestPrep ? '<th style="width: 60px;">Frags</th>' : ''}
                                     <th style="width: 60px;">Status</th>
                                 </tr>
                             </thead>
@@ -823,6 +919,7 @@
                 questions.forEach((q, idx) => {
                     const hasAnswer = q.answer && q.answer.trim();
                     const pages = (q.page_citations || []).join(', ') || '-';
+                    const fragCount = q.fragment_count || 0;
 
                     html += `
                         <tr>
@@ -830,6 +927,7 @@
                             <td>${q.question}</td>
                             <td class="answer-cell">${hasAnswer ? q.answer : '<em style="color: #999;">Not found</em>'}</td>
                             <td class="pages-cell">${pages}</td>
+                            ${isBestPrep ? `<td style="text-align: center;"><span style="background: ${fragCount > 1 ? '#ff9800' : '#e0e0e0'}; color: ${fragCount > 1 ? 'white' : '#666'}; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${fragCount}</span></td>` : ''}
                             <td class="${hasAnswer ? 'status-yes' : 'status-no'}">${hasAnswer ? 'Yes' : 'No'}</td>
                         </tr>
                     `;
@@ -839,6 +937,78 @@
             });
 
             document.getElementById('bySectionContent').innerHTML = html;
+        }
+
+        function renderFragmentsTab(data) {
+            const sections = data.result?.sections || [];
+            const allFragments = [];
+
+            // Collect all fragments from all questions
+            sections.forEach(section => {
+                (section.questions || []).forEach(q => {
+                    if (q.fragments && q.fragments.length > 0) {
+                        q.fragments.forEach(frag => {
+                            allFragments.push({
+                                section: section.section_name,
+                                question: q.question,
+                                question_id: q.question_id,
+                                ...frag
+                            });
+                        });
+                    }
+                });
+            });
+
+            if (allFragments.length === 0) {
+                document.getElementById('fragmentsContent').innerHTML = `
+                    <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                        <p style="font-size: 18px; margin-bottom: 10px;">No fragment data available</p>
+                        <p style="font-size: 14px;">Fragment data is collected during BestPrep analysis. This may be a legacy analysis or fragment data wasn't preserved.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div style="margin-bottom: 20px; padding: 15px; background: #fff3e0; border-radius: 8px;">
+                    <strong style="color: #e65100;">${allFragments.length} Answer Fragments</strong>
+                    <span style="color: #666; margin-left: 10px;">All answer fragments preserved with full provenance - nothing discarded</span>
+                </div>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">Frag ID</th>
+                            <th style="width: 130px;">Section</th>
+                            <th style="width: 180px;">Question</th>
+                            <th>Fragment Text</th>
+                            <th style="width: 80px;">Pages</th>
+                            <th style="width: 60px;">Window</th>
+                            <th style="width: 70px;">Conf.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            allFragments.forEach(frag => {
+                const pages = (frag.pages || []).join(', ') || '-';
+                const shortQuestion = frag.question.length > 50 ? frag.question.substring(0, 50) + '...' : frag.question;
+                const confidence = frag.confidence ? Math.round(frag.confidence * 100) + '%' : '-';
+
+                html += `
+                    <tr>
+                        <td style="font-family: monospace; font-size: 10px; color: #5B7FCC;">${frag.fragment_id || '-'}</td>
+                        <td>${frag.section}</td>
+                        <td title="${frag.question}">${shortQuestion}</td>
+                        <td class="answer-cell">${frag.text || '-'}</td>
+                        <td class="pages-cell">${pages}</td>
+                        <td style="text-align: center;">${frag.window_index !== undefined ? frag.window_index : '-'}</td>
+                        <td style="text-align: center; font-weight: 600; color: ${frag.confidence >= 0.8 ? '#22c55e' : frag.confidence >= 0.5 ? '#f59e0b' : '#ef4444'};">${confidence}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            document.getElementById('fragmentsContent').innerHTML = html;
         }
 
         function renderFootnotesTab(data) {
@@ -908,8 +1078,13 @@
             document.getElementById('footnotesContent').innerHTML = html;
         }
 
-        async function exportAnalysis(sessionId) {
-            window.open(`/api/export/excel-dashboard/${sessionId}`, '_blank');
+        async function exportAnalysis(sessionId, mode) {
+            // Use appropriate export endpoint based on mode
+            if (mode === 'bestprep') {
+                window.open(`/api/export/bestprep-excel/${sessionId}`, '_blank');
+            } else {
+                window.open(`/api/export/excel-dashboard/${sessionId}`, '_blank');
+            }
         }
 
         function closeModal() {

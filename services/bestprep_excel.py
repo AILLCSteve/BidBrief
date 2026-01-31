@@ -2,10 +2,33 @@
 BestPrep Excel Export - Comprehensive answer format with all fragments and footnotes.
 """
 import io
+import re
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+
+
+def sanitize_for_excel(text):
+    """
+    Remove or replace characters that are illegal in Excel worksheet cells.
+    Excel doesn't allow control characters (0x00-0x1F except tab, newline, carriage return).
+    """
+    if not text:
+        return text
+    if not isinstance(text, str):
+        return str(text)
+
+    # Remove illegal XML characters (control chars except tab, newline, carriage return)
+    # These cause "cannot be used in worksheets" errors
+    illegal_pattern = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
+    cleaned = illegal_pattern.sub('', text)
+
+    # Also replace other problematic characters
+    # \u001f is Unit Separator - replace with space
+    cleaned = cleaned.replace('\u001f', ' ')
+
+    return cleaned
 
 
 class BestPrepExcelGenerator:
@@ -84,7 +107,7 @@ class BestPrepExcelGenerator:
         row = 2
         for qid, ca_data in self.accumulator.get('cumulative_answers', {}).items():
             ws.cell(row, 1, row - 1)
-            ws.cell(row, 2, ca_data.get('question_text', ''))
+            ws.cell(row, 2, sanitize_for_excel(ca_data.get('question_text', '')))
             ws.cell(row, 2).alignment = Alignment(wrap_text=True, vertical='top')
 
             # Use synthesized answer if available, else concatenate fragments
@@ -92,9 +115,11 @@ class BestPrepExcelGenerator:
             if not synthesized:
                 fragments = ca_data.get('fragments', [])
                 if fragments:
-                    synthesized = "\n\n---\n\n".join([f.get('text', '') for f in fragments])
+                    synthesized = "\n\n---\n\n".join([sanitize_for_excel(f.get('text', '')) for f in fragments])
                 else:
                     synthesized = "No answer found"
+            else:
+                synthesized = sanitize_for_excel(synthesized)
 
             ws.cell(row, 3, synthesized)
             ws.cell(row, 3).alignment = Alignment(wrap_text=True, vertical='top')
@@ -129,8 +154,8 @@ class BestPrepExcelGenerator:
                 ws.cell(row, 3, frag.get('window_index', 0))
                 ws.cell(row, 4, ', '.join(map(str, frag.get('pages', []))))
                 ws.cell(row, 5, f"{frag.get('confidence', 0):.0%}")
-                ws.cell(row, 6, frag.get('expert_name', ''))
-                ws.cell(row, 7, frag.get('text', ''))
+                ws.cell(row, 6, sanitize_for_excel(frag.get('expert_name', '')))
+                ws.cell(row, 7, sanitize_for_excel(frag.get('text', '')))
                 ws.cell(row, 7).alignment = Alignment(wrap_text=True, vertical='top')
                 row += 1
 
@@ -153,7 +178,7 @@ class BestPrepExcelGenerator:
                 ws.cell(row, 1, fn.get('footnote_id', ''))
                 ws.cell(row, 2, qid)
                 ws.cell(row, 3, fn.get('page', 0))
-                ws.cell(row, 4, fn.get('quote', ''))
+                ws.cell(row, 4, sanitize_for_excel(fn.get('quote', '')))
                 ws.cell(row, 4).alignment = Alignment(wrap_text=True, vertical='top')
                 ws.cell(row, 5, fn.get('window_index', 0))
                 ws.cell(row, 6, fn.get('fragment_id', ''))

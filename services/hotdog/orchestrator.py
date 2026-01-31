@@ -443,21 +443,45 @@ class HotdogOrchestrator:
                 )
 
                 # Build new_answers array with full details for frontend table
+                # MODE-AWARE: BestPrep sends CUMULATIVE data, Bid/Spec sends current window
                 new_answers = []
-                for answer in window_result.answers.values():
-                    question = config.question_map.get(answer.question_id)
-                    if question:
-                        section = config.section_map.get(question.section_id)
-                        new_answers.append({
-                            'question_id': answer.question_id,
-                            'question_text': question.text,
-                            'section_id': question.section_id,
-                            'section_name': section.name if section else question.section_id,
-                            'answer_text': answer.text,
-                            'pages': answer.pages,
-                            'confidence': answer.confidence,
-                            'footnote': answer.footnote  # NEW: Include footnote
-                        })
+                if self.mode == AnalysisMode.BESTPREP:
+                    # BestPrep: Send CUMULATIVE data for ALL questions with fragments
+                    for qid, ca in self.bestprep_accumulator.get_all_cumulative_answers().items():
+                        if ca.fragments:
+                            question = config.question_map.get(qid)
+                            if question:
+                                section = config.section_map.get(question.section_id)
+                                # Combine all fragment texts with separator
+                                combined_text = " [...] ".join([f.text for f in ca.fragments])
+                                new_answers.append({
+                                    'question_id': qid,
+                                    'question_text': question.text,
+                                    'section_id': question.section_id,
+                                    'section_name': section.name if section else question.section_id,
+                                    'answer_text': combined_text,  # All fragments combined
+                                    'pages': ca.all_pages,         # ALL pages across all fragments
+                                    'confidence': ca.highest_confidence,
+                                    'footnote': f"{ca.footnote_count} citations" if ca.footnote_count > 0 else "",
+                                    'fragment_count': ca.fragment_count,  # For display
+                                    'is_cumulative': True  # Flag for frontend
+                                })
+                else:
+                    # Bid/Spec: Send current window's answers (existing behavior)
+                    for answer in window_result.answers.values():
+                        question = config.question_map.get(answer.question_id)
+                        if question:
+                            section = config.section_map.get(question.section_id)
+                            new_answers.append({
+                                'question_id': answer.question_id,
+                                'question_text': question.text,
+                                'section_id': question.section_id,
+                                'section_name': section.name if section else question.section_id,
+                                'answer_text': answer.text,
+                                'pages': answer.pages,
+                                'confidence': answer.confidence,
+                                'footnote': answer.footnote
+                            })
 
                 self._emit_progress('window_complete', {
                     'window_num': window_idx,
@@ -529,20 +553,41 @@ class HotdogOrchestrator:
                             best_frag = max(ca.fragments, key=lambda f: f.confidence)
                             text = best_frag.text
 
+                        # Get all pages from fragments
+                        all_pages = ca.all_pages
+                        if not all_pages:
+                            # Fallback: collect pages from fragments
+                            all_pages = list(set(p for f in ca.fragments for p in f.pages))
+                            all_pages.sort()
+
+                        # CRITICAL: Answer model requires <PDF pg X> marker in text
+                        # Add citation if missing (synthesized answers may not have it)
+                        if '<PDF pg' not in text and all_pages:
+                            pages_str = ', '.join(map(str, all_pages))
+                            text = f"{text} <PDF pg {pages_str}>"
+
+                        # Skip if still no pages (shouldn't happen but safety check)
+                        if not all_pages:
+                            logger.warning(f"Skipping {qid}: no pages found in any fragments")
+                            continue
+
                         try:
                             answer = Answer(
                                 question_id=qid,
                                 text=text,
-                                pages=ca.all_pages,
+                                pages=all_pages,
                                 confidence=ca.highest_confidence,
                                 expert="Synthesis Agent" if ca.synthesized_answer else ca.fragments[0].expert_name,
                                 window=0,
                                 footnote=""
                             )
                             accumulated_answers[qid] = [answer]
-                        except ValueError:
-                            # Skip invalid answers
-                            pass
+                        except ValueError as e:
+                            # Log the error instead of silently skipping
+                            logger.error(f"Failed to create Answer for {qid}: {e}")
+                            logger.error(f"  text preview: {text[:100]}...")
+                            logger.error(f"  pages: {all_pages}")
+                            logger.error(f"  confidence: {ca.highest_confidence}")
             else:
                 accumulated_answers = self.layer4_accumulator.get_accumulated_answers()
 

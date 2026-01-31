@@ -429,6 +429,28 @@
             </div>
         </div>
 
+        <!-- Analysis Mode Selection (moved to top per user request) -->
+        <div class="section">
+            <h3>📊 Analysis Mode</h3>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #28a745; flex: 1; min-width: 280px;" id="modeLabel_bid_spec">
+                    <input type="radio" name="analysisMode" value="bid_spec" checked onchange="setAnalysisMode('bid_spec')" style="margin-top: 3px;">
+                    <div>
+                        <strong style="color: #1E3A8A;">Bid/Spec/RFP Mode</strong>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">Smart deduplication, merge similar answers. Best for construction bid specs and RFPs.</p>
+                    </div>
+                </label>
+                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #ddd; flex: 1; min-width: 280px;" id="modeLabel_bestprep">
+                    <input type="radio" name="analysisMode" value="bestprep" onchange="setAnalysisMode('bestprep')" style="margin-top: 3px;">
+                    <div>
+                        <strong style="color: #1E3A8A;">BestPrep/TestPrep Mode</strong>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">Exhaustive answers, never discard info, with synthesis. Best for textbooks and study materials.</p>
+                    </div>
+                </label>
+            </div>
+            <p id="modeHint" style="margin-top: 10px; color: #28a745; font-size: 13px;">Bid/Spec: Smart deduplication, optimized for specs</p>
+        </div>
+
         <!-- Question Configuration -->
         <div class="section">
             <h3>❓ Question Configuration</h3>
@@ -456,28 +478,6 @@
                     <strong>What are Context Guardrails?</strong> Global rules applied to ALL questions in the analysis.
                 </small>
             </div>
-        </div>
-
-        <!-- Analysis Mode Selection -->
-        <div class="section">
-            <h3>📊 Analysis Mode</h3>
-            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #28a745; flex: 1; min-width: 280px;" id="modeLabel_bid_spec">
-                    <input type="radio" name="analysisMode" value="bid_spec" checked onchange="setAnalysisMode('bid_spec')" style="margin-top: 3px;">
-                    <div>
-                        <strong style="color: #1E3A8A;">Bid/Spec/RFP Mode</strong>
-                        <p style="color: #666; font-size: 12px; margin-top: 5px;">Smart deduplication, merge similar answers. Best for construction bid specs and RFPs.</p>
-                    </div>
-                </label>
-                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #ddd; flex: 1; min-width: 280px;" id="modeLabel_bestprep">
-                    <input type="radio" name="analysisMode" value="bestprep" onchange="setAnalysisMode('bestprep')" style="margin-top: 3px;">
-                    <div>
-                        <strong style="color: #1E3A8A;">BestPrep/TestPrep Mode</strong>
-                        <p style="color: #666; font-size: 12px; margin-top: 5px;">Exhaustive answers, never discard info, with synthesis. Best for textbooks and study materials.</p>
-                    </div>
-                </label>
-            </div>
-            <p id="modeHint" style="margin-top: 10px; color: #28a745; font-size: 13px;">Bid/Spec: Smart deduplication, optimized for specs</p>
         </div>
 
         <!-- Analysis Controls -->
@@ -1505,11 +1505,14 @@ function initializeUnitaryTableState() {
         return;
     }
 
-    // Build master question registry with all questions
+    // Build master question registry with ONLY ENABLED questions from ENABLED sections
+    // This ensures statistics reflect actual questions being analyzed
     questionConfig.sections.filter(s => s.enabled).forEach(section => {
-        section.questions.forEach((q, idx) => {
-            allQuestions[q.id] = {  // FIX: Use q.id, not q.question_id
-                question_id: q.id,  // Store the ID in the object for easy access
+        // Filter to only enabled questions within the section
+        const enabledQuestions = section.questions.filter(q => q.enabled !== false);
+        enabledQuestions.forEach((q, idx) => {
+            allQuestions[q.id] = {
+                question_id: q.id,
                 section_name: section.section_name,
                 question_number: idx + 1,
                 question_text: q.text,
@@ -1532,11 +1535,22 @@ function updateUnitaryTableWithNewAnswers(newAnswers) {
 
     newAnswers.forEach(answer => {
         if (allQuestions[answer.question_id]) {
-            // Update question state
-            allQuestions[answer.question_id].status = 'found';
-            allQuestions[answer.question_id].answer = answer.answer_text;
-            allQuestions[answer.question_id].pages = answer.pages;
-            allQuestions[answer.question_id].footnote = answer.footnote;
+            const q = allQuestions[answer.question_id];
+            q.status = 'found';
+
+            // BestPrep mode with cumulative data from backend
+            if (currentAnalysisMode === 'bestprep' && answer.is_cumulative) {
+                // Data is already cumulative from backend - use directly
+                q.answer = answer.answer_text;
+                q.pages = answer.pages;
+                q.footnote = answer.footnote;
+                q.fragment_count = answer.fragment_count || 1;
+            } else {
+                // Bid/Spec mode: Replace behavior (existing)
+                q.answer = answer.answer_text;
+                q.pages = answer.pages;
+                q.footnote = answer.footnote;
+            }
 
             updatedQuestionIds.push(answer.question_id);
 
@@ -1559,6 +1573,9 @@ function updateUnitaryTableAsFinal(result, isPartial) {
     /**
      * Update unitary table with final/complete results
      * Called when analysis completes or is stopped
+     *
+     * IMPORTANT: For BestPrep mode, we preserve live accumulated data and only
+     * update from final results if they have MORE information (not less).
      */
     Logger.info('📊 Updating unitary table with final results...');
 
@@ -1567,11 +1584,35 @@ function updateUnitaryTableAsFinal(result, isPartial) {
         section.questions.forEach(q => {
             const questionId = q.question_id;
             if (allQuestions[questionId]) {
-                // Update with final data
-                allQuestions[questionId].status = q.answer ? 'found' : 'pending';
-                allQuestions[questionId].answer = q.answer || null;
-                allQuestions[questionId].pages = q.page_citations || [];
-                allQuestions[questionId].footnote = q.footnote || null;
+                const existing = allQuestions[questionId];
+
+                // For BestPrep mode: DON'T overwrite existing live data with empty/less data
+                // Only update if final has actual data OR existing is empty
+                if (currentAnalysisMode === 'bestprep') {
+                    // Only update if final result has an answer
+                    if (q.answer && q.answer.trim()) {
+                        existing.status = 'found';
+                        existing.answer = q.synthesized_answer || q.answer;
+                        // Merge pages (keep all accumulated + any new from final)
+                        const finalPages = q.page_citations || [];
+                        const allPages = [...new Set([...(existing.pages || []), ...finalPages])].sort((a,b) => a-b);
+                        existing.pages = allPages;
+                    }
+                    // Preserve existing footnote if final is empty
+                    if (q.footnote && q.footnote.trim()) {
+                        existing.footnote = q.footnote;
+                    }
+                    // Preserve fragment count
+                    if (q.fragment_count) {
+                        existing.fragment_count = q.fragment_count;
+                    }
+                } else {
+                    // Bid/Spec mode: Standard replace behavior
+                    existing.status = q.answer ? 'found' : 'pending';
+                    existing.answer = q.answer || null;
+                    existing.pages = q.page_citations || [];
+                    existing.footnote = q.footnote || null;
+                }
 
                 // Add footnote to global list if not already there
                 if (q.footnote && q.footnote.trim() && !allFootnotes.includes(q.footnote)) {
@@ -1656,13 +1697,25 @@ function renderUnitaryTable() {
             const isPending = q.status === 'pending';
             const rowColor = isPending ? '#fafafa' : '#e8f5e9';
 
+            // Build answer cell content - clickable when has answer
+            let answerContent;
+            if (isPending) {
+                answerContent = '<span style="color: #999; font-style: italic;">Analyzing...</span>';
+            } else {
+                const truncatedAnswer = (q.answer && q.answer.length > 150) ? q.answer.substring(0, 150) + '...' : (q.answer || '');
+                const fragmentBadge = (currentAnalysisMode === 'bestprep' && q.fragment_count > 1)
+                    ? `<span style="background: #ff9800; color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 5px;">${q.fragment_count} frags</span>`
+                    : '';
+                answerContent = `<span onclick="openAnswerDetailModal('${q.question_id}')" style="cursor: pointer; color: #1E3A8A;" title="Click to view full answer">${truncatedAnswer}${fragmentBadge}</span>`;
+            }
+
             html += `
                 <tr id="row-${q.question_id}" style="background: ${rowColor};">
                     <td style="padding: 10px; border: 1px solid #ddd;">${idx === 0 ? sectionName : ''}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${q.question_number}</td>
                     <td style="padding: 10px; border: 1px solid #ddd;">${q.question_text}</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; ${isPending ? 'color: #999; font-style: italic;' : ''}">
-                        ${isPending ? 'Analyzing...' : q.answer}
+                    <td style="padding: 10px; border: 1px solid #ddd;">
+                        ${answerContent}
                     </td>
                     <td style="padding: 10px; border: 1px solid #ddd;">${isPending ? '-' : q.pages.join(', ')}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${q.footnote ? '✓' : '-'}</td>
@@ -1697,7 +1750,18 @@ function updateUnitaryTableRows(questionIds) {
             // Update cells (skip section and number, update question/answer/pages/footnote)
             const cells = row.cells;
             if (cells.length >= 6) {
-                cells[3].innerHTML = isPending ? '<span style="color: #999; font-style: italic;">Analyzing...</span>' : q.answer;
+                if (isPending) {
+                    cells[3].innerHTML = '<span style="color: #999; font-style: italic;">Analyzing...</span>';
+                    cells[3].style.cursor = 'default';
+                } else {
+                    // Truncate answer for display and make it clickable
+                    const truncatedAnswer = truncateText(q.answer || '', 150);
+                    const fragmentBadge = (currentAnalysisMode === 'bestprep' && q.fragment_count > 1)
+                        ? `<span style="background: #ff9800; color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 5px;">${q.fragment_count} frags</span>`
+                        : '';
+                    cells[3].innerHTML = `<span onclick="openAnswerDetailModal('${qid}')" style="cursor: pointer; color: #1E3A8A;" title="Click to view full answer">${truncatedAnswer}${fragmentBadge}</span>`;
+                    cells[3].style.cursor = 'pointer';
+                }
                 cells[3].style.color = isPending ? '#999' : '';
                 cells[3].style.fontStyle = isPending ? 'italic' : '';
                 cells[4].innerHTML = isPending ? '-' : q.pages.join(', ');
@@ -1711,6 +1775,12 @@ function updateUnitaryTableRows(questionIds) {
     if (footnotesContainer) {
         footnotesContainer.outerHTML = renderFootnotesSection();
     }
+}
+
+function truncateText(text, maxLength) {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
 }
 
 function renderFootnotesSection() {
@@ -2183,7 +2253,83 @@ window.addEventListener('click', function(event) {
     if (event.target === aboutModal) {
         closeAboutModal();
     }
+    const answerModal = document.getElementById('answerDetailModal');
+    if (event.target === answerModal) {
+        closeAnswerDetailModal();
+    }
 });
+
+// ============================================================================
+// ANSWER DETAIL MODAL - View full answer details during analysis
+// ============================================================================
+
+function openAnswerDetailModal(questionId) {
+    const q = allQuestions[questionId];
+    if (!q) {
+        Logger.warning(`Question ${questionId} not found`);
+        return;
+    }
+
+    document.getElementById('answerDetailTitle').textContent = `Q${q.question_number}: ${q.section_name}`;
+
+    // Build content with all available details
+    let pagesHtml = q.pages && q.pages.length > 0
+        ? q.pages.map(p => `<span style="background: #e3f2fd; padding: 2px 8px; border-radius: 4px; margin: 2px; display: inline-block;">Page ${p}</span>`).join('')
+        : '<em style="color: #999;">No pages yet</em>';
+
+    let fragmentInfo = '';
+    if (currentAnalysisMode === 'bestprep' && q.fragment_count) {
+        fragmentInfo = `<div style="margin-top: 10px; padding: 8px 12px; background: #fff3e0; border-radius: 4px; border-left: 3px solid #ff9800;">
+            <strong>Fragments Found:</strong> ${q.fragment_count} answer fragment(s) accumulated
+        </div>`;
+    }
+
+    let answerHtml = q.answer
+        ? `<div style="white-space: pre-wrap; line-height: 1.6;">${q.answer}</div>`
+        : '<em style="color: #999;">Analysis in progress...</em>';
+
+    let footnoteHtml = q.footnote && q.footnote.trim()
+        ? `<div style="margin-top: 15px; padding: 12px; background: #fffaeb; border-radius: 6px; border-left: 3px solid #ff9800;">
+            <strong>Citations:</strong> ${q.footnote}
+           </div>`
+        : '';
+
+    let content = `
+        <div style="margin-bottom: 20px;">
+            <div style="font-size: 1.1em; color: #1E3A8A; margin-bottom: 10px;"><strong>Question:</strong></div>
+            <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; border-left: 3px solid #1E3A8A;">
+                ${q.question_text}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <div style="font-size: 1.1em; color: #1E3A8A; margin-bottom: 10px;"><strong>PDF Pages:</strong></div>
+            <div>${pagesHtml}</div>
+            ${fragmentInfo}
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <div style="font-size: 1.1em; color: #1E3A8A; margin-bottom: 10px;"><strong>Answer:</strong></div>
+            <div style="padding: 15px; background: #e8f5e9; border-radius: 6px; border-left: 3px solid #4CAF50; max-height: 400px; overflow-y: auto;">
+                ${answerHtml}
+            </div>
+        </div>
+
+        ${footnoteHtml}
+
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee; color: #666; font-size: 12px;">
+            <strong>Status:</strong> ${q.status === 'found' ? '✅ Answer Found' : '⏳ Analyzing...'}
+            ${currentAnalysisMode === 'bestprep' ? ' | <strong>Mode:</strong> BestPrep (Cumulative)' : ' | <strong>Mode:</strong> Bid/Spec'}
+        </div>
+    `;
+
+    document.getElementById('answerDetailContent').innerHTML = content;
+    document.getElementById('answerDetailModal').style.display = 'flex';
+}
+
+function closeAnswerDetailModal() {
+    document.getElementById('answerDetailModal').style.display = 'none';
+}
 
     </script>
 
@@ -2195,6 +2341,19 @@ window.addEventListener('click', function(event) {
                 <button onclick="closeQuestionManager()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px;">Close</button>
             </div>
             <div id="questionManagerContent" style="padding: 20px; overflow-y: auto; flex: 1;">
+                <!-- Content rendered by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Answer Detail Modal - View full answer during analysis -->
+    <div id="answerDetailModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center;">
+        <div style="background: white; width: 90%; max-width: 800px; max-height: 90vh; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <h3 id="answerDetailTitle" style="margin: 0;">Answer Details</h3>
+                <button onclick="closeAnswerDetailModal()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px;">Close</button>
+            </div>
+            <div id="answerDetailContent" style="padding: 20px; overflow-y: auto; flex: 1;">
                 <!-- Content rendered by JavaScript -->
             </div>
         </div>

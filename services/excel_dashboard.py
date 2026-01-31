@@ -15,6 +15,28 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
+def sanitize_for_excel(text):
+    """
+    Remove or replace characters that are illegal in Excel worksheet cells.
+    Excel doesn't allow control characters (0x00-0x1F except tab, newline, carriage return).
+    """
+    if not text:
+        return text
+    if not isinstance(text, str):
+        return str(text)
+
+    # Remove illegal XML characters (control chars except tab, newline, carriage return)
+    # These cause "cannot be used in worksheets" errors
+    illegal_pattern = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
+    cleaned = illegal_pattern.sub('', text)
+
+    # Also replace other problematic characters
+    # \u001f is Unit Separator - replace with space
+    cleaned = cleaned.replace('\u001f', ' ')
+
+    return cleaned
+
+
 class ExcelDashboardGenerator:
     """Generate executive-ready Excel report package with 4 professional sheets"""
 
@@ -330,7 +352,7 @@ class ExcelDashboardGenerator:
             section_name = section.get('section_name', '')
 
             for q in section.get('questions', []):
-                answer_text = q.get('answer') or ''
+                answer_text = sanitize_for_excel(q.get('answer') or '')
                 has_answer = bool(answer_text and answer_text.strip())
                 pages = q.get('page_citations', [])
                 pages_str = ', '.join(map(str, pages)) if pages else '-'
@@ -349,7 +371,7 @@ class ExcelDashboardGenerator:
                 else:
                     section_cell.font = self.DATA_FONT
 
-                ws.cell(row, 3, q.get('question', '')).font = self.DATA_FONT
+                ws.cell(row, 3, sanitize_for_excel(q.get('question', ''))).font = self.DATA_FONT
 
                 answer_cell = ws.cell(row, 4, answer_text if has_answer else 'Not found in document')
                 if has_answer:
@@ -421,7 +443,7 @@ class ExcelDashboardGenerator:
 
             # Questions
             for idx, q in enumerate(questions, start=1):
-                answer_text = q.get('answer') or ''
+                answer_text = sanitize_for_excel(q.get('answer') or '')
                 has_answer = bool(answer_text and answer_text.strip())
                 pages = q.get('page_citations', [])
                 pages_str = ', '.join(map(str, pages)) if pages else '-'
@@ -430,7 +452,7 @@ class ExcelDashboardGenerator:
                 ws.cell(row, 1, idx).font = self.DATA_FONT
                 ws.cell(row, 1).alignment = Alignment(horizontal='center', vertical='top')
 
-                ws.cell(row, 2, q.get('question', '')).font = self.DATA_FONT
+                ws.cell(row, 2, sanitize_for_excel(q.get('question', ''))).font = self.DATA_FONT
 
                 answer_cell = ws.cell(row, 3, answer_text if has_answer else 'Not found in document')
                 if has_answer:
@@ -514,9 +536,10 @@ class ExcelDashboardGenerator:
             ws.cell(row, 1, fn['number']).font = self.DATA_FONT_BOLD
             ws.cell(row, 1).alignment = Alignment(horizontal='center', vertical='top')
 
-            ws.cell(row, 2, fn['section']).font = self.DATA_FONT
-            ws.cell(row, 3, fn['question'][:100] + '...' if len(fn['question']) > 100 else fn['question']).font = self.DATA_FONT
-            ws.cell(row, 4, fn['footnote']).font = self.DATA_FONT
+            ws.cell(row, 2, sanitize_for_excel(fn['section'])).font = self.DATA_FONT
+            question_text = sanitize_for_excel(fn['question'])
+            ws.cell(row, 3, question_text[:100] + '...' if len(question_text) > 100 else question_text).font = self.DATA_FONT
+            ws.cell(row, 4, sanitize_for_excel(fn['footnote'])).font = self.DATA_FONT
 
             pages_str = ', '.join(map(str, fn['pages'])) if fn['pages'] else '-'
             ws.cell(row, 5, pages_str).font = self.DATA_FONT_BOLD
