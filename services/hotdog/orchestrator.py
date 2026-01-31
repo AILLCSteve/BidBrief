@@ -474,7 +474,11 @@ class HotdogOrchestrator:
                     progress_summary = f"{window_idx}/{len(windows)} windows processed"
                     logger.info(f"\n📊 Progress: {progress_summary}")
                     logger.info(self.layer5_token_manager.get_statistics())
-                    logger.info(self.layer4_accumulator.get_statistics())
+                    # Use appropriate accumulator based on mode
+                    if self.mode == AnalysisMode.BESTPREP:
+                        logger.info(self.bestprep_accumulator.get_statistics())
+                    else:
+                        logger.info(self.layer4_accumulator.get_statistics())
 
                     self._emit_progress('progress_milestone', {
                         'windows_processed': window_idx,
