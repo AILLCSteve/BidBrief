@@ -41,6 +41,9 @@ from .output_compiler import OutputCompiler
 from .second_pass_processor import SecondPassProcessor
 from .token_optimizer import TokenOptimizer
 from .key_requirements_extractor import KeyRequirementsExtractor
+from .mode_config import ModeConfig, AnalysisMode, get_mode_config
+from .append_accumulator import AppendOnlyAccumulator
+from .synthesis_agent import SynthesisAgent
 from .models import (
     AnalysisResult,
     ParsedConfig,
@@ -73,7 +76,8 @@ class HotdogOrchestrator:
         max_parallel_experts: int = 5,
         similarity_threshold: float = 0.75,
         progress_callback: Optional[Callable] = None,
-        context_guardrails: Optional[str] = None
+        context_guardrails: Optional[str] = None,
+        mode: str = 'bid_spec'
     ):
         """
         Initialize the HOTDOG orchestrator.
@@ -87,11 +91,16 @@ class HotdogOrchestrator:
                               Signature: callback(event_type: str, data: dict)
             context_guardrails: Optional global context rules for analysis
                               (e.g., "Only answer within CIPP lining context")
+            mode: Analysis mode - 'bid_spec' (default) or 'bestprep'
         """
         self.openai_client = AsyncOpenAI(api_key=openai_api_key)
         self.config_path = config_path
         self.progress_callback = progress_callback
         self.context_guardrails = context_guardrails or ""
+
+        # Mode configuration
+        self.mode_config = get_mode_config(mode)
+        self.mode = self.mode_config.mode
 
         # Detect model limits using TokenOptimizer
         self.model = "gpt-4o"  # Most robust available model
@@ -119,9 +128,19 @@ class HotdogOrchestrator:
             model=self.model,
             max_completion_tokens=model_limits.recommended_completion_tokens
         )
-        self.layer4_accumulator = SmartAccumulator(
-            similarity_threshold=similarity_threshold
-        )
+
+        # Initialize appropriate accumulator based on mode
+        if self.mode == AnalysisMode.BESTPREP:
+            self.layer4_accumulator = None  # Not used in BestPrep mode
+            self.bestprep_accumulator = AppendOnlyAccumulator()
+            self.synthesis_agent = SynthesisAgent(openai_api_key, model=self.model)
+        else:
+            self.layer4_accumulator = SmartAccumulator(
+                similarity_threshold=similarity_threshold
+            )
+            self.bestprep_accumulator = None
+            self.synthesis_agent = None
+
         self.layer5_token_manager = TokenBudgetManager(
             max_prompt_tokens=model_limits.recommended_prompt_tokens,  # 75K for GPT-4o
             max_completion_tokens=model_limits.recommended_completion_tokens  # 16K for GPT-4o
@@ -144,9 +163,12 @@ class HotdogOrchestrator:
         self.stop_requested = False
 
         logger.info("🔥 HOTDOG AI Orchestrator initialized")
+        logger.info(f"   Mode: {self.mode.value}")
         logger.info(f"   Model: {self.model}")
         logger.info(f"   Prompt Budget: {model_limits.recommended_prompt_tokens:,} tokens (18.75x improvement!)")
         logger.info(f"   Completion Limit: {model_limits.recommended_completion_tokens:,} tokens")
+        if self.mode == AnalysisMode.BESTPREP:
+            logger.info("   📚 BestPrep Mode: Append-only accumulation, synthesis enabled")
         if self.context_guardrails:
             logger.info(f"📋 Context Guardrails: {self.context_guardrails[:100]}...")
 
@@ -268,8 +290,13 @@ class HotdogOrchestrator:
             self.cached_config = config
 
             # Register question texts with accumulator for Key Requirement detection
-            for question_id, question in config.question_map.items():
-                self.layer4_accumulator.register_question_text(question_id, question.text)
+            if self.mode == AnalysisMode.BID_SPEC:
+                for question_id, question in config.question_map.items():
+                    self.layer4_accumulator.register_question_text(question_id, question.text)
+            else:
+                # BestPrep mode: initialize questions in append-only accumulator
+                for question_id, question in config.question_map.items():
+                    self.bestprep_accumulator.initialize_question(question_id, question.text)
 
             # ============================================================
             # LAYER 2: EXPERT PERSONA GENERATION
@@ -363,12 +390,52 @@ class HotdogOrchestrator:
                 )
 
                 # -----------------------------------------------------
-                # LAYER 4: Smart Accumulation
+                # LAYER 4: Smart Accumulation (mode-aware)
                 # -----------------------------------------------------
-                accumulation_stats = self.layer4_accumulator.accumulate_window(window_result)
-
-                # Get current accumulated answers for live display
-                accumulated_so_far = self.layer4_accumulator.get_accumulated_answers()
+                if self.mode == AnalysisMode.BESTPREP:
+                    # BestPrep: Append-only accumulation
+                    for question_id, answer in window_result.answers.items():
+                        self.bestprep_accumulator.add_answer(
+                            question_id=question_id,
+                            answer_text=answer.text,
+                            pages=answer.pages,
+                            confidence=answer.confidence,
+                            window_index=window_idx,
+                            expert_name=answer.expert,
+                            raw_footnote=answer.footnote
+                        )
+                    self.bestprep_accumulator.mark_window_processed(window_idx)
+                    accumulation_stats = {
+                        'window_num': window_idx,
+                        'new_answers': len(window_result.answers),
+                        'merges': 0,
+                        'appends': len(window_result.answers)
+                    }
+                    # Build accumulated_so_far compatible format for live display
+                    accumulated_so_far = {}
+                    for qid, ca in self.bestprep_accumulator.get_all_cumulative_answers().items():
+                        if ca.fragments:
+                            # Create a mock Answer object for display compatibility
+                            from .models import Answer
+                            best_frag = max(ca.fragments, key=lambda f: f.confidence)
+                            try:
+                                mock_answer = Answer(
+                                    question_id=qid,
+                                    text=best_frag.text,
+                                    pages=best_frag.pages,
+                                    confidence=best_frag.confidence,
+                                    expert=best_frag.expert_name,
+                                    window=best_frag.window_index,
+                                    footnote=best_frag.raw_footnote
+                                )
+                                accumulated_so_far[qid] = [mock_answer]
+                            except ValueError:
+                                # Skip invalid answers (missing citations)
+                                pass
+                else:
+                    # Bid/Spec: Smart accumulation with deduplication
+                    accumulation_stats = self.layer4_accumulator.accumulate_window(window_result)
+                    accumulated_so_far = self.layer4_accumulator.get_accumulated_answers()
 
                 # Format unitary log for live display (answers found so far)
                 unitary_log_markdown = self._format_live_unitary_log(
@@ -416,13 +483,65 @@ class HotdogOrchestrator:
                     })
 
             # ============================================================
+            # LAYER 7: SYNTHESIS (BestPrep mode only)
+            # ============================================================
+            if self.mode == AnalysisMode.BESTPREP and self.synthesis_agent:
+                logger.info("\n🧠 Layer 7: Synthesis Agent")
+                self._emit_progress('layer_7_start', {
+                    'layer': 'Synthesis Agent',
+                    'questions_to_synthesize': len(self.bestprep_accumulator.get_questions_for_synthesis())
+                })
+
+                synthesis_results = await self.synthesis_agent.synthesize_all(
+                    self.bestprep_accumulator,
+                    max_concurrent=3
+                )
+
+                logger.info(f"  ✅ Synthesized {len(synthesis_results)} answers")
+                self._emit_progress('layer_7_complete', {
+                    'synthesized_count': len(synthesis_results),
+                    'synthesis_stats': self.synthesis_agent.get_statistics()
+                })
+
+            # ============================================================
             # LAYER 6: OUTPUT COMPILATION
             # ============================================================
             logger.info("\n📋 Layer 6: Output Compilation")
             self._emit_progress('layer_6_start', {'layer': 'Output Compilation'})
 
             completed_at = datetime.now()
-            accumulated_answers = self.layer4_accumulator.get_accumulated_answers()
+
+            # Get accumulated answers based on mode
+            if self.mode == AnalysisMode.BESTPREP:
+                # Build accumulated_answers from BestPrep accumulator
+                accumulated_answers = {}
+                for qid, ca in self.bestprep_accumulator.get_all_cumulative_answers().items():
+                    if ca.fragments:
+                        # Use synthesized answer if available, else best fragment
+                        from .models import Answer
+                        if ca.synthesized_answer:
+                            text = ca.synthesized_answer
+                        else:
+                            best_frag = max(ca.fragments, key=lambda f: f.confidence)
+                            text = best_frag.text
+
+                        try:
+                            answer = Answer(
+                                question_id=qid,
+                                text=text,
+                                pages=ca.all_pages,
+                                confidence=ca.highest_confidence,
+                                expert="Synthesis Agent" if ca.synthesized_answer else ca.fragments[0].expert_name,
+                                window=0,
+                                footnote=""
+                            )
+                            accumulated_answers[qid] = [answer]
+                        except ValueError:
+                            # Skip invalid answers
+                            pass
+            else:
+                accumulated_answers = self.layer4_accumulator.get_accumulated_answers()
+
             total_tokens = self.layer5_token_manager.total_tokens_used
 
             result = self.layer6_compiler.compile_results(
@@ -492,11 +611,15 @@ class HotdogOrchestrator:
         # Layer statistics
         logger.info("\n📊 LAYER STATISTICS")
         logger.info(self.layer3_processor.get_statistics())
-        logger.info(self.layer4_accumulator.get_statistics())
+        if self.mode == AnalysisMode.BESTPREP:
+            logger.info(self.bestprep_accumulator.get_statistics())
+            if self.synthesis_agent:
+                logger.info(self.synthesis_agent.get_statistics())
+        else:
+            logger.info(self.layer4_accumulator.get_statistics())
+            # Print accumulation report
+            logger.info("\n" + self.layer4_accumulator.generate_report())
         logger.info(self.layer5_token_manager.get_statistics())
-
-        # Print accumulation report
-        logger.info("\n" + self.layer4_accumulator.generate_report())
 
     async def run_second_pass(self, first_pass_result: AnalysisResult) -> AnalysisResult:
         """
@@ -741,6 +864,17 @@ class HotdogOrchestrator:
             Formatted text report
         """
         return self.layer6_compiler.generate_text_report(result, config)
+
+    def get_bestprep_accumulator_data(self) -> Optional[dict]:
+        """
+        Get BestPrep accumulator data for export (BestPrep mode only).
+
+        Returns:
+            Dict with cumulative_answers and statistics, or None if not in BestPrep mode
+        """
+        if self.mode == AnalysisMode.BESTPREP and self.bestprep_accumulator:
+            return self.bestprep_accumulator.to_dict()
+        return None
 
     def _build_partial_browser_output(self, accumulated_answers: dict, config: ParsedConfig) -> dict:
         """

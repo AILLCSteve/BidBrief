@@ -598,6 +598,15 @@
         }
 
         function renderAllTabs(data, sessionId) {
+            // Detect mode from result data
+            const mode = data.mode || 'bid_spec';
+
+            // Add mode indicator to modal title
+            const modalTitle = document.getElementById('modalTitle');
+            if (mode === 'bestprep') {
+                modalTitle.innerHTML += ' <span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px;">BestPrep</span>';
+            }
+
             renderSummaryTab(data, sessionId);
             renderDetailedTab(data);
             renderBySectionTab(data);

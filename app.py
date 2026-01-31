@@ -686,7 +686,12 @@ def analyze_document():
     pdf_filename = data.get('pdf_filename', 'Unknown.pdf')  # Get original filename
     context_guardrails = data.get('context_guardrails', '')
     enabled_sections = data.get('enabled_sections', None)  # NEW: Optional list of enabled section IDs
+    analysis_mode = data.get('mode', 'bid_spec')  # NEW: Analysis mode (bid_spec or bestprep)
     session_id = data.get('session_id', f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+    # Validate analysis mode
+    if analysis_mode not in ['bid_spec', 'bestprep']:
+        return jsonify({'success': False, 'error': 'Invalid mode. Must be "bid_spec" or "bestprep"'}), 400
 
     # Track session timestamp for cleanup
     session_timestamps[session_id] = datetime.now()
@@ -730,12 +735,13 @@ def analyze_document():
             # Get config path
             config_path = str(Config.BASE_DIR / 'config' / 'cipp_questions_default.json')
 
-            # Initialize orchestrator
+            # Initialize orchestrator with mode
             orchestrator = HotdogOrchestrator(
                 openai_api_key=openai_key,
                 config_path=config_path,
                 context_guardrails=context_guardrails,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                mode=analysis_mode
             )
 
             # Store in active_analyses IMMEDIATELY (for partial results)
@@ -743,9 +749,10 @@ def analyze_document():
                 'orchestrator': orchestrator,
                 'config_path': config_path,
                 'pdf_path': pdf_path,
-                'pdf_filename': pdf_filename
+                'pdf_filename': pdf_filename,
+                'mode': analysis_mode
             }
-            logger.info(f"Orchestrator stored in active_analyses: {session_id}")
+            logger.info(f"Orchestrator stored in active_analyses: {session_id} (mode: {analysis_mode})")
 
             # Run analysis (blocking in THIS thread, not main Flask thread)
             loop = asyncio.new_event_loop()
@@ -793,13 +800,14 @@ def analyze_document():
                             'config_path': config_path,
                             'pdf_path': pdf_path,
                             'pdf_filename': pdf_filename,
+                            'mode': analysis_mode,
                             'completed_at': datetime.now(),
                             'status': 'completed'
                         }
                         del active_analyses[session_id]
                         # Update timestamp so cleanup doesn't delete recently completed analyses
                         session_timestamps[session_id] = datetime.now()
-                        logger.info(f"✅ Session moved to completed_analyses: {session_id}")
+                        logger.info(f"✅ Session moved to completed_analyses: {session_id} (mode: {analysis_mode})")
 
                 # Signal done
                 progress_q.put(('done', {}))
@@ -826,6 +834,7 @@ def analyze_document():
                             'config_path': active_analyses[session_id]['config_path'],
                             'pdf_path': active_analyses[session_id].get('pdf_path', ''),
                             'pdf_filename': active_analyses[session_id].get('pdf_filename', 'Unknown.pdf'),
+                            'mode': active_analyses[session_id].get('mode', 'bid_spec'),
                             'stopped_at': datetime.now(),
                             'status': 'stopped',
                             'error': error_msg
@@ -950,9 +959,31 @@ def get_results(session_id):
         logger.info(f"Fetching results for partial analysis: {session_id}")
         orchestrator = session_data['orchestrator']
         config_path = session_data['config_path']
+        mode = session_data.get('mode', 'bid_spec')
 
-        # Get accumulated answers so far
-        accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
+        # Get accumulated answers based on mode
+        from services.hotdog.mode_config import AnalysisMode
+        if orchestrator.mode == AnalysisMode.BESTPREP and orchestrator.bestprep_accumulator:
+            # Build accumulated_answers from BestPrep accumulator
+            accumulated_answers = {}
+            for qid, ca in orchestrator.bestprep_accumulator.get_all_cumulative_answers().items():
+                if ca.fragments:
+                    from services.hotdog.models import Answer
+                    best_frag = max(ca.fragments, key=lambda f: f.confidence)
+                    try:
+                        mock_answer = Answer(
+                            question_id=qid,
+                            text=best_frag.text,
+                            pages=best_frag.pages,
+                            confidence=best_frag.confidence,
+                            expert=best_frag.expert_name,
+                            window=best_frag.window_index
+                        )
+                        accumulated_answers[qid] = [mock_answer]
+                    except ValueError:
+                        pass
+        else:
+            accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
 
         parsed_config = config_loader.load_from_json(config_path)
 
@@ -969,6 +1000,7 @@ def get_results(session_id):
             'success': True,
             'result': legacy_result,
             'partial': True,  # Flag indicating partial results
+            'mode': mode,
             'statistics': {
                 'processing_time': 0,  # Not yet available
                 'total_tokens': orchestrator.layer5_token_manager.total_tokens_used,
@@ -983,9 +1015,31 @@ def get_results(session_id):
         logger.info(f"Fetching partial results for active analysis: {session_id}")
         orchestrator = session_data['orchestrator']
         config_path = session_data['config_path']
+        mode = session_data.get('mode', 'bid_spec')
 
-        # Get accumulated answers so far
-        accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
+        # Get accumulated answers based on mode
+        from services.hotdog.mode_config import AnalysisMode
+        if orchestrator.mode == AnalysisMode.BESTPREP and orchestrator.bestprep_accumulator:
+            # Build accumulated_answers from BestPrep accumulator
+            accumulated_answers = {}
+            for qid, ca in orchestrator.bestprep_accumulator.get_all_cumulative_answers().items():
+                if ca.fragments:
+                    from services.hotdog.models import Answer
+                    best_frag = max(ca.fragments, key=lambda f: f.confidence)
+                    try:
+                        mock_answer = Answer(
+                            question_id=qid,
+                            text=best_frag.text,
+                            pages=best_frag.pages,
+                            confidence=best_frag.confidence,
+                            expert=best_frag.expert_name,
+                            window=best_frag.window_index
+                        )
+                        accumulated_answers[qid] = [mock_answer]
+                    except ValueError:
+                        pass
+        else:
+            accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
 
         parsed_config = config_loader.load_from_json(config_path)
 
@@ -1002,6 +1056,7 @@ def get_results(session_id):
             'success': True,
             'result': legacy_result,
             'partial': True,  # Flag indicating in-progress
+            'mode': mode,
             'statistics': {
                 'processing_time': 0,  # Not yet available
                 'total_tokens': orchestrator.layer5_token_manager.total_tokens_used,
@@ -1138,6 +1193,85 @@ def export_excel_dashboard(session_id):
 
     except Exception as e:
         logger.error(f"Excel export failed: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================================
+# BESTPREP EXCEL EXPORT
+# ============================================================================
+
+@app.route('/api/export/bestprep-excel/<session_id>', methods=['GET'])
+def export_bestprep_excel(session_id):
+    """Generate comprehensive BestPrep Excel report with all fragments and footnotes"""
+    from services.hotdog.mode_config import AnalysisMode
+
+    # Find session in completed or partial analyses
+    session_data = None
+    is_partial = False
+
+    with session_lock:
+        if session_id in completed_analyses:
+            session_data = completed_analyses[session_id]
+        elif session_id in partial_analyses:
+            session_data = partial_analyses[session_id]
+            is_partial = True
+        elif session_id in active_analyses:
+            session_data = active_analyses[session_id]
+            is_partial = True
+
+    if not session_data:
+        return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+    orchestrator = session_data['orchestrator']
+
+    # Verify this is a BestPrep analysis
+    if orchestrator.mode != AnalysisMode.BESTPREP:
+        return jsonify({
+            'success': False,
+            'error': 'Not a BestPrep analysis. Use standard Excel export instead.'
+        }), 400
+
+    if not orchestrator.bestprep_accumulator:
+        return jsonify({'success': False, 'error': 'No BestPrep accumulator data available'}), 400
+
+    try:
+        from services.bestprep_excel import BestPrepExcelGenerator
+
+        # Get accumulator data
+        accumulator_data = orchestrator.bestprep_accumulator.to_dict()
+
+        # Build result dict for generator
+        result_dict = {
+            'document_name': session_data.get('pdf_filename', 'Unknown'),
+            'mode': 'bestprep'
+        }
+
+        generator = BestPrepExcelGenerator(
+            analysis_result=result_dict,
+            accumulator_data=accumulator_data
+        )
+
+        excel_file = generator.generate()
+
+        # Build filename
+        import re
+        doc_name = session_data.get('pdf_filename', 'BestPrep_Analysis')
+        doc_name = re.sub(r'\.pdf$', '', doc_name, flags=re.IGNORECASE)
+        doc_name = re.sub(r'[^\w\s-]', '', doc_name).strip()
+        doc_name = re.sub(r'\s+', '_', doc_name)[:50]
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        partial_suffix = '_PARTIAL' if is_partial else ''
+        filename = f'{doc_name}_BestPrep_{date_str}{partial_suffix}.xlsx'
+
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        logger.error(f"BestPrep Excel export failed: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

@@ -458,6 +458,28 @@
             </div>
         </div>
 
+        <!-- Analysis Mode Selection -->
+        <div class="section">
+            <h3>📊 Analysis Mode</h3>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #28a745; flex: 1; min-width: 280px;" id="modeLabel_bid_spec">
+                    <input type="radio" name="analysisMode" value="bid_spec" checked onchange="setAnalysisMode('bid_spec')" style="margin-top: 3px;">
+                    <div>
+                        <strong style="color: #1E3A8A;">Bid/Spec/RFP Mode</strong>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">Smart deduplication, merge similar answers. Best for construction bid specs and RFPs.</p>
+                    </div>
+                </label>
+                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #ddd; flex: 1; min-width: 280px;" id="modeLabel_bestprep">
+                    <input type="radio" name="analysisMode" value="bestprep" onchange="setAnalysisMode('bestprep')" style="margin-top: 3px;">
+                    <div>
+                        <strong style="color: #1E3A8A;">BestPrep/TestPrep Mode</strong>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">Exhaustive answers, never discard info, with synthesis. Best for textbooks and study materials.</p>
+                    </div>
+                </label>
+            </div>
+            <p id="modeHint" style="margin-top: 10px; color: #28a745; font-size: 13px;">Bid/Spec: Smart deduplication, optimized for specs</p>
+        </div>
+
         <!-- Analysis Controls -->
         <div class="section">
             <h3>🎯 Analysis Controls</h3>
@@ -524,10 +546,37 @@ let pollingInterval = null;  // NEW: Polling interval
 let lastEventIndex = 0;  // NEW: Track which events we've already processed
 let questionConfig = { sections: [], totalQuestions: 0 };
 let liveAnswers = {}; // Store answers as they come in: { question_id: { question, answer, pages } }
+let currentAnalysisMode = 'bid_spec';  // NEW: Analysis mode (bid_spec or bestprep)
 
 // NEW: Unitary Table State
 let allQuestions = {};  // { question_id: { section_name, question_text, status, answer, pages, footnote } }
 let allFootnotes = [];  // Array of unique footnotes
+
+// ============================================================================
+// ANALYSIS MODE SELECTION
+// ============================================================================
+
+function setAnalysisMode(mode) {
+    currentAnalysisMode = mode;
+    Logger.info(`Analysis mode set to: ${mode}`);
+
+    // Update UI styling
+    const bidSpecLabel = document.getElementById('modeLabel_bid_spec');
+    const bestprepLabel = document.getElementById('modeLabel_bestprep');
+    const modeHint = document.getElementById('modeHint');
+
+    if (mode === 'bestprep') {
+        bidSpecLabel.style.borderColor = '#ddd';
+        bestprepLabel.style.borderColor = '#28a745';
+        modeHint.textContent = 'BestPrep: Every answer fragment preserved, synthesis at end';
+        modeHint.style.color = '#22c55e';
+    } else {
+        bidSpecLabel.style.borderColor = '#28a745';
+        bestprepLabel.style.borderColor = '#ddd';
+        modeHint.textContent = 'Bid/Spec: Smart deduplication, optimized for specs';
+        modeHint.style.color = '#28a745';
+    }
+}
 
 // ============================================================================
 // LOGGER - Simple, Working
@@ -935,6 +984,7 @@ async function startAnalysis() {
         Logger.info(`📊 Analyzing ${enabledSectionIds.length} enabled sections`);
 
         // STEP 4: Start analysis (returns immediately - runs in background)
+        Logger.info(`📊 Analysis mode: ${currentAnalysisMode}`);
         const analyzeResp = await fetch('/api/analyze', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -943,7 +993,8 @@ async function startAnalysis() {
                 pdf_path: pdfPath,
                 pdf_filename: pdfFilename,  // NEW: Include original filename
                 context_guardrails: contextGuardrails || undefined,
-                enabled_sections: enabledSectionIds  // NEW: Only analyze enabled sections
+                enabled_sections: enabledSectionIds,  // Only analyze enabled sections
+                mode: currentAnalysisMode  // NEW: Include analysis mode
             })
         });
 
@@ -1308,8 +1359,10 @@ function downloadCSV(data) {
 
 function exportExcelDashboard() {
     /**
-     * Export using server-side Excel Report Package generator.
-     * Sheets: Executive Summary, Detailed Results, By Section, Footnotes
+     * Export using server-side Excel generator.
+     * Uses mode-appropriate endpoint:
+     * - bid_spec: 4-sheet Report Package (Executive Summary, Detailed, By Section, Footnotes)
+     * - bestprep: 5-sheet Comprehensive Report (Summary, Synthesized, Fragments, Footnotes, Page Index)
      */
     if (!currentSessionId) {
         Logger.error('No session ID available for export');
@@ -1317,11 +1370,16 @@ function exportExcelDashboard() {
         return;
     }
 
-    Logger.info(`📊 Requesting Excel Report Package for session: ${currentSessionId}`);
+    Logger.info(`📊 Requesting Excel export for session: ${currentSessionId} (mode: ${currentAnalysisMode})`);
 
-    // Open the server-side export endpoint in a new tab/download
-    window.open(`/api/export/excel-dashboard/${currentSessionId}`, '_blank');
-    Logger.success('✅ Excel dashboard export initiated');
+    // Use mode-appropriate export endpoint
+    if (currentAnalysisMode === 'bestprep') {
+        window.open(`/api/export/bestprep-excel/${currentSessionId}`, '_blank');
+        Logger.success('✅ BestPrep Excel export initiated (5-sheet comprehensive report)');
+    } else {
+        window.open(`/api/export/excel-dashboard/${currentSessionId}`, '_blank');
+        Logger.success('✅ Excel Report Package export initiated');
+    }
 }
 
 function exportHTML(data) {
