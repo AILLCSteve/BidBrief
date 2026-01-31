@@ -868,6 +868,53 @@ def analyze_document():
 # GET RESULTS
 # ============================================================================
 
+def _extract_bestprep_data(orchestrator):
+    """Extract BestPrep accumulator data (fragments, footnotes) for API responses."""
+    from services.hotdog.mode_config import AnalysisMode
+
+    if orchestrator.mode != AnalysisMode.BESTPREP or not orchestrator.bestprep_accumulator:
+        return None
+
+    accumulator = orchestrator.bestprep_accumulator
+    bestprep_data = {
+        'fragments': [],
+        'footnotes': [],
+        'statistics': {
+            'total_fragments': 0,
+            'total_footnotes': 0,
+            'questions_with_fragments': 0
+        }
+    }
+
+    # Extract all fragments and footnotes
+    for qid, ca in accumulator.get_all_cumulative_answers().items():
+        if ca.fragments:
+            bestprep_data['statistics']['questions_with_fragments'] += 1
+            for frag in ca.fragments:
+                bestprep_data['fragments'].append({
+                    'question_id': qid,
+                    'question_text': ca.question_text,
+                    'text': frag.text,
+                    'pages': frag.pages,
+                    'confidence': frag.confidence,
+                    'expert': frag.expert_name,
+                    'window': frag.window_index
+                })
+                bestprep_data['statistics']['total_fragments'] += 1
+
+        if ca.footnotes:
+            for fn in ca.footnotes:
+                bestprep_data['footnotes'].append({
+                    'question_id': qid,
+                    'footnote_id': fn.footnote_id,
+                    'quote': fn.quote,
+                    'page': fn.page,
+                    'context': fn.context
+                })
+                bestprep_data['statistics']['total_footnotes'] += 1
+
+    return bestprep_data
+
 @app.route('/api/results/<session_id>', methods=['GET'])
 def get_results(session_id):
     """
@@ -930,7 +977,8 @@ def get_results(session_id):
         # Get mode for response
         mode = session_data.get('mode', 'bid_spec')
 
-        return jsonify({
+        # Build response
+        response = {
             'success': True,
             'result': legacy_result,
             'mode': mode,
@@ -942,7 +990,14 @@ def get_results(session_id):
                 'total_questions': parsed_config.total_questions,
                 'average_confidence': f"{result.average_confidence:.0%}"
             }
-        })
+        }
+
+        # Add BestPrep-specific data if available
+        bestprep_data = _extract_bestprep_data(orchestrator)
+        if bestprep_data:
+            response['bestprep_data'] = bestprep_data
+
+        return jsonify(response)
 
     elif session_type == 'legacy':
         result = session_data['result']
@@ -958,7 +1013,8 @@ def get_results(session_id):
 
         mode = session_data.get('mode', 'bid_spec')
 
-        return jsonify({
+        # Build response
+        response = {
             'success': True,
             'result': legacy_result,
             'mode': mode,
@@ -970,7 +1026,14 @@ def get_results(session_id):
                 'total_questions': parsed_config.total_questions,
                 'average_confidence': f"{result.average_confidence:.0%}"
             }
-        })
+        }
+
+        # Add BestPrep-specific data if available
+        bestprep_data = _extract_bestprep_data(orchestrator)
+        if bestprep_data:
+            response['bestprep_data'] = bestprep_data
+
+        return jsonify(response)
 
     elif session_type == 'partial':
         logger.info(f"Fetching results for partial analysis: {session_id}")
@@ -1016,7 +1079,8 @@ def get_results(session_id):
         # Transform to legacy format
         legacy_result = _transform_to_legacy_format(partial_browser_output)
 
-        return jsonify({
+        # Build response
+        response = {
             'success': True,
             'result': legacy_result,
             'partial': True,  # Flag indicating partial results
@@ -1029,7 +1093,14 @@ def get_results(session_id):
                 'total_questions': parsed_config.total_questions,
                 'average_confidence': 'Partial'
             }
-        })
+        }
+
+        # Add BestPrep-specific data if available
+        bestprep_data = _extract_bestprep_data(orchestrator)
+        if bestprep_data:
+            response['bestprep_data'] = bestprep_data
+
+        return jsonify(response)
 
     elif session_type == 'active':
         logger.info(f"Fetching partial results for active analysis: {session_id}")
@@ -1075,7 +1146,8 @@ def get_results(session_id):
         # Transform to legacy format
         legacy_result = _transform_to_legacy_format(partial_browser_output)
 
-        return jsonify({
+        # Build response
+        response = {
             'success': True,
             'result': legacy_result,
             'partial': True,  # Flag indicating in-progress
@@ -1088,7 +1160,14 @@ def get_results(session_id):
                 'total_questions': parsed_config.total_questions,
                 'average_confidence': 'In progress'
             }
-        })
+        }
+
+        # Add BestPrep-specific data if available
+        bestprep_data = _extract_bestprep_data(orchestrator)
+        if bestprep_data:
+            response['bestprep_data'] = bestprep_data
+
+        return jsonify(response)
 
     # Should never reach here due to lock check above
     return jsonify({'success': False, 'error': 'Internal error'}), 500

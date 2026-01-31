@@ -1657,8 +1657,8 @@ function renderUnitaryTable() {
         <div style="background: white; padding: 20px; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <h3 style="color: #1E3A8A; margin: 0;">📊 Unitary Log - Live Analysis</h3>
-                <button onclick="openFullViewModal()" style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
-                    📋 View Full Results
+                <button onclick="openViewModal()" style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                    View
                 </button>
             </div>
 
@@ -2339,10 +2339,10 @@ function closeAnswerDetailModal() {
 }
 
 // ============================================================================
-// FULL VIEW MODAL - Comprehensive results view (like admin modal)
+// VIEW MODAL - Comprehensive results view (identical to admin modal)
 // ============================================================================
 
-function openFullViewModal() {
+function openViewModal() {
     const modal = document.getElementById('fullViewModal');
     modal.style.display = 'flex';
 
@@ -2370,11 +2370,35 @@ function closeFullViewModal() {
 }
 
 function switchFullViewTab(tabName) {
-    document.querySelectorAll('.fv-tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.fv-tab-content').forEach(content => content.classList.remove('active'));
+    // Remove active class from all tab buttons
+    document.querySelectorAll('.fv-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.style.background = 'transparent';
+        btn.style.color = '#6b7280';
+        btn.style.borderBottomColor = 'transparent';
+    });
 
-    document.querySelector(`[onclick="switchFullViewTab('${tabName}')"]`).classList.add('active');
-    document.getElementById(`fv-tab-${tabName}`).classList.add('active');
+    // Hide all tab content
+    document.querySelectorAll('.fv-tab-content').forEach(content => {
+        content.classList.remove('active');
+        content.style.display = 'none';
+    });
+
+    // Activate selected tab button
+    const activeBtn = document.querySelector(`[onclick="switchFullViewTab('${tabName}')"]`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.style.background = 'white';
+        activeBtn.style.color = '#1E3A8A';
+        activeBtn.style.borderBottomColor = '#1E3A8A';
+    }
+
+    // Show selected tab content
+    const activeContent = document.getElementById(`fv-tab-${tabName}`);
+    if (activeContent) {
+        activeContent.classList.add('active');
+        activeContent.style.display = 'block';
+    }
 }
 
 function renderFullViewSummaryTab() {

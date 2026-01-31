@@ -1014,24 +1014,40 @@
         }
 
         function renderFragmentsTab(data) {
-            const sections = data.result?.sections || [];
-            const allFragments = [];
+            // Try to get fragments from bestprep_data first (new API), fall back to sections
+            let allFragments = [];
 
-            // Collect all fragments from all questions
-            sections.forEach(section => {
-                (section.questions || []).forEach(q => {
-                    if (q.fragments && q.fragments.length > 0) {
-                        q.fragments.forEach(frag => {
-                            allFragments.push({
-                                section: section.section_name,
-                                question: q.question,
-                                question_id: q.question_id,
-                                ...frag
+            if (data.bestprep_data && data.bestprep_data.fragments && data.bestprep_data.fragments.length > 0) {
+                // Use bestprep_data from API (contains full fragment details)
+                allFragments = data.bestprep_data.fragments.map((frag, idx) => ({
+                    fragment_id: `F${idx + 1}`,
+                    section: frag.question_id?.split('_')[0] || 'Unknown',
+                    question: frag.question_text || frag.question_id,
+                    question_id: frag.question_id,
+                    text: frag.text,
+                    pages: frag.pages,
+                    window_index: frag.window,
+                    confidence: frag.confidence,
+                    expert: frag.expert
+                }));
+            } else {
+                // Fallback: try to get from sections (legacy)
+                const sections = data.result?.sections || [];
+                sections.forEach(section => {
+                    (section.questions || []).forEach(q => {
+                        if (q.fragments && q.fragments.length > 0) {
+                            q.fragments.forEach(frag => {
+                                allFragments.push({
+                                    section: section.section_name,
+                                    question: q.question,
+                                    question_id: q.question_id,
+                                    ...frag
+                                });
                             });
-                        });
-                    }
+                        }
+                    });
                 });
-            });
+            }
 
             if (allFragments.length === 0) {
                 document.getElementById('fragmentsContent').innerHTML = `
@@ -1148,24 +1164,36 @@
         }
 
         function renderFootnotesTab(data) {
-            const sections = data.result?.sections || [];
             let footnotes = [];
-            let fnNum = 1;
 
-            // Collect all footnotes
-            sections.forEach(section => {
-                (section.questions || []).forEach(q => {
-                    if (q.footnote && q.footnote.trim()) {
-                        footnotes.push({
-                            number: fnNum++,
-                            section: section.section_name,
-                            question: q.question,
-                            footnote: q.footnote,
-                            pages: q.page_citations || []
-                        });
-                    }
+            // Try to get footnotes from bestprep_data first (new API)
+            if (data.bestprep_data && data.bestprep_data.footnotes && data.bestprep_data.footnotes.length > 0) {
+                footnotes = data.bestprep_data.footnotes.map((fn, idx) => ({
+                    number: idx + 1,
+                    section: fn.question_id?.split('_')[0] || 'Unknown',
+                    question: fn.question_id || 'N/A',
+                    footnote: fn.quote || fn.context || '',
+                    pages: fn.page ? [fn.page] : [],
+                    footnote_id: fn.footnote_id
+                }));
+            } else {
+                // Fallback: try to get from sections (legacy)
+                const sections = data.result?.sections || [];
+                let fnNum = 1;
+                sections.forEach(section => {
+                    (section.questions || []).forEach(q => {
+                        if (q.footnote && q.footnote.trim()) {
+                            footnotes.push({
+                                number: fnNum++,
+                                section: section.section_name,
+                                question: q.question,
+                                footnote: q.footnote,
+                                pages: q.page_citations || []
+                            });
+                        }
+                    });
                 });
-            });
+            }
 
             if (footnotes.length === 0) {
                 document.getElementById('footnotesContent').innerHTML = `

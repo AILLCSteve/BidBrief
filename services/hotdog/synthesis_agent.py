@@ -24,18 +24,24 @@ class SynthesisAgent:
     4. Contradictions are noted and reconciled
     """
 
-    SYNTHESIS_SYSTEM_PROMPT = """You are a scholarly synthesis agent. Your task is to combine multiple answer fragments about the same question into ONE comprehensive, coherent answer.
+    SYNTHESIS_SYSTEM_PROMPT = """You are an expert synthesis agent specializing in combining multiple answer fragments into one cohesive, natural language response.
 
 CRITICAL REQUIREMENTS:
-1. EVERY piece of information from EVERY fragment must be included
-2. EVERY page citation must be preserved in the final answer
-3. EVERY footnote and quote must be referenced
-4. If fragments contain contradictory information, note both perspectives
-5. Organize the answer logically, but NEVER omit any information
-6. Use the format: "According to page X, ..." for each distinct piece of information
-7. End with a "Sources" section listing ALL page numbers referenced
+1. Produce a NATURAL LANGUAGE answer - written as flowing prose, NOT as a list of citations
+2. NEVER include page numbers, citations, or source references in the answer text itself
+3. DO NOT use phrases like "According to page X", "As stated in...", "Per the document...", etc.
+4. Combine ALL information from ALL fragments into a unified, coherent response
+5. If fragments contain contradictory information, reconcile them or present both perspectives naturally
+6. Structure the answer appropriately based on length:
+   - Short answers (1-2 sentences): Direct, concise statement
+   - Medium answers (paragraph): Well-structured paragraph with logical flow
+   - Long answers (multiple points): Use natural paragraph breaks, not bullet points
+7. The answer should read as if written by a knowledgeable expert who has internalized all the source material
+8. Every piece of information from every fragment MUST be included - omit NOTHING
+9. Citations, page numbers, and footnotes are tracked SEPARATELY - they should NOT appear in your synthesized answer
 
-Your output MUST be exhaustive. Missing even one citation is a failure."""
+OUTPUT FORMAT: Pure, natural language prose. No citations. No page references. No source attributions.
+The footnotes and citations are already captured elsewhere - your job is ONLY to produce the synthesized answer text."""
 
     SYNTHESIS_USER_TEMPLATE = """QUESTION: {question}
 
@@ -45,11 +51,20 @@ COLLECTED FRAGMENTS ({fragment_count} total):
 COLLECTED FOOTNOTES ({footnote_count} total):
 {footnotes_text}
 
-ALL PAGES REFERENCED: {all_pages}
+ALL PAGES REFERENCED (for tracking only, NOT for inclusion in answer): {all_pages}
 
 ---
 
-Synthesize ALL the above into ONE comprehensive answer. Include EVERY piece of information and EVERY citation. Do not omit anything."""
+TASK: Synthesize ALL the information from the fragments above into ONE comprehensive, natural language answer.
+
+RULES:
+- Write in natural prose - NO inline citations or page references
+- Include EVERY piece of information from EVERY fragment
+- Structure the answer appropriately (short/medium/long based on content)
+- The answer should read as expert knowledge, not as a document summary
+- DO NOT include "Sources:", "References:", or any citation section
+
+OUTPUT: Natural language answer ONLY."""
 
     def __init__(self, api_key: str, model: str = "gpt-4o"):
         self.client = AsyncOpenAI(api_key=api_key)
