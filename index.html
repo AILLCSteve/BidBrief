@@ -770,7 +770,15 @@ function handleEvent(data) {
         }
         else if (data.event === 'layer_6_complete') {
             Logger.success(`✅ Output compiled: ${data.questions_answered} questions answered`);
-            ProgressTracker.update(95, 'Results ready...');
+            ProgressTracker.update(90, 'Output compiled...');
+        }
+        else if (data.event === 'layer_7_start') {
+            Logger.info(`📊 Layer 7: ${data.layer} - Synthesizing ${data.questions_to_synthesize} answers...`);
+            ProgressTracker.update(92, 'Synthesizing answers...');
+        }
+        else if (data.event === 'layer_7_complete') {
+            Logger.success(`✅ Synthesis complete: ${data.synthesized_count} answers synthesized`);
+            ProgressTracker.update(95, 'Synthesis complete...');
         }
         else if (data.event === 'results_ready') {
             // Store the complete result from polling (no need for separate fetch)

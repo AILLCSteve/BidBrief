@@ -909,7 +909,7 @@ def _extract_bestprep_data(orchestrator):
                     'footnote_id': fn.footnote_id,
                     'quote': fn.quote,
                     'page': fn.page,
-                    'context': fn.context
+                    'text': fn.text
                 })
                 bestprep_data['statistics']['total_footnotes'] += 1
 
@@ -1532,6 +1532,7 @@ def get_all_sessions():
                 'pdf_path': session_data.get('pdf_path', 'N/A'),
                 'pdf_filename': session_data.get('pdf_filename', 'Unknown.pdf'),
                 'config_path': session_data.get('config_path', 'N/A'),
+                'mode': session_data.get('mode', 'bid_spec'),  # Include analysis mode for export routing
             }
 
             # Add timestamp if available
