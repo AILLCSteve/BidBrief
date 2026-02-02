@@ -480,10 +480,13 @@
             </div>
         </div>
 
-        <!-- Advanced Analysis Options -->
-        <div class="section">
-            <h3>⚙️ Advanced Options</h3>
-            <div style="background: rgba(255,255,255,0.95); padding: 15px; border-radius: 8px; border: 1px solid #ddd;">
+        <!-- Advanced Analysis Options (Admin Only, Collapsed by Default) -->
+        <div class="section" id="advancedOptionsSection" style="display: none;">
+            <h3 onclick="toggleAdvancedOptions()" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                <span>⚙️ Advanced Options <span id="adminBadge" style="background: #dc2626; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 8px;">ADMIN</span></span>
+                <span id="advancedToggleIcon" style="font-size: 1.2em; transition: transform 0.3s;">▶</span>
+            </h3>
+            <div id="advancedOptionsContent" style="display: none; background: rgba(255,255,255,0.95); padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-top: 10px;">
                 <!-- Pipeline Mode Selection -->
                 <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee;">
                     <strong style="color: #1E3A8A; display: block; margin-bottom: 10px;">Analysis Pipeline Mode</strong>
@@ -1690,12 +1693,57 @@ function clearResults() {
 }
 
 // ============================================================================
+// ADMIN CHECK AND ADVANCED OPTIONS
+// ============================================================================
+
+let isUserAdmin = false;
+
+async function checkAdminStatus() {
+    try {
+        const response = await fetch('/api/user/info');
+        const data = await response.json();
+        if (data.success && data.is_admin) {
+            isUserAdmin = true;
+            // Show Advanced Options section for admins
+            document.getElementById('advancedOptionsSection').style.display = 'block';
+            Logger.info('🔐 Admin access granted - Advanced Options available');
+        } else {
+            isUserAdmin = false;
+            // Keep hidden for non-admins
+            document.getElementById('advancedOptionsSection').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Failed to check admin status:', error);
+        isUserAdmin = false;
+    }
+}
+
+function toggleAdvancedOptions() {
+    if (!isUserAdmin) {
+        return; // Non-admins cannot toggle
+    }
+    const content = document.getElementById('advancedOptionsContent');
+    const icon = document.getElementById('advancedToggleIcon');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.style.transform = 'rotate(90deg)';
+    } else {
+        content.style.display = 'none';
+        icon.style.transform = 'rotate(0deg)';
+    }
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
     Logger.info('🚀 BidBrief initialized (HOTDOG AI)');
     Logger.info('✅ Ready for document analysis');
+
+    // Check admin status to show/hide Advanced Options
+    checkAdminStatus();
 
     // Load question configuration
     loadQuestionConfig();

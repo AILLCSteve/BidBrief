@@ -512,6 +512,25 @@ def verify_session():
 
 
 # ============================================================================
+# USER INFO
+# ============================================================================
+
+@app.route('/api/user/info', methods=['GET'])
+@require_auth
+def get_user_info():
+    """Get current user info including admin status"""
+    session = check_auth_cookie()
+    if not session:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    return jsonify({
+        'success': True,
+        'username': session.get('username', 'unknown'),
+        'role': session.get('role', 'user'),
+        'is_admin': session.get('role') == 'admin'
+    })
+
+
 # API KEY
 # ============================================================================
 
