@@ -1201,10 +1201,13 @@ def export_excel_dashboard(session_id):
         orchestrator = session_data['orchestrator']
         config_path = session_data['config_path']
 
-        # Get complete browser-formatted output
+        # CRITICAL: Use cached_config (filtered to analyzed sections) not full config file
         from services.hotdog.layers import ConfigurationLoader
-        config_loader = ConfigurationLoader()
-        parsed_config = config_loader.load_from_json(config_path)
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            # Fallback to loading from file if cached_config not available
+            config_loader = ConfigurationLoader()
+            parsed_config = config_loader.load_from_json(config_path)
         browser_output = orchestrator.get_browser_output(result, parsed_config)
         is_partial = False
 
@@ -1216,10 +1219,12 @@ def export_excel_dashboard(session_id):
         orchestrator = session_data['orchestrator']
         config_path = session_data['config_path']
 
-        # Get complete browser-formatted output
+        # CRITICAL: Use cached_config (filtered to analyzed sections) not full config file
         from services.hotdog.layers import ConfigurationLoader
-        config_loader = ConfigurationLoader()
-        parsed_config = config_loader.load_from_json(config_path)
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            config_loader = ConfigurationLoader()
+            parsed_config = config_loader.load_from_json(config_path)
         browser_output = orchestrator.get_browser_output(result, parsed_config)
         is_partial = False
 
@@ -1233,10 +1238,12 @@ def export_excel_dashboard(session_id):
         # Get accumulated answers so far
         accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
 
-        # Load config
+        # CRITICAL: Use cached_config (filtered to analyzed sections) not full config file
         from services.hotdog.layers import ConfigurationLoader
-        config_loader = ConfigurationLoader()
-        parsed_config = config_loader.load_from_json(config_path)
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            config_loader = ConfigurationLoader()
+            parsed_config = config_loader.load_from_json(config_path)
 
         # Build partial browser output
         browser_output = orchestrator._build_partial_browser_output(
@@ -1255,10 +1262,12 @@ def export_excel_dashboard(session_id):
         # Get accumulated answers so far
         accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
 
-        # Load config
+        # CRITICAL: Use cached_config (filtered to analyzed sections) not full config file
         from services.hotdog.layers import ConfigurationLoader
-        config_loader = ConfigurationLoader()
-        parsed_config = config_loader.load_from_json(config_path)
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            config_loader = ConfigurationLoader()
+            parsed_config = config_loader.load_from_json(config_path)
 
         # Build partial browser output
         browser_output = orchestrator._build_partial_browser_output(

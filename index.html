@@ -910,6 +910,10 @@ function handleEvent(data) {
             // Store the complete result from polling (no need for separate fetch)
             // CRITICAL: Store just the result object, not the whole event wrapper
             currentAnalysisResult = data.result;
+            // Also extract key requirements from result if available
+            if (data.result && data.result.key_requirements) {
+                currentKeyRequirements = data.result.key_requirements;
+            }
             Logger.info(`✅ Results received via polling (${data.result.sections?.length || 0} sections)`);
         }
         else if (data.event === 'analysis_complete' || data.event === 'done') {
