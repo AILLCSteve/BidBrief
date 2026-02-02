@@ -165,6 +165,7 @@ class Answer:
         - Use highest confidence
         - Track merge history
         - Concatenate all footnotes
+        - SMART DEDUP: Use Jaccard similarity to avoid repeating same info
         """
         if self.question_id != other.question_id:
             raise ValueError(f"Cannot merge answers for different questions: {self.question_id} vs {other.question_id}")
@@ -172,14 +173,52 @@ class Answer:
         # CRITICAL: Append text instead of discarding
         # Add separator and the other answer's text
         if other.text and other.text.strip():
-            # Check if the other text contains substantially different info
-            # by comparing normalized versions
             import re
+
+            # Extract core content for comparison (remove page citations and common prefixes)
+            def extract_core_content(text: str) -> str:
+                """Extract the meaningful content, removing citations and filler."""
+                # Remove PDF page citations
+                cleaned = re.sub(r'<PDF pg[^>]*>', '', text)
+                # Remove common answer prefixes
+                cleaned = re.sub(r'^(the\s+)?(project\s+)?(name|title|location|owner|engineer|deadline|date|bond|warranty|insurance|contractor|scope)\s*(is|:|\s)', '', cleaned, flags=re.IGNORECASE)
+                # Remove special markers
+                cleaned = re.sub(r'\[Additional reference\]:\s*', '', cleaned)
+                # Normalize whitespace
+                cleaned = re.sub(r'\s+', ' ', cleaned).strip().lower()
+                return cleaned
+
+            def calculate_jaccard_similarity(text1: str, text2: str) -> float:
+                """Calculate Jaccard similarity between two texts."""
+                # Tokenize into words
+                tokens1 = set(re.findall(r'\b\w+\b', text1.lower()))
+                tokens2 = set(re.findall(r'\b\w+\b', text2.lower()))
+
+                if not tokens1 or not tokens2:
+                    return 0.0
+
+                intersection = tokens1 & tokens2
+                union = tokens1 | tokens2
+
+                return len(intersection) / len(union) if union else 0.0
+
+            # Get normalized versions for comparison
             norm_self = re.sub(r'\s+', ' ', self.text.lower().strip())
             norm_other = re.sub(r'\s+', ' ', other.text.lower().strip())
 
-            # Only append if not a near-duplicate (avoid exact repeats)
-            if norm_other not in norm_self and norm_self not in norm_other:
+            # First check: exact substring match (fast path)
+            is_substring_match = norm_other in norm_self or norm_self in norm_other
+
+            # Second check: Jaccard similarity on core content
+            core_self = extract_core_content(self.text)
+            core_other = extract_core_content(other.text)
+            similarity = calculate_jaccard_similarity(core_self, core_other)
+
+            # High similarity (>= 0.7) means same info, don't append
+            is_similar = similarity >= 0.7
+
+            # Only append if not a duplicate (neither substring nor high similarity)
+            if not is_substring_match and not is_similar:
                 self.text = f"{self.text}\n\n[Additional reference]: {other.text}"
 
         # Aggregate page citations (remove duplicates, sort)

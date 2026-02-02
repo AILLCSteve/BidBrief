@@ -273,7 +273,8 @@ def _transform_to_legacy_format(hotdog_output: dict) -> dict:
         'total_pages': hotdog_output.get('total_pages', 0),
         'questions_answered': hotdog_output.get('questions_answered', 0),
         'total_questions': hotdog_output.get('total_questions', 0),
-        'metadata': hotdog_output.get('metadata', {})
+        'metadata': hotdog_output.get('metadata', {}),
+        'key_requirements': hotdog_output.get('key_requirements', {})  # Preserve key requirements
     }
 
 
@@ -688,6 +689,9 @@ def analyze_document():
     enabled_sections = data.get('enabled_sections', None)  # NEW: Optional list of enabled section IDs
     analysis_mode = data.get('mode', 'bid_spec')  # Analysis mode (bid_spec or bestprep)
     recheck_empty_windows = data.get('recheck_empty_windows', False)  # Retry windows with 0 answers
+    enable_second_pass = data.get('enable_second_pass', False)  # Retry unanswered questions
+    enable_deep_rag = data.get('enable_deep_rag', False)  # External search for remaining
+    pipeline_mode = data.get('pipeline_mode', 'classic')  # 'classic' or 'v2_pipeline'
     session_id = data.get('session_id', f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
     # Validate analysis mode
@@ -743,7 +747,10 @@ def analyze_document():
                 context_guardrails=context_guardrails,
                 progress_callback=progress_callback,
                 mode=analysis_mode,
-                recheck_empty_windows=recheck_empty_windows
+                recheck_empty_windows=recheck_empty_windows,
+                enable_second_pass=enable_second_pass,
+                enable_deep_rag=enable_deep_rag,
+                use_pipeline_v2=(pipeline_mode == 'v2_pipeline')
             )
 
             # Store in active_analyses IMMEDIATELY (for partial results)
@@ -1272,8 +1279,11 @@ def export_excel_dashboard(session_id):
         # but browser_output has {'question_text': ..., 'primary_answer': {'text': ..., 'pages': ...}}
         legacy_result = _transform_to_legacy_format(browser_output)
 
+        # Extract API key requirements if available (from KeyRequirementsExtractor)
+        api_key_requirements = browser_output.get('key_requirements', {})
+
         # Generate Excel dashboard (now works with both complete and partial)
-        generator = ExcelDashboardGenerator(legacy_result, is_partial=is_partial)
+        generator = ExcelDashboardGenerator(legacy_result, is_partial=is_partial, api_key_requirements=api_key_requirements)
         excel_file = generator.generate()
 
         # Build filename from document name and date

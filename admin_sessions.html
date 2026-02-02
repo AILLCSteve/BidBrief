@@ -841,7 +841,25 @@
                 `;
             } else {
                 // Bid/Spec mode - Key Project Requirements
-                const keyReqs = extractKeyRequirements(sections);
+                // First try to get key_requirements from API response (preferred)
+                // Fall back to extracting from sections if not available
+                const apiKeyReqs = data.result?.key_requirements || {};
+                const extractedKeyReqs = extractKeyRequirements(sections);
+
+                // Merge API key requirements with extracted ones (API takes precedence)
+                const keyReqLabels = {
+                    'project_name': 'Project Name',
+                    'owner': 'Owner/Agency',
+                    'engineer': 'Engineer',
+                    'location': 'Location',
+                    'bid_date': 'Bid Deadline',
+                    'scope': 'Scope',
+                    'contract_days': 'Timeline',
+                    'liquidated_damages': 'Liquidated Damages',
+                    'bond_requirements': 'Bonding',
+                    'insurance': 'Insurance',
+                    'warranty': 'Warranty'
+                };
 
                 html += `
                     <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
@@ -878,22 +896,38 @@
                         </tbody>
                     </table>
 
-                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Key Project Requirements</h3>
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Project Requirements</h3>
                     <table class="results-table">
                         <tbody>
                 `;
 
-                // Add key requirements rows
-                const reqOrder = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline', 'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance'];
-                reqOrder.forEach(reqName => {
-                    const value = keyReqs[reqName] || '<em style="color: #999;">Not found in document</em>';
-                    html += `
-                        <tr>
-                            <td style="width: 200px; font-weight: 600; background: #f9fafb;">${reqName}</td>
-                            <td>${value}</td>
-                        </tr>
-                    `;
-                });
+                // Use API key requirements if available, otherwise use extracted
+                if (Object.keys(apiKeyReqs).length > 0) {
+                    // Display from API key_requirements
+                    for (const [key, value] of Object.entries(apiKeyReqs)) {
+                        if (value && value.trim()) {
+                            const label = keyReqLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                            html += `
+                                <tr>
+                                    <td style="width: 200px; font-weight: 600; background: #fef3c7;">${label}</td>
+                                    <td>${value}</td>
+                                </tr>
+                            `;
+                        }
+                    }
+                } else {
+                    // Fallback to extracted key requirements
+                    const reqOrder = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline', 'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance'];
+                    reqOrder.forEach(reqName => {
+                        const value = extractedKeyReqs[reqName] || '<em style="color: #999;">Not found in document</em>';
+                        html += `
+                            <tr>
+                                <td style="width: 200px; font-weight: 600; background: #fef3c7;">${reqName}</td>
+                                <td>${value}</td>
+                            </tr>
+                        `;
+                    });
+                }
 
                 html += '</tbody></table>';
             }

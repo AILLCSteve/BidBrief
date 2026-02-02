@@ -99,12 +99,16 @@ class ExcelDashboardGenerator:
         'Location': ['location', 'project location', 'city', 'municipality', 'address'],
     }
 
-    def __init__(self, analysis_result, is_partial=False):
+    def __init__(self, analysis_result, is_partial=False, api_key_requirements=None):
         self.result = analysis_result
         self.is_partial = is_partial
         self.wb = Workbook()
         self.footnotes = self._collect_footnotes()
-        self.key_requirements = self._extract_key_requirements()
+        # Use API-extracted key requirements if provided, otherwise extract from sections
+        if api_key_requirements and len(api_key_requirements) > 0:
+            self.key_requirements = self._format_api_key_requirements(api_key_requirements)
+        else:
+            self.key_requirements = self._extract_key_requirements()
 
     def generate(self):
         """Generate complete 4-sheet report package"""
@@ -138,6 +142,50 @@ class ExcelDashboardGenerator:
                     })
                     fn_num += 1
         return footnotes
+
+    def _format_api_key_requirements(self, api_key_requirements):
+        """Format API-extracted key requirements for Excel display"""
+        requirements = {}
+
+        # Map API keys to display-friendly names
+        key_name_mapping = {
+            'project_name': 'Project Name',
+            'owner': 'Owner/Agency',
+            'engineer': 'Engineer',
+            'location': 'Location',
+            'bid_deadline': 'Bid Deadline',
+            'completion_date': 'Timeline',
+            'scope': 'Scope',
+            'linear_feet': 'Scope',
+            'payment_terms': 'Payment',
+            'warranty': 'Warranty',
+            'liquidated_damages': 'Liquidated Damages',
+            'bid_bond': 'Bonding',
+            'performance_bond': 'Bonding',
+            'certifications': 'Certifications',
+            'insurance': 'Insurance',
+        }
+
+        for key, value in api_key_requirements.items():
+            if value and str(value).strip() and str(value).lower() not in ['not found', 'n/a', 'not specified']:
+                # Get display name from mapping, or format the key nicely
+                display_name = key_name_mapping.get(key, key.replace('_', ' ').title())
+
+                # Clean the value - remove PDF citations for display
+                clean_value = re.sub(r'<PDF pg[^>]+>', '', str(value)).strip()
+                clean_value = re.sub(r'\s+', ' ', clean_value)
+
+                # Truncate if too long
+                if len(clean_value) > 200:
+                    clean_value = clean_value[:197] + '...'
+
+                # Merge with existing if same display name (e.g., multiple bond types)
+                if display_name in requirements and clean_value not in requirements[display_name]:
+                    requirements[display_name] = f"{requirements[display_name]}; {clean_value}"
+                else:
+                    requirements[display_name] = clean_value
+
+        return requirements
 
     def _extract_key_requirements(self):
         """Extract key project requirements from analysis answers"""

@@ -484,16 +484,64 @@
         <div class="section">
             <h3>⚙️ Advanced Options</h3>
             <div style="background: rgba(255,255,255,0.95); padding: 15px; border-radius: 8px; border: 1px solid #ddd;">
-                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
-                    <input type="checkbox" id="recheckEmptyWindows" style="margin-top: 3px; width: 18px; height: 18px;">
-                    <div>
-                        <strong style="color: #1E3A8A;">Recheck Empty Windows</strong>
-                        <p style="color: #666; font-size: 12px; margin: 5px 0 0 0;">
-                            After first pass, retry extraction on any windows that found 0 answers.
-                            Increases thoroughness but adds processing time.
-                        </p>
+                <!-- Pipeline Mode Selection -->
+                <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee;">
+                    <strong style="color: #1E3A8A; display: block; margin-bottom: 10px;">Analysis Pipeline Mode</strong>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: #f0f4ff; border-radius: 6px; border: 2px solid #1E3A8A;">
+                            <input type="radio" name="pipelineMode" value="classic" checked style="margin-top: 3px;">
+                            <div>
+                                <strong style="color: #1E3A8A;">Classic Mode (Recommended)</strong>
+                                <p style="color: #666; font-size: 12px; margin: 3px 0 0 0;">
+                                    Current exhaustive window-based processing. Analyzes all pages for all selected questions.
+                                </p>
+                            </div>
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: #f8fafc; border-radius: 6px; border: 1px solid #ddd;">
+                            <input type="radio" name="pipelineMode" value="v2_pipeline" style="margin-top: 3px;">
+                            <div>
+                                <strong style="color: #1E3A8A;">v2 Multi-Pass Pipeline</strong>
+                                <p style="color: #666; font-size: 12px; margin: 3px 0 0 0;">
+                                    4-stage intelligent pipeline: Quick-scan → Selective Exhaustive → Second Pass → Optional RAG.
+                                    Better for large documents with clear structure (TOC, Index).
+                                </p>
+                            </div>
+                        </label>
                     </div>
-                </label>
+                </div>
+
+                <!-- Optional Processing Passes -->
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                        <input type="checkbox" id="recheckEmptyWindows" style="margin-top: 3px; width: 18px; height: 18px;">
+                        <div>
+                            <strong style="color: #1E3A8A;">Recheck Empty Windows</strong>
+                            <p style="color: #666; font-size: 12px; margin: 5px 0 0 0;">
+                                After first pass, retry extraction on any windows that found 0 answers.
+                            </p>
+                        </div>
+                    </label>
+
+                    <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                        <input type="checkbox" id="enableSecondPass" style="margin-top: 3px; width: 18px; height: 18px;">
+                        <div>
+                            <strong style="color: #1E3A8A;">Enable Second Pass</strong>
+                            <p style="color: #666; font-size: 12px; margin: 5px 0 0 0;">
+                                After main analysis, retry questions with NO answers using enhanced creative prompts.
+                            </p>
+                        </div>
+                    </label>
+
+                    <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                        <input type="checkbox" id="enableDeepRAG" style="margin-top: 3px; width: 18px; height: 18px;">
+                        <div>
+                            <strong style="color: #1E3A8A;">Enable Deep RAG (External Search)</strong>
+                            <p style="color: #666; font-size: 12px; margin: 5px 0 0 0;">
+                                Search external similar projects for remaining unanswered questions. Answers include disclaimers.
+                            </p>
+                        </div>
+                    </label>
+                </div>
             </div>
         </div>
 
@@ -558,6 +606,7 @@
 let currentFile = null;
 let currentSessionId = null;
 let currentAnalysisResult = null;
+let currentKeyRequirements = null;  // Store key requirements from analysis
 let activeEventSource = null;  // LEGACY: Kept for backward compatibility
 let pollingInterval = null;  // NEW: Polling interval
 let lastEventIndex = 0;  // NEW: Track which events we've already processed
@@ -568,6 +617,9 @@ let currentAnalysisMode = 'bid_spec';  // NEW: Analysis mode (bid_spec or bestpr
 // NEW: Unitary Table State
 let allQuestions = {};  // { question_id: { section_name, question_text, status, answer, pages, footnote } }
 let allFootnotes = [];  // Array of unique footnotes
+
+// NEW: Question selection state for multi-pass processing
+let selectedQuestionsForProcessing = new Set();  // User-selected for additional processing
 
 // ============================================================================
 // ANALYSIS MODE SELECTION
@@ -797,6 +849,63 @@ function handleEvent(data) {
             Logger.success(`✅ Synthesis complete: ${data.synthesized_count} answers synthesized`);
             ProgressTracker.update(95, 'Synthesis complete...');
         }
+        // V2 Pipeline Stage Events
+        else if (data.event === 'stage_1_start' || data.event === 'stage_start' && data.stage === 'quick_scan') {
+            Logger.info(`🚀 Stage 1: Comprehensive Quick-Scan starting...`);
+            ProgressTracker.update(25, 'Quick-scan: Analyzing document structure...');
+        }
+        else if (data.event === 'stage_1_complete' || data.event === 'stage_complete' && data.stage === 'quick_scan') {
+            Logger.success(`✅ Quick-scan complete: ${data.high_confidence_count || data.answers_found} high-confidence answers`);
+            ProgressTracker.update(40, 'Quick-scan complete...');
+        }
+        else if (data.event === 'stage_start' && data.stage === 'exhaustive') {
+            Logger.info(`🔄 Stage 2: Selective Exhaustive Pass starting...`);
+            ProgressTracker.update(45, 'Exhaustive pass...');
+        }
+        else if (data.event === 'stage_complete' && data.stage === 'exhaustive') {
+            Logger.success(`✅ Exhaustive pass complete: ${data.answers_found} answers`);
+            ProgressTracker.update(70, 'Exhaustive pass complete...');
+        }
+        else if (data.event === 'second_pass_start' || data.event === 'stage_start' && data.stage === 'second_pass') {
+            Logger.info(`🔍 Second Pass: Retrying ${data.unanswered_count} unanswered questions...`);
+            ProgressTracker.update(75, 'Second pass: Enhanced scrutiny...');
+        }
+        else if (data.event === 'second_pass_complete' || data.event === 'stage_complete' && data.stage === 'second_pass') {
+            Logger.success(`✅ Second pass complete: ${data.answers_found} new answers, ${data.still_unanswered} still unanswered`);
+            ProgressTracker.update(85, 'Second pass complete...');
+        }
+        else if (data.event === 'stage_start' && data.stage === 'deep_rag') {
+            Logger.info(`🔍 Stage 4: Deep RAG External Search starting...`);
+            ProgressTracker.update(88, 'Deep RAG: Searching external sources...');
+        }
+        else if (data.event === 'stage_complete' && data.stage === 'deep_rag') {
+            Logger.success(`✅ Deep RAG complete: ${data.answers_found} external answers (with disclaimers)`);
+            ProgressTracker.update(92, 'Deep RAG complete...');
+        }
+        else if (data.event === 'recheck_start') {
+            Logger.info(`🔄 Rechecking ${data.empty_window_count} empty windows...`);
+            ProgressTracker.update(80, 'Rechecking empty windows...');
+        }
+        else if (data.event === 'recheck_complete') {
+            Logger.success(`✅ Recheck complete: ${data.total_new_answers} additional answers from ${data.windows_rechecked} windows`);
+            ProgressTracker.update(85, 'Recheck complete...');
+        }
+        // Key Requirements Events
+        else if (data.event === 'key_requirements_start') {
+            Logger.info(`🔑 Extracting Key Project Requirements...`);
+            ProgressTracker.update(18, 'Extracting key requirements...');
+        }
+        else if (data.event === 'key_requirements_complete') {
+            Logger.success(`✅ Key Requirements extracted: ${data.count} items`);
+            // Store key requirements for later use in modals
+            if (data.requirements) {
+                currentKeyRequirements = data.requirements;
+            }
+            ProgressTracker.update(20, 'Key requirements extracted...');
+        }
+        else if (data.event === 'key_requirements_failed') {
+            Logger.warning(`⚠️ Key requirements extraction failed: ${data.error}`);
+        }
         else if (data.event === 'results_ready') {
             // Store the complete result from polling (no need for separate fetch)
             // CRITICAL: Store just the result object, not the whole event wrapper
@@ -1010,7 +1119,13 @@ async function startAnalysis() {
 
         // STEP 4: Start analysis (returns immediately - runs in background)
         const recheckEmpty = document.getElementById('recheckEmptyWindows').checked;
-        Logger.info(`📊 Analysis mode: ${currentAnalysisMode}, Recheck empty: ${recheckEmpty}`);
+        const enableSecondPass = document.getElementById('enableSecondPass').checked;
+        const enableDeepRAG = document.getElementById('enableDeepRAG').checked;
+        const pipelineMode = document.querySelector('input[name="pipelineMode"]:checked').value;
+
+        Logger.info(`📊 Analysis mode: ${currentAnalysisMode}, Pipeline: ${pipelineMode}`);
+        Logger.info(`   Options: Recheck empty=${recheckEmpty}, Second pass=${enableSecondPass}, Deep RAG=${enableDeepRAG}`);
+
         const analyzeResp = await fetch('/api/analyze', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1021,7 +1136,10 @@ async function startAnalysis() {
                 context_guardrails: contextGuardrails || undefined,
                 enabled_sections: enabledSectionIds,  // Only analyze enabled sections
                 mode: currentAnalysisMode,  // Analysis mode
-                recheck_empty_windows: recheckEmpty  // Retry windows with 0 answers
+                recheck_empty_windows: recheckEmpty,  // Retry windows with 0 answers
+                enable_second_pass: enableSecondPass,  // Retry unanswered questions
+                enable_deep_rag: enableDeepRAG,  // External search for remaining
+                pipeline_mode: pipelineMode  // 'classic' or 'v2_pipeline'
             })
         });
 
@@ -1699,11 +1817,34 @@ function renderUnitaryTable() {
                 </div>
             </div>
 
+            <!-- Selection Actions Panel (hidden until selections made) -->
+            <div id="selectionActionsPanel" style="background: #fff3cd; padding: 15px; border-radius: 6px; margin-bottom: 20px; display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <strong style="color: #856404;">📋 <span id="selectionSummary">0 questions selected</span></strong>
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button onclick="runSecondPassOnSelected()" style="background: #1E3A8A; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                            🔄 Run Second Pass
+                        </button>
+                        <button onclick="runRAGOnSelected()" style="background: #047857; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                            🔍 Run Deep RAG
+                        </button>
+                        <button onclick="clearQuestionSelection()" style="background: #6b7280; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                            ✕ Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Unitary Table -->
             <div style="overflow-x: auto;">
                 <table class="unitary-table" style="width: 100%; border-collapse: collapse; font-size: 14px;">
                     <thead>
                         <tr style="background: #1E3A8A; color: white;">
+                            <th style="padding: 12px; text-align: center; border: 1px solid #ddd; width: 40px;">
+                                <input type="checkbox" id="selectAllQuestions" onchange="toggleAllQuestionSelection(this)" title="Select all for additional processing">
+                            </th>
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Section</th>
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 50px;">#</th>
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Question</th>
@@ -1742,8 +1883,21 @@ function renderUnitaryTable() {
                 answerContent = `<span onclick="openAnswerDetailModal('${q.question_id}')" style="cursor: pointer; color: #1E3A8A;" title="Click to view full answer">${truncatedAnswer}${fragmentBadge}</span>`;
             }
 
+            // Determine if this should be auto-selected (unanswered or low confidence)
+            const isUnanswered = isPending || !q.answer;
+            const isLowConfidence = q.confidence && q.confidence < 0.9;
+            const isSelected = selectedQuestionsForProcessing.has(q.question_id);
+
             html += `
                 <tr id="row-${q.question_id}" style="background: ${rowColor};">
+                    <td style="padding: 10px; text-align: center; border: 1px solid #ddd;">
+                        <input type="checkbox"
+                               class="question-select-checkbox"
+                               data-question-id="${q.question_id}"
+                               ${isSelected ? 'checked' : ''}
+                               onchange="handleQuestionSelectionChange('${q.question_id}', this.checked)"
+                               title="${isUnanswered ? 'Unanswered question' : (isLowConfidence ? 'Low confidence answer' : 'Select for additional processing')}">
+                    </td>
                     <td style="padding: 10px; border: 1px solid #ddd;">${idx === 0 ? sectionName : ''}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${q.question_number}</td>
                     <td style="padding: 10px; border: 1px solid #ddd;">${q.question_text}</td>
@@ -1853,6 +2007,177 @@ function renderFootnotesSection() {
             </ol>
         </div>
     `;
+}
+
+// ============================================================================
+// QUESTION SELECTION FOR MULTI-PASS PROCESSING
+// ============================================================================
+
+function handleQuestionSelectionChange(questionId, isSelected) {
+    if (isSelected) {
+        selectedQuestionsForProcessing.add(questionId);
+    } else {
+        selectedQuestionsForProcessing.delete(questionId);
+    }
+    updateSelectionSummary();
+}
+
+function toggleAllQuestionSelection(checkbox) {
+    const checkboxes = document.querySelectorAll('.question-select-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+        const qid = cb.dataset.questionId;
+        if (checkbox.checked) {
+            selectedQuestionsForProcessing.add(qid);
+        } else {
+            selectedQuestionsForProcessing.delete(qid);
+        }
+    });
+    updateSelectionSummary();
+}
+
+function updateSelectionSummary() {
+    const panel = document.getElementById('selectionActionsPanel');
+    const summary = document.getElementById('selectionSummary');
+
+    if (selectedQuestionsForProcessing.size > 0) {
+        panel.style.display = 'flex';
+        summary.textContent = `${selectedQuestionsForProcessing.size} questions selected`;
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function clearQuestionSelection() {
+    selectedQuestionsForProcessing.clear();
+    document.querySelectorAll('.question-select-checkbox').forEach(cb => cb.checked = false);
+    const selectAll = document.getElementById('selectAllQuestions');
+    if (selectAll) selectAll.checked = false;
+    updateSelectionSummary();
+}
+
+function getSelectedQuestionIds() {
+    return Array.from(selectedQuestionsForProcessing);
+}
+
+async function runSecondPassOnSelected() {
+    const selectedIds = getSelectedQuestionIds();
+    if (selectedIds.length === 0) {
+        Logger.warning('No questions selected for second pass');
+        alert('Please select questions first');
+        return;
+    }
+
+    Logger.info(`🔄 Starting second pass on ${selectedIds.length} selected questions...`);
+
+    try {
+        const response = await fetch(`/api/analyze/second-pass/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question_ids: selectedIds })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Second pass request failed');
+        }
+
+        const result = await response.json();
+        Logger.success(`✅ Second pass complete: ${result.answers_found} new answers found`);
+
+        // Refresh results if answers were found
+        if (result.answers_found > 0) {
+            Logger.info('Refreshing results...');
+            // The backend should have updated the session, so we can fetch fresh results
+            await refreshResults();
+        }
+    } catch (error) {
+        Logger.error('Second pass failed: ' + error.message);
+        alert('Second pass failed: ' + error.message);
+    }
+}
+
+async function runRAGOnSelected() {
+    const selectedIds = getSelectedQuestionIds();
+    if (selectedIds.length === 0) {
+        Logger.warning('No questions selected for RAG search');
+        alert('Please select questions first');
+        return;
+    }
+
+    Logger.info(`🔍 Starting Deep RAG on ${selectedIds.length} selected questions...`);
+
+    try {
+        const response = await fetch(`/api/analyze/rag/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question_ids: selectedIds })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'RAG request failed');
+        }
+
+        const result = await response.json();
+        Logger.success(`✅ Deep RAG complete: ${result.answers_found} potential answers found (with disclaimers)`);
+
+        // Show RAG results in a modal or update table
+        if (result.answers_found > 0 && result.results) {
+            showRAGResults(result.results);
+        }
+    } catch (error) {
+        Logger.error('Deep RAG failed: ' + error.message);
+        alert('Deep RAG failed: ' + error.message);
+    }
+}
+
+function showRAGResults(results) {
+    // Display RAG results with disclaimers
+    let html = '<div style="max-height: 400px; overflow-y: auto;">';
+    html += '<p style="color: #856404; background: #fff3cd; padding: 10px; border-radius: 6px; margin-bottom: 15px;">';
+    html += '⚠️ These answers are from EXTERNAL sources and may not apply to this project. Always verify with official documents.';
+    html += '</p>';
+
+    for (const [qid, data] of Object.entries(results)) {
+        const q = allQuestions[qid];
+        html += `
+            <div style="border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 6px;">
+                <strong>${q ? q.question_text : qid}</strong>
+                <p style="margin: 10px 0;">${data.answer}</p>
+                <small style="color: #666;">Source: ${data.source} (${data.source_type}) | Confidence: ${(data.confidence * 100).toFixed(0)}%</small>
+            </div>
+        `;
+    }
+    html += '</div>';
+
+    // Show in a simple alert/modal (you can enhance this)
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+    modal.innerHTML = `
+        <div style="background: white; padding: 20px; border-radius: 8px; max-width: 600px; width: 90%;">
+            <h3 style="color: #1E3A8A; margin-bottom: 15px;">🔍 Deep RAG Results</h3>
+            ${html}
+            <button onclick="this.parentElement.parentElement.remove()" style="margin-top: 15px; background: #1E3A8A; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">Close</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+async function refreshResults() {
+    if (!currentSessionId) return;
+
+    try {
+        const response = await fetch(`/api/results/${currentSessionId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.status === 'complete' || data.status === 'partial') {
+                updateUnitaryTableAsFinal(data.result, data.status === 'partial');
+            }
+        }
+    } catch (error) {
+        Logger.warning('Could not refresh results: ' + error.message);
+    }
 }
 
 // ============================================================================
@@ -2522,6 +2847,41 @@ function renderFullViewSummaryTab() {
             </table>
         `;
     } else {
+        // Build Key Project Requirements section for Bid/Spec mode
+        let krpHtml = '';
+        if (currentKeyRequirements && Object.keys(currentKeyRequirements).length > 0) {
+            krpHtml = `
+                <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Project Requirements</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                    <tbody>
+            `;
+            const krpLabels = {
+                'project_name': 'Project Name',
+                'owner': 'Owner/Agency',
+                'engineer': 'Engineer/Designer',
+                'bid_date': 'Bid Date',
+                'location': 'Location',
+                'scope': 'Scope',
+                'contract_days': 'Contract Days',
+                'liquidated_damages': 'Liquidated Damages',
+                'bond_requirements': 'Bond Requirements',
+                'insurance': 'Insurance Requirements',
+                'warranty': 'Warranty Period'
+            };
+            for (const [key, value] of Object.entries(currentKeyRequirements)) {
+                if (value && value.trim()) {
+                    const label = krpLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                    krpHtml += `
+                        <tr>
+                            <td style="padding: 10px; font-weight: 600; background: #fef3c7; border: 1px solid #e5e7eb; width: 200px;">${label}</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">${value}</td>
+                        </tr>
+                    `;
+                }
+            }
+            krpHtml += '</tbody></table>';
+        }
+
         html = `
             <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
@@ -2538,6 +2898,7 @@ function renderFullViewSummaryTab() {
                         <td style="padding: 10px; border: 1px solid #e5e7eb;">${allPages.size}</td></tr>
                 </tbody>
             </table>
+            ${krpHtml}
         `;
     }
 
