@@ -1016,8 +1016,11 @@ def get_results(session_id):
         }
 
         # Add key requirements from orchestrator (for bid_spec mode)
-        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
-            response['key_requirements'] = orchestrator.extracted_key_requirements
+        # Use get_summary_data() for JSON-serializable output (extracted_key_requirements contains dataclass objects)
+        if hasattr(orchestrator, 'key_requirements_extractor') and orchestrator.key_requirements_extractor:
+            key_reqs = orchestrator.key_requirements_extractor.get_summary_data()
+            if key_reqs:
+                response['key_requirements'] = key_reqs
 
         # Add BestPrep-specific data if available
         bestprep_data = _extract_bestprep_data(orchestrator)
@@ -1056,8 +1059,11 @@ def get_results(session_id):
         }
 
         # Add key requirements from orchestrator (for bid_spec mode)
-        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
-            response['key_requirements'] = orchestrator.extracted_key_requirements
+        # Use get_summary_data() for JSON-serializable output (extracted_key_requirements contains dataclass objects)
+        if hasattr(orchestrator, 'key_requirements_extractor') and orchestrator.key_requirements_extractor:
+            key_reqs = orchestrator.key_requirements_extractor.get_summary_data()
+            if key_reqs:
+                response['key_requirements'] = key_reqs
 
         # Add BestPrep-specific data if available
         bestprep_data = _extract_bestprep_data(orchestrator)
@@ -1127,8 +1133,11 @@ def get_results(session_id):
         }
 
         # Add key requirements from orchestrator (for bid_spec mode)
-        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
-            response['key_requirements'] = orchestrator.extracted_key_requirements
+        # Use get_summary_data() for JSON-serializable output (extracted_key_requirements contains dataclass objects)
+        if hasattr(orchestrator, 'key_requirements_extractor') and orchestrator.key_requirements_extractor:
+            key_reqs = orchestrator.key_requirements_extractor.get_summary_data()
+            if key_reqs:
+                response['key_requirements'] = key_reqs
 
         # Add BestPrep-specific data if available
         bestprep_data = _extract_bestprep_data(orchestrator)
