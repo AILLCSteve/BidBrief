@@ -287,7 +287,8 @@ def _transform_to_legacy_format(hotdog_output: dict) -> dict:
         'questions_answered': hotdog_output.get('questions_answered', 0),
         'total_questions': hotdog_output.get('total_questions', 0),
         'metadata': hotdog_output.get('metadata', {}),
-        'key_requirements': hotdog_output.get('key_requirements', {})  # Preserve key requirements
+        'key_requirements': hotdog_output.get('key_requirements', {}),  # Preserve key requirements
+        'footnotes': hotdog_output.get('footnotes', [])  # Preserve compiled footnotes array
     }
 
 
@@ -1014,6 +1015,10 @@ def get_results(session_id):
             }
         }
 
+        # Add key requirements from orchestrator (for bid_spec mode)
+        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
+            response['key_requirements'] = orchestrator.extracted_key_requirements
+
         # Add BestPrep-specific data if available
         bestprep_data = _extract_bestprep_data(orchestrator)
         if bestprep_data:
@@ -1049,6 +1054,10 @@ def get_results(session_id):
                 'average_confidence': f"{result.average_confidence:.0%}"
             }
         }
+
+        # Add key requirements from orchestrator (for bid_spec mode)
+        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
+            response['key_requirements'] = orchestrator.extracted_key_requirements
 
         # Add BestPrep-specific data if available
         bestprep_data = _extract_bestprep_data(orchestrator)
@@ -1116,6 +1125,10 @@ def get_results(session_id):
                 'average_confidence': 'Partial'
             }
         }
+
+        # Add key requirements from orchestrator (for bid_spec mode)
+        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
+            response['key_requirements'] = orchestrator.extracted_key_requirements
 
         # Add BestPrep-specific data if available
         bestprep_data = _extract_bestprep_data(orchestrator)
@@ -1308,17 +1321,29 @@ def export_excel_dashboard(session_id):
         generator = ExcelDashboardGenerator(legacy_result, is_partial=is_partial, api_key_requirements=api_key_requirements)
         excel_file = generator.generate()
 
-        # Build filename from document name and date
+        # Build filename from project name (KRP) + date + mode
         from datetime import datetime
         import re
-        doc_name = legacy_result.get('document_name', 'Analysis')
-        # Clean the document name for filename use
-        doc_name = re.sub(r'\.pdf$', '', doc_name, flags=re.IGNORECASE)
-        doc_name = re.sub(r'[^\w\s-]', '', doc_name).strip()
-        doc_name = re.sub(r'\s+', '_', doc_name)[:50]  # Limit length
+
+        # Try to get project name from key requirements first
+        project_name = None
+        if api_key_requirements:
+            project_name = api_key_requirements.get('project_name') or api_key_requirements.get('Project Name')
+
+        # Fallback to document name
+        if not project_name:
+            project_name = legacy_result.get('document_name', 'Analysis')
+
+        # Clean the name for filename use
+        project_name = re.sub(r'\.pdf$', '', project_name, flags=re.IGNORECASE)
+        project_name = re.sub(r'<PDF pg[^>]+>', '', project_name)  # Remove PDF citations
+        project_name = re.sub(r'[^\w\s-]', '', project_name).strip()
+        project_name = re.sub(r'\s+', '_', project_name)[:50]  # Limit length
+
         date_str = datetime.now().strftime('%Y-%m-%d')
         partial_suffix = '_PARTIAL' if is_partial else ''
-        filename = f'{doc_name}_{date_str}{partial_suffix}.xlsx'
+        mode_suffix = '_bidspec'  # This endpoint is for bid/spec mode
+        filename = f'{project_name}_{date_str}{mode_suffix}{partial_suffix}.xlsx'
 
         return send_file(
             excel_file,
@@ -1411,15 +1436,27 @@ def export_bestprep_excel(session_id):
 
         excel_file = generator.generate()
 
-        # Build filename
+        # Build filename from project name (KRP) + date + mode
         import re
-        doc_name = session_data.get('pdf_filename', 'BestPrep_Analysis')
-        doc_name = re.sub(r'\.pdf$', '', doc_name, flags=re.IGNORECASE)
-        doc_name = re.sub(r'[^\w\s-]', '', doc_name).strip()
-        doc_name = re.sub(r'\s+', '_', doc_name)[:50]
+
+        # Try to get project name from key requirements first
+        project_name = None
+        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
+            project_name = orchestrator.extracted_key_requirements.get('project_name') or orchestrator.extracted_key_requirements.get('Project Name')
+
+        # Fallback to document name
+        if not project_name:
+            project_name = session_data.get('pdf_filename', 'BestPrep_Analysis')
+
+        # Clean the name for filename use
+        project_name = re.sub(r'\.pdf$', '', project_name, flags=re.IGNORECASE)
+        project_name = re.sub(r'<PDF pg[^>]+>', '', project_name)  # Remove PDF citations
+        project_name = re.sub(r'[^\w\s-]', '', project_name).strip()
+        project_name = re.sub(r'\s+', '_', project_name)[:50]
+
         date_str = datetime.now().strftime('%Y-%m-%d')
         partial_suffix = '_PARTIAL' if is_partial else ''
-        filename = f'{doc_name}_BestPrep_{date_str}{partial_suffix}.xlsx'
+        filename = f'{project_name}_{date_str}_bestprep{partial_suffix}.xlsx'
 
         logger.info(f"BestPrep Excel export successful: {filename}")
 

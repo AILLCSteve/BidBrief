@@ -841,25 +841,31 @@
                 `;
             } else {
                 // Bid/Spec mode - Key Project Requirements
-                // First try to get key_requirements from API response (preferred)
-                // Fall back to extracting from sections if not available
-                const apiKeyReqs = data.result?.key_requirements || {};
-                const extractedKeyReqs = extractKeyRequirements(sections);
+                // Get key_requirements from API response (from orchestrator.extracted_key_requirements)
+                const apiKeyReqs = data.key_requirements || {};
 
-                // Merge API key requirements with extracted ones (API takes precedence)
+                // Key requirement label mappings
                 const keyReqLabels = {
                     'project_name': 'Project Name',
                     'owner': 'Owner/Agency',
                     'engineer': 'Engineer',
                     'location': 'Location',
                     'bid_date': 'Bid Deadline',
+                    'bid_deadline': 'Bid Deadline',
                     'scope': 'Scope',
                     'contract_days': 'Timeline',
+                    'timeline': 'Timeline',
                     'liquidated_damages': 'Liquidated Damages',
                     'bond_requirements': 'Bonding',
+                    'bonding': 'Bonding',
                     'insurance': 'Insurance',
-                    'warranty': 'Warranty'
+                    'warranty': 'Warranty',
+                    'certifications': 'Certifications',
+                    'payment_terms': 'Payment'
                 };
+
+                // Preferred display order
+                const displayOrder = ['project_name', 'owner', 'engineer', 'location', 'bid_date', 'bid_deadline', 'scope', 'contract_days', 'timeline', 'liquidated_damages', 'bond_requirements', 'bonding', 'warranty', 'certifications', 'insurance', 'payment_terms'];
 
                 html += `
                     <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
@@ -895,41 +901,49 @@
                             </tr>
                         </tbody>
                     </table>
-
-                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Project Requirements</h3>
-                    <table class="results-table">
-                        <tbody>
                 `;
 
-                // Use API key requirements if available, otherwise use extracted
+                // Only show Key Requirements section if we have data from API
                 if (Object.keys(apiKeyReqs).length > 0) {
-                    // Display from API key_requirements
-                    for (const [key, value] of Object.entries(apiKeyReqs)) {
-                        if (value && value.trim()) {
+                    html += `
+                        <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Project Requirements</h3>
+                        <table class="results-table">
+                            <tbody>
+                    `;
+
+                    // Display in preferred order, then any remaining keys
+                    const displayedKeys = new Set();
+                    displayOrder.forEach(key => {
+                        if (apiKeyReqs[key] && apiKeyReqs[key].trim()) {
                             const label = keyReqLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                            // Clean the value - remove PDF citations for cleaner display
+                            let cleanValue = apiKeyReqs[key].replace(/<PDF pg[^>]+>/g, '').trim();
                             html += `
                                 <tr>
                                     <td style="width: 200px; font-weight: 600; background: #fef3c7;">${label}</td>
-                                    <td>${value}</td>
+                                    <td>${cleanValue}</td>
+                                </tr>
+                            `;
+                            displayedKeys.add(key);
+                        }
+                    });
+
+                    // Add any keys not in preferred order
+                    for (const [key, value] of Object.entries(apiKeyReqs)) {
+                        if (!displayedKeys.has(key) && value && value.trim()) {
+                            const label = keyReqLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                            let cleanValue = value.replace(/<PDF pg[^>]+>/g, '').trim();
+                            html += `
+                                <tr>
+                                    <td style="width: 200px; font-weight: 600; background: #fef3c7;">${label}</td>
+                                    <td>${cleanValue}</td>
                                 </tr>
                             `;
                         }
                     }
-                } else {
-                    // Fallback to extracted key requirements
-                    const reqOrder = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline', 'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages', 'Bonding', 'Certifications', 'Insurance'];
-                    reqOrder.forEach(reqName => {
-                        const value = extractedKeyReqs[reqName] || '<em style="color: #999;">Not found in document</em>';
-                        html += `
-                            <tr>
-                                <td style="width: 200px; font-weight: 600; background: #fef3c7;">${reqName}</td>
-                                <td>${value}</td>
-                            </tr>
-                        `;
-                    });
-                }
 
-                html += '</tbody></table>';
+                    html += '</tbody></table>';
+                }
             }
 
             html += `<p style="margin-top: 20px; color: #6b7280; font-size: 12px;">Session ID: ${sessionId}</p>`;
@@ -1239,11 +1253,12 @@
                     footnote_id: fn.footnote_id
                 }));
             } else {
-                // Fallback: try to get from sections (legacy)
+                // Fallback: Collect ALL footnotes from sections (not just one per question)
                 const sections = data.result?.sections || [];
                 let fnNum = 1;
                 sections.forEach(section => {
                     (section.questions || []).forEach(q => {
+                        // Check for footnote field (single footnote)
                         if (q.footnote && q.footnote.trim()) {
                             footnotes.push({
                                 number: fnNum++,
@@ -1251,6 +1266,20 @@
                                 question: q.question,
                                 footnote: q.footnote,
                                 pages: q.page_citations || []
+                            });
+                        }
+                        // Also check for footnotes array (multiple footnotes per question)
+                        if (q.footnotes && Array.isArray(q.footnotes)) {
+                            q.footnotes.forEach(fn => {
+                                if (fn && fn.trim()) {
+                                    footnotes.push({
+                                        number: fnNum++,
+                                        section: section.section_name,
+                                        question: q.question,
+                                        footnote: fn,
+                                        pages: q.page_citations || []
+                                    });
+                                }
                             });
                         }
                     });
@@ -1267,40 +1296,20 @@
                 return;
             }
 
+            // Styled list format matching analysis page
             let html = `
                 <div style="margin-bottom: 20px; padding: 15px; background: #E8EEF7; border-radius: 8px;">
                     <strong style="color: #1E3A8A;">${footnotes.length} Footnotes</strong>
-                    <span style="color: #6b7280; margin-left: 10px;">Additional context and citations from the analysis</span>
+                    <span style="color: #6b7280; margin-left: 10px;">PDF page references and additional context</span>
                 </div>
-                <table class="results-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 40px;">#</th>
-                            <th style="width: 150px;">Section</th>
-                            <th style="width: 200px;">Related Question</th>
-                            <th>Footnote/Citation</th>
-                            <th style="width: 80px;">Pages</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+                <ol style="margin: 0; padding-left: 25px; line-height: 1.8;">
             `;
 
             footnotes.forEach(fn => {
-                const pages = fn.pages.join(', ') || '-';
-                const shortQuestion = fn.question.length > 80 ? fn.question.substring(0, 80) + '...' : fn.question;
-
-                html += `
-                    <tr>
-                        <td style="text-align: center; font-weight: 600; color: #1E3A8A;">${fn.number}</td>
-                        <td>${fn.section}</td>
-                        <td title="${fn.question}">${shortQuestion}</td>
-                        <td>${fn.footnote}</td>
-                        <td class="pages-cell">${pages}</td>
-                    </tr>
-                `;
+                html += `<li style="margin-bottom: 12px; padding: 10px; background: #fffaeb; border-radius: 4px; border-left: 3px solid #ff9800;">${fn.footnote}</li>`;
             });
 
-            html += '</tbody></table>';
+            html += '</ol>';
             document.getElementById('footnotesContent').innerHTML = html;
         }
 

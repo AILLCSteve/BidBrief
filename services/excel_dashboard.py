@@ -126,8 +126,28 @@ class ExcelDashboardGenerator:
         return output
 
     def _collect_footnotes(self):
-        """Collect all footnotes from the analysis"""
+        """Collect all footnotes from the analysis.
+
+        First tries to use the compiled footnotes array from the result (contains all citations).
+        Falls back to collecting individual question footnotes if compiled array not available.
+        """
         footnotes = []
+
+        # Try compiled footnotes array first (contains ALL citations from document)
+        compiled_footnotes = self.result.get('footnotes', [])
+        if compiled_footnotes:
+            for fn_num, fn_text in enumerate(compiled_footnotes, 1):
+                if fn_text and fn_text.strip():
+                    footnotes.append({
+                        'number': fn_num,
+                        'section': '',  # Compiled footnotes don't have section context
+                        'question': '',
+                        'footnote': fn_text.strip(),
+                        'pages': []
+                    })
+            return footnotes
+
+        # Fallback: collect from individual questions
         fn_num = 1
         for section in self.result.get('sections', []):
             for q in section.get('questions', []):
@@ -549,62 +569,109 @@ class ExcelDashboardGenerator:
         """Sheet 4: Footnotes - All citations and contextual notes"""
         ws = self.wb.create_sheet('Footnotes')
 
-        ws.merge_cells('A1:E1')
+        # Title with styling
+        ws.merge_cells('A1:B1')
         ws['A1'] = 'FOOTNOTES & CITATIONS'
-        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].font = Font(name='Calibri', size=18, bold=True, color="FFFFFF")
+        ws['A1'].fill = self.TITLE_FILL
         ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
-        ws.row_dimensions[1].height = 30
+        ws.row_dimensions[1].height = 35
 
         if not self.footnotes:
             ws['A3'] = 'No footnotes were generated during this analysis.'
             ws['A3'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+            ws.column_dimensions['A'].width = 60
             return
 
-        ws['A2'] = f'{len(self.footnotes)} footnotes collected from analysis'
+        # Subtitle with count
+        ws['A2'] = f'{len(self.footnotes)} footnotes/citations collected from analysis'
         ws['A2'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+        ws.row_dimensions[2].height = 25
 
-        row = 4
-        headers = ['#', 'Section', 'Related Question', 'Footnote/Citation', 'PDF Pages']
-        widths = [5, 25, 40, 55, 12]
+        # Check if we have compiled footnotes (simple format) or question-based footnotes
+        has_question_context = any(fn.get('section') or fn.get('question') for fn in self.footnotes)
 
-        for col, (header, width) in enumerate(zip(headers, widths), start=1):
-            cell = ws.cell(row, col, header)
-            cell.font = self.HEADER_FONT
-            cell.fill = self.HEADER_FILL
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            cell.border = self.BORDER_THIN
-            ws.column_dimensions[get_column_letter(col)].width = width
+        if has_question_context:
+            # Format with section/question context
+            row = 4
+            headers = ['#', 'Section', 'Related Question', 'Footnote/Citation', 'PDF Pages']
+            widths = [6, 25, 40, 55, 12]
 
-        ws.row_dimensions[row].height = 25
-
-        for fn in self.footnotes:
-            row += 1
-            is_alt = fn['number'] % 2 == 0
-
-            ws.cell(row, 1, fn['number']).font = self.DATA_FONT_BOLD
-            ws.cell(row, 1).alignment = Alignment(horizontal='center', vertical='top')
-
-            ws.cell(row, 2, sanitize_for_excel(fn['section'])).font = self.DATA_FONT
-            question_text = sanitize_for_excel(fn['question'])
-            ws.cell(row, 3, question_text[:100] + '...' if len(question_text) > 100 else question_text).font = self.DATA_FONT
-            ws.cell(row, 4, sanitize_for_excel(fn['footnote'])).font = self.DATA_FONT
-
-            pages_str = ', '.join(map(str, fn['pages'])) if fn['pages'] else '-'
-            ws.cell(row, 5, pages_str).font = self.DATA_FONT_BOLD
-            ws.cell(row, 5).alignment = Alignment(horizontal='center', vertical='top')
-
-            for col in range(1, 6):
-                cell = ws.cell(row, col)
+            for col, (header, width) in enumerate(zip(headers, widths), start=1):
+                cell = ws.cell(row, col, header)
+                cell.font = self.HEADER_FONT
+                cell.fill = self.HEADER_FILL
+                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
                 cell.border = self.BORDER_THIN
-                if is_alt:
-                    cell.fill = self.ALT_ROW_FILL
-                cell.alignment = Alignment(
-                    horizontal='left' if col in [2, 3, 4] else 'center',
-                    vertical='top',
-                    wrap_text=True
-                )
+                ws.column_dimensions[get_column_letter(col)].width = width
 
-            ws.row_dimensions[row].height = 45
+            ws.row_dimensions[row].height = 25
+
+            for fn in self.footnotes:
+                row += 1
+                is_alt = fn['number'] % 2 == 0
+
+                ws.cell(row, 1, fn['number']).font = self.DATA_FONT_BOLD
+                ws.cell(row, 1).alignment = Alignment(horizontal='center', vertical='top')
+                ws.cell(row, 1).fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+
+                ws.cell(row, 2, sanitize_for_excel(fn['section'])).font = self.DATA_FONT
+                question_text = sanitize_for_excel(fn['question'])
+                ws.cell(row, 3, question_text[:100] + '...' if len(question_text) > 100 else question_text).font = self.DATA_FONT
+                ws.cell(row, 4, sanitize_for_excel(fn['footnote'])).font = self.DATA_FONT
+
+                pages_str = ', '.join(map(str, fn['pages'])) if fn['pages'] else '-'
+                ws.cell(row, 5, pages_str).font = self.DATA_FONT_BOLD
+                ws.cell(row, 5).alignment = Alignment(horizontal='center', vertical='top')
+
+                for col in range(1, 6):
+                    cell = ws.cell(row, col)
+                    cell.border = self.BORDER_THIN
+                    if is_alt and col != 1:  # Don't override # column highlight
+                        cell.fill = self.ALT_ROW_FILL
+                    cell.alignment = Alignment(
+                        horizontal='left' if col in [2, 3, 4] else 'center',
+                        vertical='top',
+                        wrap_text=True
+                    )
+
+                ws.row_dimensions[row].height = 45
+        else:
+            # Simple format - just # and footnote text (for compiled footnotes)
+            row = 4
+            headers = ['#', 'Footnote/Citation']
+            widths = [6, 100]
+
+            for col, (header, width) in enumerate(zip(headers, widths), start=1):
+                cell = ws.cell(row, col, header)
+                cell.font = self.HEADER_FONT
+                cell.fill = self.HEADER_FILL
+                cell.alignment = Alignment(horizontal='center' if col == 1 else 'left', vertical='center', wrap_text=True)
+                cell.border = self.BORDER_THIN
+                ws.column_dimensions[get_column_letter(col)].width = width
+
+            ws.row_dimensions[row].height = 25
+
+            for fn in self.footnotes:
+                row += 1
+                is_alt = fn['number'] % 2 == 0
+
+                # Number column with highlight
+                cell_num = ws.cell(row, 1, fn['number'])
+                cell_num.font = self.DATA_FONT_BOLD
+                cell_num.alignment = Alignment(horizontal='center', vertical='top')
+                cell_num.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+                cell_num.border = self.BORDER_THIN
+
+                # Footnote text
+                cell_fn = ws.cell(row, 2, sanitize_for_excel(fn['footnote']))
+                cell_fn.font = self.DATA_FONT
+                cell_fn.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+                cell_fn.border = self.BORDER_THIN
+                if is_alt:
+                    cell_fn.fill = self.ALT_ROW_FILL
+
+                ws.row_dimensions[row].height = 50
 
     def _get_timestamp(self):
         """Get formatted timestamp"""
