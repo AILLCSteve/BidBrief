@@ -441,12 +441,14 @@
             <div class="tab-container">
                 <div class="tab-buttons">
                     <button class="tab-btn active" onclick="switchTab('summary')">Summary</button>
+                    <button class="tab-btn" id="optimizedScanTabBtn" style="display: none;" onclick="switchTab('optimizedScan')">Optimized Scan</button>
                     <button class="tab-btn" onclick="switchTab('detailed')">Detailed Results</button>
                     <button class="tab-btn" onclick="switchTab('bySection')">By Section</button>
+                    <button class="tab-btn" id="unansweredPassTabBtn" style="display: none;" onclick="switchTab('unansweredPass')">Unanswered Pass</button>
                     <button class="tab-btn" id="fragmentsTabBtn" style="display: none;" onclick="switchTab('fragments')">All Fragments</button>
                     <button class="tab-btn" onclick="switchTab('footnotes')">Footnotes</button>
                     <button class="tab-btn" id="pageIndexTabBtn" style="display: none;" onclick="switchTab('pageIndex')">Page Index</button>
-                    <button class="tab-btn" id="optimizedScanTabBtn" style="display: none;" onclick="switchTab('optimizedScan')">Optimized Scan</button>
+                    <button class="tab-btn" id="ragTabBtn" style="display: none;" onclick="switchTab('rag')">Deep RAG</button>
                 </div>
             </div>
 
@@ -454,11 +456,17 @@
             <div id="tab-summary" class="tab-content active">
                 <div id="summaryContent"></div>
             </div>
+            <div id="tab-optimizedScan" class="tab-content">
+                <div id="optimizedScanContent"></div>
+            </div>
             <div id="tab-detailed" class="tab-content">
                 <div id="detailedContent"></div>
             </div>
             <div id="tab-bySection" class="tab-content">
                 <div id="bySectionContent"></div>
+            </div>
+            <div id="tab-unansweredPass" class="tab-content">
+                <div id="unansweredPassContent"></div>
             </div>
             <div id="tab-fragments" class="tab-content">
                 <div id="fragmentsContent"></div>
@@ -469,8 +477,8 @@
             <div id="tab-pageIndex" class="tab-content">
                 <div id="pageIndexContent"></div>
             </div>
-            <div id="tab-optimizedScan" class="tab-content">
-                <div id="optimizedScanContent"></div>
+            <div id="tab-rag" class="tab-content">
+                <div id="ragContent"></div>
             </div>
         </div>
     </div>
@@ -633,12 +641,26 @@
                 document.getElementById('pageIndexTabBtn').style.display = 'none';
             }
 
-            // Show Optimized Scan tab for V2 pipeline analyses
-            if (data.optimized_scan_data && Object.keys(data.optimized_scan_data).length > 0) {
+            // Detect if this is a V2 pipeline analysis (HOTDOG7ATE)
+            const isV2Pipeline = data.use_pipeline_v2 || (data.optimized_scan_data && Object.keys(data.optimized_scan_data).length > 0);
+
+            // Show V2 Pipeline tabs for HOTDOG7ATE analyses
+            if (isV2Pipeline) {
+                // Optimized Scan tab
                 document.getElementById('optimizedScanTabBtn').style.display = 'inline-block';
-                renderOptimizedScanTab(data.optimized_scan_data);
+                renderOptimizedScanTab(data.optimized_scan_data || {});
+
+                // Unanswered Pass tab
+                document.getElementById('unansweredPassTabBtn').style.display = 'inline-block';
+                renderUnansweredPassTab(data.unanswered_pass_data || null);
+
+                // RAG tab
+                document.getElementById('ragTabBtn').style.display = 'inline-block';
+                renderRagTab(data.rag_data || null);
             } else {
                 document.getElementById('optimizedScanTabBtn').style.display = 'none';
+                document.getElementById('unansweredPassTabBtn').style.display = 'none';
+                document.getElementById('ragTabBtn').style.display = 'none';
             }
 
             renderSummaryTab(data, sessionId, mode);
@@ -1329,8 +1351,8 @@
             if (!optimizedScanData || Object.keys(optimizedScanData).length === 0) {
                 document.getElementById('optimizedScanContent').innerHTML = `
                     <div style="text-align: center; padding: 60px; color: #9ca3af;">
-                        <p style="font-size: 18px; margin-bottom: 10px;">No Optimized Scan data available</p>
-                        <p style="font-size: 14px;">This tab shows V2 pipeline document navigator audit data</p>
+                        <p style="font-size: 18px; margin-bottom: 10px;">Stage not Processed by User</p>
+                        <p style="font-size: 14px;">Optimized Scan Pass was not run for this analysis</p>
                     </div>
                 `;
                 return;
@@ -1341,11 +1363,12 @@
             const allKeywords = optimizedScanData.all_keywords_by_section || {};
             const reduction = optimizedScanData.estimated_reduction || 'N/A';
             const unassigned = optimizedScanData.unassigned_questions || [];
+            const hotspots = optimizedScanData.topic_hotspots_found || structure.topic_hotspots_count || 0;
 
             let html = `
                 <div style="background: linear-gradient(135deg, #7c3aed, #a855f7); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h3 style="margin: 0 0 8px 0; font-size: 16px;">V2 Pipeline - Document Navigator Audit</h3>
-                    <p style="margin: 0; opacity: 0.9; font-size: 13px;">Pre-scan analysis showing which pages each expert was directed to examine</p>
+                    <h3 style="margin: 0 0 8px 0; font-size: 16px;">V2 Pipeline - Optimized Scan Pass Audit</h3>
+                    <p style="margin: 0; opacity: 0.9; font-size: 13px;">Enhanced document analysis: TOC, Index, Headers, Footers, Topic Hotspots, Expert Keywords</p>
                 </div>
 
                 <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Document Structure Detected</h3>
@@ -1374,6 +1397,26 @@
                             <td style="padding: 10px; border: 1px solid #e5e7eb;">
                                 <span style="background: ${structure.has_appendix ? '#dcfce7' : '#fee2e2'}; color: ${structure.has_appendix ? '#166534' : '#991b1b'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
                                     ${structure.has_appendix ? 'Found' : 'Not Found'}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Running Headers</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                                ${structure.running_headers_count || 0} pages with detected running headers
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Spec Divisions</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                                ${structure.spec_divisions_count || 0} specification divisions found
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Topic Hotspots</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                                <span style="background: ${hotspots > 0 ? '#dcfce7' : '#fef3c7'}; color: ${hotspots > 0 ? '#166534' : '#92400e'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                    ${hotspots} keyword-dense regions detected
                                 </span>
                             </td>
                         </tr>
@@ -1448,6 +1491,25 @@
                 html += '<p style="color: #6b7280; font-style: italic;">No keyword data available</p>';
             }
 
+            // Expert Recommended Keywords section
+            const expertKeywords = optimizedScanData.expert_recommended_keywords || {};
+            if (Object.keys(expertKeywords).length > 0) {
+                html += `<h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">Expert Recommended Keywords</h3>`;
+                html += '<div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 25px;">';
+
+                for (const [expertName, keywords] of Object.entries(expertKeywords)) {
+                    html += `
+                        <div style="flex: 1; min-width: 280px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px;">
+                            <h4 style="margin: 0 0 10px 0; color: #92400e; font-size: 14px;">${expertName}</h4>
+                            <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                                ${(keywords || []).map(kw => '<span style="background: #fff; color: #92400e; padding: 2px 8px; border-radius: 4px; font-size: 11px; border: 1px solid #f59e0b;">' + kw + '</span>').join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
             // Efficiency Summary
             html += `
                 <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">Efficiency Summary</h3>
@@ -1466,6 +1528,154 @@
             `;
 
             document.getElementById('optimizedScanContent').innerHTML = html;
+        }
+
+        function renderUnansweredPassTab(unansweredPassData) {
+            if (!unansweredPassData || Object.keys(unansweredPassData).length === 0) {
+                document.getElementById('unansweredPassContent').innerHTML = `
+                    <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                        <p style="font-size: 18px; margin-bottom: 10px;">Stage not Processed by User</p>
+                        <p style="font-size: 14px;">Unanswered Questions Pass was not run for this analysis</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const questionsProcessed = unansweredPassData.questions_processed || [];
+            const answersFound = unansweredPassData.answers_found || 0;
+            const totalQuestions = unansweredPassData.total_questions || questionsProcessed.length;
+
+            let html = `
+                <div style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 8px 0; font-size: 16px;">V2 Pipeline - Unanswered Questions Pass</h3>
+                    <p style="margin: 0; opacity: 0.9; font-size: 13px;">Second pass focused on questions that remained unanswered after exhaustive scan</p>
+                </div>
+
+                <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="display: flex; gap: 30px;">
+                        <div>
+                            <span style="font-weight: 600; color: #92400e;">Questions Processed:</span>
+                            <span style="margin-left: 5px;">${totalQuestions}</span>
+                        </div>
+                        <div>
+                            <span style="font-weight: 600; color: #92400e;">New Answers Found:</span>
+                            <span style="margin-left: 5px; color: #22c55e; font-weight: 600;">${answersFound}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (questionsProcessed.length > 0) {
+                html += `
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Questions Reprocessed</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                        <thead>
+                            <tr style="background: #1E3A8A; color: white;">
+                                <th style="padding: 12px; text-align: left; font-weight: 600;">Question</th>
+                                <th style="padding: 12px; text-align: left; font-weight: 600;">Section</th>
+                                <th style="padding: 12px; text-align: center; font-weight: 600;">Found Answer</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                questionsProcessed.forEach((q, idx) => {
+                    const isAlt = idx % 2 === 1;
+                    html += `
+                        <tr style="${isAlt ? 'background: #f9fafb;' : ''}">
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.question || 'Unknown'}</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.section || ''}</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">
+                                <span style="background: ${q.found ? '#dcfce7' : '#fee2e2'}; color: ${q.found ? '#166534' : '#991b1b'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                    ${q.found ? 'Yes' : 'No'}
+                                </span>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table>';
+            }
+
+            document.getElementById('unansweredPassContent').innerHTML = html;
+        }
+
+        function renderRagTab(ragData) {
+            if (!ragData || Object.keys(ragData).length === 0) {
+                document.getElementById('ragContent').innerHTML = `
+                    <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                        <p style="font-size: 18px; margin-bottom: 10px;">Stage not Processed by User</p>
+                        <p style="font-size: 14px;">Deep RAG analysis was not run for this analysis</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const questionsProcessed = ragData.questions_processed || [];
+            const answersFound = ragData.answers_found || 0;
+            const totalQuestions = ragData.total_questions || questionsProcessed.length;
+            const chunksSearched = ragData.chunks_searched || 0;
+
+            let html = `
+                <div style="background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 8px 0; font-size: 16px;">V2 Pipeline - Deep RAG Analysis</h3>
+                    <p style="margin: 0; opacity: 0.9; font-size: 13px;">Final pass using Retrieval-Augmented Generation for remaining unanswered questions</p>
+                </div>
+
+                <div style="background: #fee2e2; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+                        <div>
+                            <span style="font-weight: 600; color: #991b1b;">Questions Processed:</span>
+                            <span style="margin-left: 5px;">${totalQuestions}</span>
+                        </div>
+                        <div>
+                            <span style="font-weight: 600; color: #991b1b;">New Answers Found:</span>
+                            <span style="margin-left: 5px; color: #22c55e; font-weight: 600;">${answersFound}</span>
+                        </div>
+                        <div>
+                            <span style="font-weight: 600; color: #991b1b;">Chunks Searched:</span>
+                            <span style="margin-left: 5px;">${chunksSearched}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (questionsProcessed.length > 0) {
+                html += `
+                    <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">RAG Search Results</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                        <thead>
+                            <tr style="background: #1E3A8A; color: white;">
+                                <th style="padding: 12px; text-align: left; font-weight: 600;">Question</th>
+                                <th style="padding: 12px; text-align: left; font-weight: 600;">Section</th>
+                                <th style="padding: 12px; text-align: center; font-weight: 600;">Similarity</th>
+                                <th style="padding: 12px; text-align: center; font-weight: 600;">Found Answer</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                questionsProcessed.forEach((q, idx) => {
+                    const isAlt = idx % 2 === 1;
+                    const similarity = q.similarity ? (q.similarity * 100).toFixed(1) + '%' : 'N/A';
+                    html += `
+                        <tr style="${isAlt ? 'background: #f9fafb;' : ''}">
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.question || 'Unknown'}</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.section || ''}</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">${similarity}</td>
+                            <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">
+                                <span style="background: ${q.found ? '#dcfce7' : '#fee2e2'}; color: ${q.found ? '#166534' : '#991b1b'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                    ${q.found ? 'Yes' : 'No'}
+                                </span>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table>';
+            }
+
+            document.getElementById('ragContent').innerHTML = html;
         }
 
         async function exportAnalysis(sessionId, mode) {

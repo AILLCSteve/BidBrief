@@ -1027,9 +1027,14 @@ def get_results(session_id):
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
 
-        # Add quick scan data for v2 pipeline (document navigator audit)
+        # Add V2 pipeline data (document navigator audit, unanswered pass, RAG)
         if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
             response['optimized_scan_data'] = orchestrator.optimized_scan_data
+            response['use_pipeline_v2'] = True
+        if hasattr(orchestrator, 'unanswered_pass_data') and orchestrator.unanswered_pass_data:
+            response['unanswered_pass_data'] = orchestrator.unanswered_pass_data
+        if hasattr(orchestrator, 'rag_data') and orchestrator.rag_data:
+            response['rag_data'] = orchestrator.rag_data
 
         return jsonify(response)
 
@@ -1074,9 +1079,14 @@ def get_results(session_id):
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
 
-        # Add quick scan data for v2 pipeline (document navigator audit)
+        # Add V2 pipeline data (document navigator audit, unanswered pass, RAG)
         if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
             response['optimized_scan_data'] = orchestrator.optimized_scan_data
+            response['use_pipeline_v2'] = True
+        if hasattr(orchestrator, 'unanswered_pass_data') and orchestrator.unanswered_pass_data:
+            response['unanswered_pass_data'] = orchestrator.unanswered_pass_data
+        if hasattr(orchestrator, 'rag_data') and orchestrator.rag_data:
+            response['rag_data'] = orchestrator.rag_data
 
         return jsonify(response)
 
@@ -1152,9 +1162,14 @@ def get_results(session_id):
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
 
-        # Add quick scan data for v2 pipeline (document navigator audit)
+        # Add V2 pipeline data (document navigator audit, unanswered pass, RAG)
         if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
             response['optimized_scan_data'] = orchestrator.optimized_scan_data
+            response['use_pipeline_v2'] = True
+        if hasattr(orchestrator, 'unanswered_pass_data') and orchestrator.unanswered_pass_data:
+            response['unanswered_pass_data'] = orchestrator.unanswered_pass_data
+        if hasattr(orchestrator, 'rag_data') and orchestrator.rag_data:
+            response['rag_data'] = orchestrator.rag_data
 
         return jsonify(response)
 
@@ -1223,9 +1238,14 @@ def get_results(session_id):
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
 
-        # Add quick scan data for v2 pipeline (document navigator audit)
+        # Add V2 pipeline data (document navigator audit, unanswered pass, RAG)
         if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
             response['optimized_scan_data'] = orchestrator.optimized_scan_data
+            response['use_pipeline_v2'] = True
+        if hasattr(orchestrator, 'unanswered_pass_data') and orchestrator.unanswered_pass_data:
+            response['unanswered_pass_data'] = orchestrator.unanswered_pass_data
+        if hasattr(orchestrator, 'rag_data') and orchestrator.rag_data:
+            response['rag_data'] = orchestrator.rag_data
 
         return jsonify(response)
 
@@ -1342,17 +1362,25 @@ def export_excel_dashboard(session_id):
         # Extract API key requirements if available (from KeyRequirementsExtractor)
         api_key_requirements = browser_output.get('key_requirements', {})
 
-        # Extract quick scan data for V2 pipeline (document navigator audit)
+        # Extract V2 pipeline data (document navigator audit, unanswered pass, RAG)
         optimized_scan_data = None
+        unanswered_pass_data = None
+        rag_data = None
         if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
             optimized_scan_data = orchestrator.optimized_scan_data
+        if hasattr(orchestrator, 'unanswered_pass_data') and orchestrator.unanswered_pass_data:
+            unanswered_pass_data = orchestrator.unanswered_pass_data
+        if hasattr(orchestrator, 'rag_data') and orchestrator.rag_data:
+            rag_data = orchestrator.rag_data
 
         # Generate Excel dashboard (now works with both complete and partial)
         generator = ExcelDashboardGenerator(
             legacy_result,
             is_partial=is_partial,
             api_key_requirements=api_key_requirements,
-            optimized_scan_data=optimized_scan_data
+            optimized_scan_data=optimized_scan_data,
+            unanswered_pass_data=unanswered_pass_data,
+            rag_data=rag_data
         )
         excel_file = generator.generate()
 

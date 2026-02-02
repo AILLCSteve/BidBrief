@@ -99,10 +99,12 @@ class ExcelDashboardGenerator:
         'Location': ['location', 'project location', 'city', 'municipality', 'address'],
     }
 
-    def __init__(self, analysis_result, is_partial=False, api_key_requirements=None, optimized_scan_data=None):
+    def __init__(self, analysis_result, is_partial=False, api_key_requirements=None, optimized_scan_data=None, unanswered_pass_data=None, rag_data=None):
         self.result = analysis_result
         self.is_partial = is_partial
         self.optimized_scan_data = optimized_scan_data  # V2 pipeline document navigator data
+        self.unanswered_pass_data = unanswered_pass_data  # V2 pipeline unanswered questions pass data
+        self.rag_data = rag_data  # V2 pipeline RAG analysis data
         self.wb = Workbook()
         self.footnotes = self._collect_footnotes()
         # Use API-extracted key requirements if provided, otherwise extract from sections
@@ -112,18 +114,31 @@ class ExcelDashboardGenerator:
             self.key_requirements = self._extract_key_requirements()
 
     def generate(self):
-        """Generate complete 4-5 sheet report package"""
+        """Generate complete report package with V2 Pipeline sheets"""
         if 'Sheet' in self.wb.sheetnames:
             del self.wb['Sheet']
 
-        self._create_executive_summary()      # Sheet 1: Executive Summary
-        self._create_detailed_results()       # Sheet 2: Detailed Results
-        self._create_by_section()             # Sheet 3: By Section
-        self._create_footnotes_sheet()        # Sheet 4: Footnotes
+        # Detect if V2 Pipeline (HOTDOG7ATE) was used
+        is_v2_pipeline = self.optimized_scan_data is not None
 
-        # Sheet 5: Optimized Scan (V2 Pipeline only - document navigator audit data)
-        if self.optimized_scan_data:
-            self._create_quick_scan_sheet()
+        self._create_executive_summary()      # Sheet 1: Executive Summary
+
+        # Sheet 2: Optimized Scan (V2 Pipeline - after Summary)
+        if is_v2_pipeline:
+            self._create_optimized_scan_sheet()
+
+        self._create_detailed_results()       # Sheet 3: Detailed Results
+        self._create_by_section()             # Sheet 4: By Section
+
+        # Sheet 5: Unanswered Questions Pass (V2 Pipeline)
+        if is_v2_pipeline:
+            self._create_unanswered_pass_sheet()
+
+        self._create_footnotes_sheet()        # Sheet 6: Footnotes
+
+        # Sheet 7: Deep RAG (V2 Pipeline - at end)
+        if is_v2_pipeline:
+            self._create_rag_sheet()
 
         output = io.BytesIO()
         self.wb.save(output)
@@ -678,17 +693,30 @@ class ExcelDashboardGenerator:
 
                 ws.row_dimensions[row].height = 50
 
-    def _create_quick_scan_sheet(self):
-        """Sheet 5: Optimized Scan - V2 Pipeline Document Navigator Audit Data
+    def _create_optimized_scan_sheet(self):
+        """Sheet: Optimized Scan - V2 Pipeline Document Navigator Audit Data
 
         Shows pages targeted by each expert and keywords searched for audit purposes.
         Only created when optimized_scan_data is available (V2 pipeline analyses).
         """
         ws = self.wb.create_sheet('Optimized Scan')
 
+        # Check if we have data
+        if not self.optimized_scan_data or len(self.optimized_scan_data) == 0:
+            ws.merge_cells('A1:C1')
+            ws['A1'] = 'STAGE NOT PROCESSED BY USER'
+            ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="9CA3AF")
+            ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+            ws.row_dimensions[1].height = 40
+            ws.merge_cells('A3:C3')
+            ws['A3'] = 'Optimized Scan Pass was not run for this analysis'
+            ws['A3'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+            ws.column_dimensions['A'].width = 50
+            return
+
         # Title
         ws.merge_cells('A1:F1')
-        ws['A1'] = 'V2 PIPELINE - QUICK SCAN AUDIT'
+        ws['A1'] = 'V2 PIPELINE - OPTIMIZED SCAN AUDIT'
         ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
         ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[1].height = 30
@@ -843,6 +871,175 @@ class ExcelDashboardGenerator:
         ws.cell(row, 1, 'Questions Requiring Full Scan:').font = self.STAT_LABEL_FONT
         ws.cell(row, 2, str(len(unassigned)) if unassigned else '0').font = self.DATA_FONT_BOLD
         row += 1
+
+    def _create_unanswered_pass_sheet(self):
+        """Sheet: Unanswered Questions Pass - V2 Pipeline second pass data"""
+        ws = self.wb.create_sheet('Unanswered Pass')
+
+        # Check if we have data
+        if not self.unanswered_pass_data or len(self.unanswered_pass_data) == 0:
+            ws.merge_cells('A1:C1')
+            ws['A1'] = 'STAGE NOT PROCESSED BY USER'
+            ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="9CA3AF")
+            ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+            ws.row_dimensions[1].height = 40
+            ws.merge_cells('A3:C3')
+            ws['A3'] = 'Unanswered Questions Pass was not run for this analysis'
+            ws['A3'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+            ws.column_dimensions['A'].width = 50
+            return
+
+        # Title
+        ws.merge_cells('A1:D1')
+        ws['A1'] = 'V2 PIPELINE - UNANSWERED QUESTIONS PASS'
+        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
+        ws.row_dimensions[1].height = 30
+
+        # Subtitle
+        ws.merge_cells('A2:D2')
+        ws['A2'] = 'Second pass focused on questions that remained unanswered after exhaustive scan'
+        ws['A2'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+        ws.row_dimensions[2].height = 25
+
+        row = 4
+        questions_processed = self.unanswered_pass_data.get('questions_processed', [])
+        answers_found = self.unanswered_pass_data.get('answers_found', 0)
+        total_questions = self.unanswered_pass_data.get('total_questions', len(questions_processed))
+
+        # Summary stats
+        ws.cell(row, 1, 'Questions Processed:').font = self.STAT_LABEL_FONT
+        ws.cell(row, 2, str(total_questions)).font = self.DATA_FONT_BOLD
+        row += 1
+        ws.cell(row, 1, 'New Answers Found:').font = self.STAT_LABEL_FONT
+        ws.cell(row, 2, str(answers_found)).font = self.DATA_FONT_BOLD
+        ws.cell(row, 2).fill = self.ANSWERED_FILL
+        row += 2
+
+        if questions_processed:
+            # Headers
+            headers = ['Question', 'Section', 'Found Answer']
+            widths = [50, 20, 15]
+
+            for col, (header, width) in enumerate(zip(headers, widths), start=1):
+                cell = ws.cell(row, col, header)
+                cell.font = self.HEADER_FONT
+                cell.fill = self.HEADER_FILL
+                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                cell.border = self.BORDER_THIN
+                ws.column_dimensions[get_column_letter(col)].width = width
+            ws.row_dimensions[row].height = 25
+            row += 1
+
+            for idx, q in enumerate(questions_processed):
+                is_alt = idx % 2 == 1
+                found = q.get('found', False)
+
+                ws.cell(row, 1, sanitize_for_excel(q.get('question', 'Unknown'))).font = self.DATA_FONT
+                ws.cell(row, 2, q.get('section', '')).font = self.DATA_FONT
+                status_cell = ws.cell(row, 3, 'Yes' if found else 'No')
+                status_cell.font = Font(name='Calibri', size=10, bold=True)
+                status_cell.fill = self.ANSWERED_FILL if found else self.UNANSWERED_FILL
+                status_cell.alignment = Alignment(horizontal='center', vertical='center')
+
+                for col in range(1, 4):
+                    cell = ws.cell(row, col)
+                    cell.border = self.BORDER_THIN
+                    if col != 3 and is_alt:
+                        cell.fill = self.ALT_ROW_FILL
+                    cell.alignment = Alignment(horizontal='left' if col in [1, 2] else 'center', vertical='top', wrap_text=True)
+
+                ws.row_dimensions[row].height = 35
+                row += 1
+
+    def _create_rag_sheet(self):
+        """Sheet: Deep RAG - V2 Pipeline RAG analysis data"""
+        ws = self.wb.create_sheet('Deep RAG')
+
+        # Check if we have data
+        if not self.rag_data or len(self.rag_data) == 0:
+            ws.merge_cells('A1:C1')
+            ws['A1'] = 'STAGE NOT PROCESSED BY USER'
+            ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="9CA3AF")
+            ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+            ws.row_dimensions[1].height = 40
+            ws.merge_cells('A3:C3')
+            ws['A3'] = 'Deep RAG analysis was not run for this analysis'
+            ws['A3'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+            ws.column_dimensions['A'].width = 50
+            return
+
+        # Title
+        ws.merge_cells('A1:E1')
+        ws['A1'] = 'V2 PIPELINE - DEEP RAG ANALYSIS'
+        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
+        ws.row_dimensions[1].height = 30
+
+        # Subtitle
+        ws.merge_cells('A2:E2')
+        ws['A2'] = 'Final pass using Retrieval-Augmented Generation for remaining unanswered questions'
+        ws['A2'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+        ws.row_dimensions[2].height = 25
+
+        row = 4
+        questions_processed = self.rag_data.get('questions_processed', [])
+        answers_found = self.rag_data.get('answers_found', 0)
+        total_questions = self.rag_data.get('total_questions', len(questions_processed))
+        chunks_searched = self.rag_data.get('chunks_searched', 0)
+
+        # Summary stats
+        ws.cell(row, 1, 'Questions Processed:').font = self.STAT_LABEL_FONT
+        ws.cell(row, 2, str(total_questions)).font = self.DATA_FONT_BOLD
+        row += 1
+        ws.cell(row, 1, 'New Answers Found:').font = self.STAT_LABEL_FONT
+        ws.cell(row, 2, str(answers_found)).font = self.DATA_FONT_BOLD
+        ws.cell(row, 2).fill = self.ANSWERED_FILL
+        row += 1
+        ws.cell(row, 1, 'Chunks Searched:').font = self.STAT_LABEL_FONT
+        ws.cell(row, 2, str(chunks_searched)).font = self.DATA_FONT_BOLD
+        row += 2
+
+        if questions_processed:
+            # Headers
+            headers = ['Question', 'Section', 'Similarity', 'Found Answer']
+            widths = [45, 20, 12, 15]
+
+            for col, (header, width) in enumerate(zip(headers, widths), start=1):
+                cell = ws.cell(row, col, header)
+                cell.font = self.HEADER_FONT
+                cell.fill = self.HEADER_FILL
+                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                cell.border = self.BORDER_THIN
+                ws.column_dimensions[get_column_letter(col)].width = width
+            ws.row_dimensions[row].height = 25
+            row += 1
+
+            for idx, q in enumerate(questions_processed):
+                is_alt = idx % 2 == 1
+                found = q.get('found', False)
+                similarity = q.get('similarity', 0)
+                similarity_str = f"{similarity * 100:.1f}%" if similarity else 'N/A'
+
+                ws.cell(row, 1, sanitize_for_excel(q.get('question', 'Unknown'))).font = self.DATA_FONT
+                ws.cell(row, 2, q.get('section', '')).font = self.DATA_FONT
+                ws.cell(row, 3, similarity_str).font = self.DATA_FONT
+                ws.cell(row, 3).alignment = Alignment(horizontal='center', vertical='center')
+                status_cell = ws.cell(row, 4, 'Yes' if found else 'No')
+                status_cell.font = Font(name='Calibri', size=10, bold=True)
+                status_cell.fill = self.ANSWERED_FILL if found else self.UNANSWERED_FILL
+                status_cell.alignment = Alignment(horizontal='center', vertical='center')
+
+                for col in range(1, 5):
+                    cell = ws.cell(row, col)
+                    cell.border = self.BORDER_THIN
+                    if col not in [3, 4] and is_alt:
+                        cell.fill = self.ALT_ROW_FILL
+                    if col in [1, 2]:
+                        cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+
+                ws.row_dimensions[row].height = 35
+                row += 1
 
     def _get_timestamp(self):
         """Get formatted timestamp"""
