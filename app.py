@@ -1526,6 +1526,214 @@ def stop_analysis(session_id):
 
 
 # ============================================================================
+# ON-DEMAND PROCESSING ENDPOINTS (HOTDOG7ATE)
+# ============================================================================
+
+@app.route('/api/analyze/second-pass/<session_id>', methods=['POST'])
+@require_auth
+def run_second_pass_on_selected(session_id):
+    """
+    Run second pass on selected questions for a completed/partial analysis.
+
+    POST body:
+    {
+        "question_ids": ["Q1", "Q5", "Q12"]  // Questions to reprocess
+    }
+    """
+    import asyncio
+    from openai import AsyncOpenAI
+
+    data = request.get_json()
+    question_ids = data.get('question_ids', [])
+
+    if not question_ids:
+        return jsonify({'error': 'No questions specified'}), 400
+
+    # Get analysis from completed or partial
+    with session_lock:
+        session_data = completed_analyses.get(session_id) or partial_analyses.get(session_id)
+        if not session_data:
+            return jsonify({'error': 'Analysis not found'}), 404
+
+        orchestrator = session_data.get('orchestrator')
+        result = session_data.get('result')
+
+    if not orchestrator or not orchestrator.cached_config:
+        return jsonify({'error': 'Analysis config not available'}), 400
+
+    config = orchestrator.cached_config
+
+    # Filter to requested questions
+    questions = [
+        config.question_map[qid]
+        for qid in question_ids
+        if qid in config.question_map
+    ]
+
+    if not questions:
+        return jsonify({'error': 'No valid questions found'}), 400
+
+    logger.info(f"Running second pass on {len(questions)} questions for session {session_id}")
+
+    try:
+        # Run second pass using the orchestrator's second pass processor
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        second_pass_answers = loop.run_until_complete(
+            orchestrator.layer3_5_second_pass.process_unanswered_questions(
+                windows=orchestrator.cached_windows if hasattr(orchestrator, 'cached_windows') else [],
+                unanswered_questions=questions,
+                experts=orchestrator.cached_experts if hasattr(orchestrator, 'cached_experts') else {}
+            )
+        )
+        loop.close()
+
+        # Update the result with new answers
+        answers_found = 0
+        for qid, answer in second_pass_answers.items():
+            if result and 'answers' in result:
+                if qid not in result['answers']:
+                    result['answers'][qid] = []
+                result['answers'][qid].append({
+                    'text': answer.text,
+                    'pages': answer.pages,
+                    'confidence': answer.confidence,
+                    'expert': answer.expert,
+                    'source': 'second_pass'
+                })
+                answers_found += 1
+
+        logger.info(f"Second pass complete: {answers_found} new answers")
+
+        return jsonify({
+            'status': 'complete',
+            'answers_found': answers_found,
+            'questions_processed': len(questions)
+        })
+
+    except Exception as e:
+        logger.error(f"Second pass failed: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Second pass failed: {str(e)}'}), 500
+
+
+@app.route('/api/analyze/rag/<session_id>', methods=['POST'])
+@require_auth
+def run_deep_rag_on_selected(session_id):
+    """
+    Run Deep RAG on selected questions for a completed/partial analysis.
+    Searches external sources (TAVILY) for similar projects.
+
+    POST body:
+    {
+        "question_ids": ["Q1", "Q5", "Q12"]  // Questions to search externally
+    }
+    """
+    import asyncio
+    from openai import AsyncOpenAI
+
+    data = request.get_json()
+    question_ids = data.get('question_ids', [])
+
+    if not question_ids:
+        return jsonify({'error': 'No questions specified'}), 400
+
+    # Check if TAVILY API key is available
+    tavily_key = os.environ.get('TAVILY_API_KEY')
+    if not tavily_key:
+        return jsonify({
+            'error': 'Deep RAG not available',
+            'message': 'TAVILY_API_KEY not configured. Contact administrator to enable external search.'
+        }), 503
+
+    # Get analysis from completed or partial
+    with session_lock:
+        session_data = completed_analyses.get(session_id) or partial_analyses.get(session_id)
+        if not session_data:
+            return jsonify({'error': 'Analysis not found'}), 404
+
+        orchestrator = session_data.get('orchestrator')
+        result = session_data.get('result')
+
+    if not orchestrator or not orchestrator.cached_config:
+        return jsonify({'error': 'Analysis config not available'}), 400
+
+    config = orchestrator.cached_config
+
+    # Filter to requested questions
+    questions = [
+        config.question_map[qid]
+        for qid in question_ids
+        if qid in config.question_map
+    ]
+
+    if not questions:
+        return jsonify({'error': 'No valid questions found'}), 400
+
+    logger.info(f"Running Deep RAG on {len(questions)} questions for session {session_id}")
+
+    try:
+        from services.hotdog.deep_rag_processor import DeepRAGProcessor
+
+        # Initialize RAG processor
+        rag_processor = DeepRAGProcessor()
+
+        if not rag_processor.is_available:
+            return jsonify({
+                'error': 'Deep RAG not available',
+                'message': 'TAVILY service not configured properly'
+            }), 503
+
+        # Extract project context from key requirements
+        key_reqs = orchestrator.extracted_key_requirements if hasattr(orchestrator, 'extracted_key_requirements') else {}
+
+        # Run RAG search with project context and questions
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        rag_results = loop.run_until_complete(
+            rag_processor.search_similar_projects(
+                owner=key_reqs.get('owner'),
+                engineer=key_reqs.get('engineer'),
+                project_type=key_reqs.get('project_name'),
+                location=key_reqs.get('location'),
+                unanswered_questions=[
+                    {'id': q.id, 'text': q.text} for q in questions
+                ]
+            )
+        )
+        loop.close()
+
+        # Format results for response
+        formatted_results = {}
+        answers_found = 0
+
+        for qid, answer_data in rag_results.get('answers', {}).items():
+            if answer_data.get('text'):
+                formatted_results[qid] = {
+                    'answer': answer_data.get('text', ''),
+                    'confidence': answer_data.get('confidence', 0.3),
+                    'source': answer_data.get('source', 'External'),
+                    'source_type': 'external_rag',
+                    'disclaimer': '⚠️ This answer is from EXTERNAL sources and may not apply to this project. Always verify with official documents.'
+                }
+                answers_found += 1
+
+        logger.info(f"Deep RAG complete: {answers_found} potential answers found")
+
+        return jsonify({
+            'status': 'complete',
+            'answers_found': answers_found,
+            'questions_processed': len(questions),
+            'results': formatted_results
+        })
+
+    except Exception as e:
+        logger.error(f"Deep RAG failed: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Deep RAG failed: {str(e)}'}), 500
+
+
+# ============================================================================
 # ADMIN ENDPOINTS
 # ============================================================================
 
