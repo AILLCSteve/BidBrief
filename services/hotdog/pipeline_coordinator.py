@@ -5,7 +5,7 @@ HOTDOG7ATE = Hierarchical Orchestrated Thorough Document Oversight & Guidance -
              Adaptive Thorough Extraction
 
 Coordinates all 4 stages:
-- Stage 1: Comprehensive Quick-Scan (TOC/Index/Headers)
+- Stage 1: Optimized Scan Pass (TOC/Index/Headers/Footers/Hotspots)
 - Stage 2: Selective Exhaustive Pass (current window processing)
 - Stage 3: Second Pass (for unanswered questions)
 - Stage 4: Deep RAG (optional, user-triggered via TAVILY)
@@ -63,7 +63,7 @@ class PipelineCoordinator:
     HOTDOG7ATE Pipeline Coordinator - orchestrates multi-pass analysis.
 
     Flow:
-    1. Quick-Scan: Get high-confidence answers fast using document structure
+    1. Optimized Scan: Get high-confidence answers fast using document structure
     2. Exhaustive: Process remaining + user-selected questions window-by-window
     3. Second Pass: Retry questions with NO answers using enhanced prompts
     4. Deep RAG: User-triggered external search via TAVILY (with disclaimers)
@@ -174,7 +174,7 @@ class PipelineCoordinator:
             self.navigation_map = None
 
         # ============================================================
-        # STAGE 1: Comprehensive Quick-Scan
+        # STAGE 1: Comprehensive Optimized Scan
         # ============================================================
         self._raise_if_stopped('Stage 1', 'before quick-scan')
         stage_1_result = await self._run_stage_1(pages, all_questions, experts)
@@ -232,11 +232,11 @@ class PipelineCoordinator:
         questions: List[Question],
         experts: Dict
     ) -> StageResult:
-        """Run Stage 1: Comprehensive Quick-Scan with live updates."""
+        """Run Stage 1: Optimized Scan Pass with live updates."""
         self.state.current_stage = PipelineStage.QUICK_SCAN
         self._emit_progress('stage_1_start', {
-            'stage': 'quick_scan',
-            'stage_name': 'Quick-Scan - Targeted Extraction',
+            'stage': 'optimized_scan',
+            'stage_name': 'Optimized Scan - Targeted Extraction',
             'questions_count': len(questions)
         })
 

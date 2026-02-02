@@ -165,7 +165,7 @@ class HotdogOrchestrator:
             model=self.model
         )
         self.extracted_key_requirements = {}  # Store extracted requirements
-        self.quick_scan_data = {}  # Store v2 pipeline navigation/quick-scan data for exports
+        self.optimized_scan_data = {}  # Store v2 pipeline navigation/optimized scan data for exports
 
         # Store windows and experts for second pass
         self.cached_windows = []
@@ -181,7 +181,7 @@ class HotdogOrchestrator:
         logger.info(f"   Prompt Budget: {model_limits.recommended_prompt_tokens:,} tokens")
         logger.info(f"   Completion Limit: {model_limits.recommended_completion_tokens:,} tokens")
         if self.use_pipeline_v2 and self.mode == AnalysisMode.BID_SPEC:
-            logger.info("   Pipeline: HOTDOG7ATE Multi-Pass (Quick-Scan -> Exhaustive -> Second Pass -> RAG)")
+            logger.info("   Pipeline: HOTDOG7ATE Multi-Pass (Optimized Scan -> Exhaustive -> Second Pass -> RAG)")
         else:
             logger.info("   Pipeline: Classic (Exhaustive window-based)")
         if self.mode == AnalysisMode.BESTPREP:
@@ -346,7 +346,7 @@ class HotdogOrchestrator:
                 logger.info("="*64)
                 self._emit_progress('pipeline_start', {
                     'pipeline': 'HOTDOG7ATE',
-                    'stages': ['quick_scan', 'exhaustive', 'second_pass', 'deep_rag']
+                    'stages': ['optimized_scan', 'exhaustive', 'second_pass', 'deep_rag']
                 })
 
                 from .pipeline_coordinator import PipelineCoordinator
@@ -384,10 +384,10 @@ class HotdogOrchestrator:
                     enable_rag=self.enable_deep_rag
                 )
 
-                # Store navigation map data for exports/modals
+                # Store navigation map data for exports/modals (Optimized Scan Pass)
                 if coordinator.navigation_map:
                     nav_map = coordinator.navigation_map
-                    self.quick_scan_data = {
+                    self.optimized_scan_data = {
                         'pipeline': 'HOTDOG7ATE',
                         'structure': {
                             'has_toc': nav_map.structure.has_toc,
@@ -395,7 +395,10 @@ class HotdogOrchestrator:
                             'has_appendix': nav_map.structure.has_appendix,
                             'toc_entries_count': len(nav_map.structure.toc_entries),
                             'index_terms_count': len(nav_map.structure.index_entries),
-                            'appendix_pages': nav_map.structure.appendix_pages
+                            'appendix_pages': nav_map.structure.appendix_pages,
+                            'running_headers_count': len(nav_map.structure.running_headers),
+                            'spec_divisions_count': len(nav_map.structure.spec_divisions),
+                            'topic_hotspots_count': len(nav_map.structure.topic_hotspots)
                         },
                         'expert_assignments': [
                             {
@@ -405,12 +408,14 @@ class HotdogOrchestrator:
                                 'context_pages': a.context_pages,
                                 'total_pages': len(a.primary_pages) + len(a.context_pages),
                                 'keywords_matched': a.keywords_found,
+                                'expert_keywords': getattr(a, 'expert_recommended_keywords', []),
                                 'confidence': a.confidence
                             }
                             for a in nav_map.expert_assignments.values()
                         ],
                         'all_keywords_by_section': nav_map.all_keywords_by_expert,
                         'unassigned_questions': nav_map.unassigned_questions,
+                        'topic_hotspots_found': nav_map.topic_hotspots_found,
                         'estimated_reduction': f"{nav_map.estimated_reduction*100:.0f}%" if nav_map.estimated_reduction else 'N/A',
                         'stage_results': coordinator.get_pipeline_summary()
                     }

@@ -446,7 +446,7 @@
                     <button class="tab-btn" id="fragmentsTabBtn" style="display: none;" onclick="switchTab('fragments')">All Fragments</button>
                     <button class="tab-btn" onclick="switchTab('footnotes')">Footnotes</button>
                     <button class="tab-btn" id="pageIndexTabBtn" style="display: none;" onclick="switchTab('pageIndex')">Page Index</button>
-                    <button class="tab-btn" id="quickScanTabBtn" style="display: none;" onclick="switchTab('quickScan')">Quick Scan</button>
+                    <button class="tab-btn" id="optimizedScanTabBtn" style="display: none;" onclick="switchTab('optimizedScan')">Optimized Scan</button>
                 </div>
             </div>
 
@@ -469,8 +469,8 @@
             <div id="tab-pageIndex" class="tab-content">
                 <div id="pageIndexContent"></div>
             </div>
-            <div id="tab-quickScan" class="tab-content">
-                <div id="quickScanContent"></div>
+            <div id="tab-optimizedScan" class="tab-content">
+                <div id="optimizedScanContent"></div>
             </div>
         </div>
     </div>
@@ -633,12 +633,12 @@
                 document.getElementById('pageIndexTabBtn').style.display = 'none';
             }
 
-            // Show Quick Scan tab for V2 pipeline analyses
-            if (data.quick_scan_data && Object.keys(data.quick_scan_data).length > 0) {
-                document.getElementById('quickScanTabBtn').style.display = 'inline-block';
-                renderQuickScanTab(data.quick_scan_data);
+            // Show Optimized Scan tab for V2 pipeline analyses
+            if (data.optimized_scan_data && Object.keys(data.optimized_scan_data).length > 0) {
+                document.getElementById('optimizedScanTabBtn').style.display = 'inline-block';
+                renderOptimizedScanTab(data.optimized_scan_data);
             } else {
-                document.getElementById('quickScanTabBtn').style.display = 'none';
+                document.getElementById('optimizedScanTabBtn').style.display = 'none';
             }
 
             renderSummaryTab(data, sessionId, mode);
@@ -1325,22 +1325,22 @@
             document.getElementById('footnotesContent').innerHTML = html;
         }
 
-        function renderQuickScanTab(quickScanData) {
-            if (!quickScanData || Object.keys(quickScanData).length === 0) {
-                document.getElementById('quickScanContent').innerHTML = `
+        function renderOptimizedScanTab(optimizedScanData) {
+            if (!optimizedScanData || Object.keys(optimizedScanData).length === 0) {
+                document.getElementById('optimizedScanContent').innerHTML = `
                     <div style="text-align: center; padding: 60px; color: #9ca3af;">
-                        <p style="font-size: 18px; margin-bottom: 10px;">No Quick Scan data available</p>
+                        <p style="font-size: 18px; margin-bottom: 10px;">No Optimized Scan data available</p>
                         <p style="font-size: 14px;">This tab shows V2 pipeline document navigator audit data</p>
                     </div>
                 `;
                 return;
             }
 
-            const structure = quickScanData.structure || {};
-            const expertAssignments = quickScanData.expert_assignments || [];
-            const allKeywords = quickScanData.all_keywords_by_section || {};
-            const reduction = quickScanData.estimated_reduction || 'N/A';
-            const unassigned = quickScanData.unassigned_questions || [];
+            const structure = optimizedScanData.structure || {};
+            const expertAssignments = optimizedScanData.expert_assignments || [];
+            const allKeywords = optimizedScanData.all_keywords_by_section || {};
+            const reduction = optimizedScanData.estimated_reduction || 'N/A';
+            const unassigned = optimizedScanData.unassigned_questions || [];
 
             let html = `
                 <div style="background: linear-gradient(135deg, #7c3aed, #a855f7); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -1465,7 +1465,7 @@
                 </table>
             `;
 
-            document.getElementById('quickScanContent').innerHTML = html;
+            document.getElementById('optimizedScanContent').innerHTML = html;
         }
 
         async function exportAnalysis(sessionId, mode) {

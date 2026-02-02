@@ -1028,8 +1028,8 @@ def get_results(session_id):
             response['bestprep_data'] = bestprep_data
 
         # Add quick scan data for v2 pipeline (document navigator audit)
-        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
-            response['quick_scan_data'] = orchestrator.quick_scan_data
+        if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
+            response['optimized_scan_data'] = orchestrator.optimized_scan_data
 
         return jsonify(response)
 
@@ -1075,8 +1075,8 @@ def get_results(session_id):
             response['bestprep_data'] = bestprep_data
 
         # Add quick scan data for v2 pipeline (document navigator audit)
-        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
-            response['quick_scan_data'] = orchestrator.quick_scan_data
+        if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
+            response['optimized_scan_data'] = orchestrator.optimized_scan_data
 
         return jsonify(response)
 
@@ -1153,8 +1153,8 @@ def get_results(session_id):
             response['bestprep_data'] = bestprep_data
 
         # Add quick scan data for v2 pipeline (document navigator audit)
-        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
-            response['quick_scan_data'] = orchestrator.quick_scan_data
+        if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
+            response['optimized_scan_data'] = orchestrator.optimized_scan_data
 
         return jsonify(response)
 
@@ -1224,8 +1224,8 @@ def get_results(session_id):
             response['bestprep_data'] = bestprep_data
 
         # Add quick scan data for v2 pipeline (document navigator audit)
-        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
-            response['quick_scan_data'] = orchestrator.quick_scan_data
+        if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
+            response['optimized_scan_data'] = orchestrator.optimized_scan_data
 
         return jsonify(response)
 
@@ -1343,16 +1343,16 @@ def export_excel_dashboard(session_id):
         api_key_requirements = browser_output.get('key_requirements', {})
 
         # Extract quick scan data for V2 pipeline (document navigator audit)
-        quick_scan_data = None
-        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
-            quick_scan_data = orchestrator.quick_scan_data
+        optimized_scan_data = None
+        if hasattr(orchestrator, 'optimized_scan_data') and orchestrator.optimized_scan_data:
+            optimized_scan_data = orchestrator.optimized_scan_data
 
         # Generate Excel dashboard (now works with both complete and partial)
         generator = ExcelDashboardGenerator(
             legacy_result,
             is_partial=is_partial,
             api_key_requirements=api_key_requirements,
-            quick_scan_data=quick_scan_data
+            optimized_scan_data=optimized_scan_data
         )
         excel_file = generator.generate()
 

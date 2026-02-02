@@ -1,5 +1,5 @@
 """
-Comprehensive Quick-Scan Processor for HOTDOG7ATE Stage 1.
+Comprehensive Optimized Scan Processor for HOTDOG7ATE Stage 1.
 
 HOTDOG7ATE = Hierarchical Orchestrated Thorough Document Oversight & Guidance -
              Adaptive Thorough Extraction
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ComprehensiveProcessor:
     """
-    Stage 1: Comprehensive Quick-Scan Processor.
+    Stage 1: Comprehensive Optimized Scan Processor.
 
     Strategy:
     1. Analyze document structure (TOC, index, headers)
@@ -68,7 +68,7 @@ class ComprehensiveProcessor:
             - List of questions needing exhaustive processing
         """
         logger.info(f"\n{'='*64}")
-        logger.info("STAGE 1: HOTDOG7ATE Comprehensive Quick-Scan")
+        logger.info("STAGE 1: HOTDOG7ATE Comprehensive Optimized Scan")
         logger.info(f"{'='*64}")
 
         start_time = datetime.now()
@@ -98,7 +98,7 @@ class ComprehensiveProcessor:
                 if answer and answer.confidence >= self.confidence_threshold:
                     high_confidence_answers[question.id] = answer
                     self.high_confidence_answers += 1
-                    logger.info(f"  {question.id}: Quick-scan success ({answer.confidence:.0%})")
+                    logger.info(f"  {question.id}: Optimized Scan success ({answer.confidence:.0%})")
                 else:
                     questions_for_exhaustive.append(question)
                     logger.debug(f"  {question.id}: Needs exhaustive pass")
@@ -109,7 +109,7 @@ class ComprehensiveProcessor:
 
         elapsed = (datetime.now() - start_time).total_seconds()
 
-        logger.info(f"\nQuick-Scan Complete ({elapsed:.1f}s)")
+        logger.info(f"\nOptimized Scan Complete ({elapsed:.1f}s)")
         logger.info(f"   High-confidence answers: {len(high_confidence_answers)}/{len(questions)}")
         logger.info(f"   Questions for exhaustive: {len(questions_for_exhaustive)}")
 
@@ -192,7 +192,7 @@ OUTPUT FORMAT (JSON):
                 text=answer_text,
                 pages=pages_cited,
                 confidence=confidence,
-                expert=expert.name if expert else "Quick-Scan",
+                expert=expert.name if expert else "Optimized Scan",
                 window=0  # Not window-based
             )
 

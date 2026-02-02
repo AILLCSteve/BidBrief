@@ -99,10 +99,10 @@ class ExcelDashboardGenerator:
         'Location': ['location', 'project location', 'city', 'municipality', 'address'],
     }
 
-    def __init__(self, analysis_result, is_partial=False, api_key_requirements=None, quick_scan_data=None):
+    def __init__(self, analysis_result, is_partial=False, api_key_requirements=None, optimized_scan_data=None):
         self.result = analysis_result
         self.is_partial = is_partial
-        self.quick_scan_data = quick_scan_data  # V2 pipeline document navigator data
+        self.optimized_scan_data = optimized_scan_data  # V2 pipeline document navigator data
         self.wb = Workbook()
         self.footnotes = self._collect_footnotes()
         # Use API-extracted key requirements if provided, otherwise extract from sections
@@ -121,8 +121,8 @@ class ExcelDashboardGenerator:
         self._create_by_section()             # Sheet 3: By Section
         self._create_footnotes_sheet()        # Sheet 4: Footnotes
 
-        # Sheet 5: Quick Scan (V2 Pipeline only - document navigator audit data)
-        if self.quick_scan_data:
+        # Sheet 5: Optimized Scan (V2 Pipeline only - document navigator audit data)
+        if self.optimized_scan_data:
             self._create_quick_scan_sheet()
 
         output = io.BytesIO()
@@ -679,12 +679,12 @@ class ExcelDashboardGenerator:
                 ws.row_dimensions[row].height = 50
 
     def _create_quick_scan_sheet(self):
-        """Sheet 5: Quick Scan - V2 Pipeline Document Navigator Audit Data
+        """Sheet 5: Optimized Scan - V2 Pipeline Document Navigator Audit Data
 
         Shows pages targeted by each expert and keywords searched for audit purposes.
-        Only created when quick_scan_data is available (V2 pipeline analyses).
+        Only created when optimized_scan_data is available (V2 pipeline analyses).
         """
-        ws = self.wb.create_sheet('Quick Scan')
+        ws = self.wb.create_sheet('Optimized Scan')
 
         # Title
         ws.merge_cells('A1:F1')
@@ -702,7 +702,7 @@ class ExcelDashboardGenerator:
         row = 4
 
         # Document Structure Summary
-        structure = self.quick_scan_data.get('structure', {})
+        structure = self.optimized_scan_data.get('structure', {})
         ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = 'DOCUMENT STRUCTURE DETECTED'
         ws[f'A{row}'].font = Font(name='Calibri', size=13, bold=True, color="FFFFFF")
@@ -728,8 +728,8 @@ class ExcelDashboardGenerator:
         row += 1  # Spacer
 
         # Expert Assignments
-        expert_assignments = self.quick_scan_data.get('expert_assignments', [])
-        all_keywords = self.quick_scan_data.get('all_keywords_by_section', {})
+        expert_assignments = self.optimized_scan_data.get('expert_assignments', [])
+        all_keywords = self.optimized_scan_data.get('all_keywords_by_section', {})
 
         ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = 'EXPERT PAGE ASSIGNMENTS'
@@ -825,8 +825,8 @@ class ExcelDashboardGenerator:
         row += 1  # Spacer
 
         # Reduction Estimate
-        reduction = self.quick_scan_data.get('estimated_reduction', 'N/A')
-        unassigned = self.quick_scan_data.get('unassigned_questions', [])
+        reduction = self.optimized_scan_data.get('estimated_reduction', 'N/A')
+        unassigned = self.optimized_scan_data.get('unassigned_questions', [])
 
         ws.merge_cells(f'A{row}:F{row}')
         ws[f'A{row}'] = 'EFFICIENCY SUMMARY'

@@ -502,7 +502,7 @@
                             <div>
                                 <strong style="color: #1E3A8A;">v2 Multi-Pass Pipeline</strong>
                                 <p style="color: #666; font-size: 12px; margin: 3px 0 0 0;">
-                                    4-stage intelligent pipeline: Quick-scan → Selective Exhaustive → Second Pass → Optional RAG.
+                                    4-stage intelligent pipeline: Optimized Scan → Selective Exhaustive → Second Pass → Optional RAG.
                                     Better for large documents with clear structure (TOC, Index).
                                 </p>
                             </div>
@@ -607,7 +607,7 @@ let currentFile = null;
 let currentSessionId = null;
 let currentAnalysisResult = null;
 let currentKeyRequirements = null;  // Store key requirements from analysis
-let currentQuickScanData = null;  // Store quick scan data from V2 pipeline
+let currentOptimizedScanData = null;  // Store optimized scan data from V2 pipeline
 let activeEventSource = null;  // LEGACY: Kept for backward compatibility
 let pollingInterval = null;  // NEW: Polling interval
 let lastEventIndex = 0;  // NEW: Track which events we've already processed
@@ -821,7 +821,8 @@ function handleEvent(data) {
             Logger.info(`   ↳ Tokens used: ${data.tokens_used} | Cost: $${data.cost || '0.00'}`);
         }
         else if (data.event === 'window_complete') {
-            Logger.success(`✅ Window ${data.window_num} complete: ${data.answers_found} answers found in ${data.processing_time.toFixed(1)}s`);
+            const procTime = data.processing_time ? data.processing_time.toFixed(1) : '?';
+            Logger.success(`✅ Window ${data.window_num || '?'} complete: ${data.answers_found || 0} answers found in ${procTime}s`);
             if (data.unitary_log) {
                 Logger.info(`   ↳ ${data.unitary_log}`);
             }
@@ -883,8 +884,8 @@ function handleEvent(data) {
             if (data.estimated_reduction) {
                 Logger.info(`   ↳ Estimated scan reduction: ${data.estimated_reduction}`);
             }
-            // Store quick scan data for display in modal and export
-            currentQuickScanData = {
+            // Store optimized scan data for display in modal and export
+            currentOptimizedScanData = {
                 structure: {
                     has_toc: data.has_toc,
                     has_index: data.has_index,
@@ -900,17 +901,17 @@ function handleEvent(data) {
             ProgressTracker.update(25, 'Document structure mapped...');
         }
         // V2 Stage 1: Quick-Scan
-        else if (data.event === 'stage_1_start' || (data.event === 'stage_start' && data.stage === 'quick_scan')) {
+        else if (data.event === 'stage_1_start' || (data.event === 'stage_start' && data.stage === 'optimized_scan')) {
             Logger.info(`🔍 Stage 1: Comprehensive Quick-Scan starting...`);
             Logger.info(`   ↳ ${data.questions_count || 0} questions to analyze`);
-            ProgressTracker.update(28, 'Quick-scan: Targeted extraction...');
+            ProgressTracker.update(28, 'Optimized Scan: Targeted extraction...');
         }
-        else if (data.event === 'stage_1_complete' || (data.event === 'stage_complete' && data.stage === 'quick_scan')) {
-            Logger.success(`✅ Quick-scan complete: ${data.high_confidence_count || data.answers_found || 0} high-confidence answers`);
+        else if (data.event === 'stage_1_complete' || (data.event === 'stage_complete' && data.stage === 'optimized_scan')) {
+            Logger.success(`✅ Optimized Scan complete: ${data.high_confidence_count || data.answers_found || 0} high-confidence answers`);
             if (data.questions_for_exhaustive !== undefined) {
                 Logger.info(`   ↳ ${data.questions_for_exhaustive} questions need exhaustive pass`);
             }
-            ProgressTracker.update(40, 'Quick-scan complete...');
+            ProgressTracker.update(40, 'Optimized Scan complete...');
         }
         // V2 Stage 2: Exhaustive Pass
         else if (data.event === 'stage_2_start' || (data.event === 'stage_start' && data.stage === 'exhaustive')) {
@@ -992,9 +993,9 @@ function handleEvent(data) {
             if (data.result && data.result.key_requirements) {
                 currentKeyRequirements = data.result.key_requirements;
             }
-            // Extract quick scan data for V2 pipeline if available
-            if (data.result && data.result.quick_scan_data) {
-                currentQuickScanData = data.result.quick_scan_data;
+            // Extract optimized scan data for V2 pipeline if available
+            if (data.result && data.result.optimized_scan_data) {
+                currentOptimizedScanData = data.result.optimized_scan_data;
                 Logger.info(`📊 Quick scan data received (V2 pipeline)`);
             }
             Logger.info(`✅ Results received via polling (${data.result.sections?.length || 0} sections)`);
@@ -1767,7 +1768,7 @@ function updateUnitaryTableWithNewAnswers(newAnswers, stage = 'classic') {
 
     // Stage labels and colors for v2 pipeline display
     const stageLabels = {
-        'quick_scan': 'Quick-Scan',
+        'optimized_scan': 'Quick-Scan',
         'exhaustive': 'Exhaustive',
         'second_pass': 'Second Pass',
         'deep_rag': 'Deep RAG',
@@ -1775,7 +1776,7 @@ function updateUnitaryTableWithNewAnswers(newAnswers, stage = 'classic') {
     };
 
     const stageColors = {
-        'quick_scan': '#8b5cf6',  // Purple
+        'optimized_scan': '#8b5cf6',  // Purple
         'exhaustive': '#3b82f6',  // Blue
         'second_pass': '#f59e0b', // Amber
         'deep_rag': '#10b981',    // Green
@@ -2856,10 +2857,10 @@ function openViewModal() {
     }
     renderFullViewFootnotesTab();
 
-    // Show Quick Scan tab for V2 pipeline analyses
-    if (currentQuickScanData && Object.keys(currentQuickScanData).length > 0) {
+    // Show Optimized Scan tab for V2 pipeline analyses
+    if (currentOptimizedScanData && Object.keys(currentOptimizedScanData).length > 0) {
         document.getElementById('fullViewQuickScanTabBtn').style.display = 'inline-block';
-        renderFullViewQuickScanTab();
+        renderFullViewOptimizedScanTab();
     } else {
         document.getElementById('fullViewQuickScanTabBtn').style.display = 'none';
     }
@@ -3272,28 +3273,29 @@ function renderFullViewFootnotesTab() {
     document.getElementById('fv-footnotesContent').innerHTML = html;
 }
 
-function renderFullViewQuickScanTab() {
-    if (!currentQuickScanData || Object.keys(currentQuickScanData).length === 0) {
-        document.getElementById('fv-quickScanContent').innerHTML = `
+function renderFullViewOptimizedScanTab() {
+    if (!currentOptimizedScanData || Object.keys(currentOptimizedScanData).length === 0) {
+        document.getElementById('fv-optimizedScanContent').innerHTML = `
             <div style="text-align: center; padding: 60px; color: #9ca3af;">
-                <p style="font-size: 18px; margin-bottom: 10px;">No Quick Scan data available</p>
+                <p style="font-size: 18px; margin-bottom: 10px;">No Optimized Scan data available</p>
                 <p style="font-size: 14px;">This tab shows V2 pipeline document navigator audit data</p>
             </div>
         `;
         return;
     }
 
-    const data = currentQuickScanData;
+    const data = currentOptimizedScanData;
     const structure = data.structure || {};
     const expertAssignments = data.expert_assignments || [];
     const allKeywords = data.all_keywords_by_section || {};
     const reduction = data.estimated_reduction || 'N/A';
     const unassigned = data.unassigned_questions || [];
+    const hotspots = data.topic_hotspots_found || structure.topic_hotspots_count || 0;
 
     let html = `
         <div style="background: linear-gradient(135deg, #7c3aed, #a855f7); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
-            <h3 style="margin: 0 0 8px 0; font-size: 16px;">V2 Pipeline - Document Navigator Audit</h3>
-            <p style="margin: 0; opacity: 0.9; font-size: 13px;">Pre-scan analysis showing which pages each expert was directed to examine</p>
+            <h3 style="margin: 0 0 8px 0; font-size: 16px;">V2 Pipeline - Optimized Scan Pass Audit</h3>
+            <p style="margin: 0; opacity: 0.9; font-size: 13px;">Enhanced document analysis: TOC, Index, Headers, Footers, Topic Hotspots, Expert Keywords</p>
         </div>
 
         <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Document Structure Detected</h3>
@@ -3322,6 +3324,26 @@ function renderFullViewQuickScanTab() {
                     <td style="padding: 10px; border: 1px solid #e5e7eb;">
                         <span style="background: ${structure.has_appendix ? '#dcfce7' : '#fee2e2'}; color: ${structure.has_appendix ? '#166534' : '#991b1b'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
                             ${structure.has_appendix ? 'Found' : 'Not Found'}
+                        </span>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Running Headers</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                        ${structure.running_headers_count || 0} pages with detected running headers
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Spec Divisions</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                        ${structure.spec_divisions_count || 0} specification divisions found
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Topic Hotspots</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                        <span style="background: ${hotspots > 0 ? '#dcfce7' : '#fef3c7'}; color: ${hotspots > 0 ? '#166534' : '#92400e'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                            ${hotspots} keyword-dense regions detected
                         </span>
                     </td>
                 </tr>
@@ -3413,7 +3435,7 @@ function renderFullViewQuickScanTab() {
         </table>
     `;
 
-    document.getElementById('fv-quickScanContent').innerHTML = html;
+    document.getElementById('fv-optimizedScanContent').innerHTML = html;
 }
 
     </script>
@@ -3461,7 +3483,7 @@ function renderFullViewQuickScanTab() {
                     <button class="fv-tab-btn" id="fullViewFragmentsTabBtn" onclick="switchFullViewTab('fragments')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">All Fragments</button>
                     <button class="fv-tab-btn" onclick="switchFullViewTab('footnotes')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent;">Footnotes</button>
                     <button class="fv-tab-btn" id="fullViewPageIndexTabBtn" onclick="switchFullViewTab('pageIndex')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">Page Index</button>
-                    <button class="fv-tab-btn" id="fullViewQuickScanTabBtn" onclick="switchFullViewTab('quickScan')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">Quick Scan</button>
+                    <button class="fv-tab-btn" id="fullViewQuickScanTabBtn" onclick="switchFullViewTab('optimizedScan')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">Optimized Scan</button>
                 </div>
             </div>
 
@@ -3485,8 +3507,8 @@ function renderFullViewQuickScanTab() {
                 <div id="fv-tab-pageIndex" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
                     <div id="fv-pageIndexContent"></div>
                 </div>
-                <div id="fv-tab-quickScan" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
-                    <div id="fv-quickScanContent"></div>
+                <div id="fv-tab-optimizedScan" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-optimizedScanContent"></div>
                 </div>
             </div>
         </div>
