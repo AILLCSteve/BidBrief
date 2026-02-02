@@ -462,7 +462,7 @@ class HotdogOrchestrator:
                                     'answer_text': combined_text,  # All fragments combined
                                     'pages': ca.all_pages,         # ALL pages across all fragments
                                     'confidence': ca.highest_confidence,
-                                    'footnote': f"{ca.footnote_count} citations" if ca.footnote_count > 0 else "",
+                                    'footnote': " | ".join([fn.quote for fn in ca.footnotes]) if ca.footnotes else "",
                                     'fragment_count': ca.fragment_count,  # For display
                                     'is_cumulative': True  # Flag for frontend
                                 })

@@ -396,60 +396,306 @@ class BestPrepExcelGenerator:
                 row += 1
 
     def _create_sources_sheet(self):
-        """Sheet 5: Page index showing which questions reference each page with professional styling."""
-        ws = self.wb.create_sheet("Page Index", 4)
+        """Sheet 5: Study Guide with prioritized pages, visual density indicators, and raw page index."""
+        from openpyxl.formatting.rule import DataBarRule
 
-        # Build page -> questions mapping
-        page_map = {}
+        ws = self.wb.create_sheet("Study Guide", 4)
+
+        # Column widths for Study Guide layout
+        ws.column_dimensions['A'].width = 12
+        ws.column_dimensions['B'].width = 18
+        ws.column_dimensions['C'].width = 50
+        ws.column_dimensions['D'].width = 15
+        ws.column_dimensions['E'].width = 12
+        ws.column_dimensions['F'].width = 25
+
+        # Build comprehensive page data
+        page_map = {}  # page -> list of question_ids
+        page_fragments = {}  # page -> fragment count
+        page_sections = {}  # page -> set of sections
+
         for qid, ca_data in self.accumulator.get('cumulative_answers', {}).items():
+            # Extract section from question_id (format: SECTION_Q1)
+            section = qid.split('_')[0] if '_' in qid else 'General'
+
             for page in ca_data.get('all_pages', []):
                 if page not in page_map:
                     page_map[page] = []
+                    page_fragments[page] = 0
+                    page_sections[page] = set()
                 if qid not in page_map[page]:
                     page_map[page].append(qid)
+                page_fragments[page] += ca_data.get('fragment_count', 1)
+                page_sections[page].add(section)
 
-        headers = ["Page", "Questions Referencing This Page", "Reference Count"]
-        col_widths = [10, 80, 18]
+        # Calculate statistics
+        total_pages = len(page_map)
+        if total_pages == 0:
+            # No data - show empty state
+            ws.cell(1, 1, "No page references found in analysis")
+            return
 
-        # Header row with styling
-        for col, (header, width) in enumerate(zip(headers, col_widths), 1):
-            cell = ws.cell(1, col, header)
-            cell.font = self.header_font
-            cell.fill = PatternFill("solid", fgColor=self.NAVY)
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = self.thin_border
-            ws.column_dimensions[get_column_letter(col)].width = width
-        ws.row_dimensions[1].height = 25
+        ref_counts = [len(qids) for qids in page_map.values()]
+        max_refs = max(ref_counts) if ref_counts else 0
+        avg_refs = sum(ref_counts) / len(ref_counts) if ref_counts else 0
 
-        # Freeze header row
-        ws.freeze_panes = 'A2'
+        # Categorize pages by priority
+        high_priority = []  # >= 75th percentile
+        medium_priority = []  # 25th-75th percentile
+        low_priority = []  # < 25th percentile
+
+        sorted_pages = sorted(page_map.keys(), key=lambda p: len(page_map[p]), reverse=True)
+        threshold_high = max(1, int(len(sorted_pages) * 0.25))
+        threshold_low = max(1, int(len(sorted_pages) * 0.75))
+
+        for i, page in enumerate(sorted_pages):
+            if i < threshold_high:
+                high_priority.append(page)
+            elif i < threshold_low:
+                medium_priority.append(page)
+            else:
+                low_priority.append(page)
+
+        # ============================================================
+        # SECTION 1: STUDY GUIDE HEADER
+        # ============================================================
+        row = 1
+        ws.cell(row, 1, "📚 STUDY GUIDE")
+        ws.cell(row, 1).font = Font(size=20, bold=True, color=self.NAVY)
+        ws.merge_cells('A1:F1')
+        ws.row_dimensions[row].height = 35
 
         row = 2
+        ws.cell(row, 1, "Prioritized Page Reference Guide for Focused Study")
+        ws.cell(row, 1).font = Font(size=12, italic=True, color="666666")
+        ws.merge_cells('A2:F2')
+
+        # ============================================================
+        # SECTION 2: SUMMARY STATISTICS
+        # ============================================================
+        row = 4
+        ws.cell(row, 1, "OVERVIEW")
+        ws.cell(row, 1).font = Font(bold=True, color="FFFFFF", size=11)
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor=self.NAVY)
+        ws.merge_cells(f'A{row}:B{row}')
+        ws.cell(row, 3).fill = PatternFill("solid", fgColor=self.NAVY)
+        ws.cell(row, 4).fill = PatternFill("solid", fgColor=self.NAVY)
+        ws.merge_cells(f'C{row}:D{row}')
+
+        stats_data = [
+            ("Total Pages Referenced", total_pages, "Max Refs on Single Page", max_refs),
+            ("High Priority Pages", len(high_priority), "Avg Questions/Page", f"{avg_refs:.1f}"),
+            ("Medium Priority Pages", len(medium_priority), "Total Fragments", sum(page_fragments.values())),
+        ]
+
+        for label1, val1, label2, val2 in stats_data:
+            row += 1
+            ws.cell(row, 1, label1)
+            ws.cell(row, 1).font = self.label_font
+            ws.cell(row, 1).fill = PatternFill("solid", fgColor=self.LIGHT_GRAY)
+            ws.cell(row, 1).border = self.thin_border
+            ws.cell(row, 2, val1)
+            ws.cell(row, 2).font = Font(bold=True, color=self.NAVY)
+            ws.cell(row, 2).alignment = Alignment(horizontal='center')
+            ws.cell(row, 2).border = self.thin_border
+            ws.cell(row, 3, label2)
+            ws.cell(row, 3).font = self.label_font
+            ws.cell(row, 3).fill = PatternFill("solid", fgColor=self.LIGHT_GRAY)
+            ws.cell(row, 3).border = self.thin_border
+            ws.cell(row, 4, val2)
+            ws.cell(row, 4).font = Font(bold=True, color=self.NAVY)
+            ws.cell(row, 4).alignment = Alignment(horizontal='center')
+            ws.cell(row, 4).border = self.thin_border
+
+        # ============================================================
+        # SECTION 3: HIGH PRIORITY PAGES (STUDY FIRST!)
+        # ============================================================
+        row += 2
+        ws.cell(row, 1, "🔴 HIGH PRIORITY - Study These First!")
+        ws.cell(row, 1).font = Font(bold=True, color="FFFFFF", size=12)
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor="DC2626")  # Red
+        ws.merge_cells(f'A{row}:F{row}')
+        ws.row_dimensions[row].height = 25
+
+        row += 1
+        priority_headers = ["Page", "Questions", "Sections", "Density", "Priority"]
+        for col, header in enumerate(priority_headers, 1):
+            cell = ws.cell(row, col, header)
+            cell.font = Font(bold=True, color=self.NAVY, size=10)
+            cell.fill = PatternFill("solid", fgColor="FECACA")  # Light red
+            cell.alignment = Alignment(horizontal='center')
+            cell.border = self.thin_border
+
+        density_start_row = row + 1
+        for page in sorted(high_priority, key=lambda p: len(page_map[p]), reverse=True)[:10]:  # Top 10
+            row += 1
+            ref_count = len(page_map[page])
+            sections = ', '.join(sorted(page_sections.get(page, set())))
+
+            ws.cell(row, 1, f"Page {page}")
+            ws.cell(row, 1).font = Font(bold=True, color=self.NAVY, size=11)
+            ws.cell(row, 1).alignment = Alignment(horizontal='center')
+            ws.cell(row, 1).border = self.thin_border
+
+            ws.cell(row, 2, ref_count)
+            ws.cell(row, 2).alignment = Alignment(horizontal='center')
+            ws.cell(row, 2).border = self.thin_border
+
+            ws.cell(row, 3, sections[:40] + ('...' if len(sections) > 40 else ''))
+            ws.cell(row, 3).border = self.thin_border
+
+            # Density score (for data bar)
+            density = ref_count
+            ws.cell(row, 4, density)
+            ws.cell(row, 4).alignment = Alignment(horizontal='center')
+            ws.cell(row, 4).border = self.thin_border
+
+            ws.cell(row, 5, "⭐⭐⭐")
+            ws.cell(row, 5).alignment = Alignment(horizontal='center')
+            ws.cell(row, 5).font = Font(color="DC2626")
+            ws.cell(row, 5).border = self.thin_border
+
+        # Add data bar to density column for high priority
+        if row > density_start_row:
+            data_bar_rule = DataBarRule(
+                start_type='num', start_value=0,
+                end_type='num', end_value=max_refs,
+                color="DC2626"  # Red
+            )
+            ws.conditional_formatting.add(f'D{density_start_row}:D{row}', data_bar_rule)
+
+        # ============================================================
+        # SECTION 4: MEDIUM PRIORITY PAGES
+        # ============================================================
+        row += 2
+        ws.cell(row, 1, "🟡 MEDIUM PRIORITY - Review After High Priority")
+        ws.cell(row, 1).font = Font(bold=True, color="FFFFFF", size=12)
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor=self.ORANGE)
+        ws.merge_cells(f'A{row}:F{row}')
+        ws.row_dimensions[row].height = 25
+
+        row += 1
+        for col, header in enumerate(priority_headers, 1):
+            cell = ws.cell(row, col, header)
+            cell.font = Font(bold=True, color=self.ORANGE, size=10)
+            cell.fill = PatternFill("solid", fgColor=self.LIGHT_ORANGE)
+            cell.alignment = Alignment(horizontal='center')
+            cell.border = self.thin_border
+
+        density_start_row = row + 1
+        for page in sorted(medium_priority, key=lambda p: len(page_map[p]), reverse=True)[:15]:  # Top 15
+            row += 1
+            ref_count = len(page_map[page])
+            sections = ', '.join(sorted(page_sections.get(page, set())))
+
+            ws.cell(row, 1, f"Page {page}")
+            ws.cell(row, 1).font = Font(bold=True, color=self.NAVY)
+            ws.cell(row, 1).alignment = Alignment(horizontal='center')
+            ws.cell(row, 1).border = self.thin_border
+
+            ws.cell(row, 2, ref_count)
+            ws.cell(row, 2).alignment = Alignment(horizontal='center')
+            ws.cell(row, 2).border = self.thin_border
+
+            ws.cell(row, 3, sections[:40] + ('...' if len(sections) > 40 else ''))
+            ws.cell(row, 3).border = self.thin_border
+
+            density = ref_count
+            ws.cell(row, 4, density)
+            ws.cell(row, 4).alignment = Alignment(horizontal='center')
+            ws.cell(row, 4).border = self.thin_border
+
+            ws.cell(row, 5, "⭐⭐")
+            ws.cell(row, 5).alignment = Alignment(horizontal='center')
+            ws.cell(row, 5).font = Font(color=self.ORANGE)
+            ws.cell(row, 5).border = self.thin_border
+
+        # Add data bar for medium priority
+        if row > density_start_row:
+            data_bar_rule = DataBarRule(
+                start_type='num', start_value=0,
+                end_type='num', end_value=max_refs,
+                color=self.ORANGE
+            )
+            ws.conditional_formatting.add(f'D{density_start_row}:D{row}', data_bar_rule)
+
+        # ============================================================
+        # SECTION 5: LOW PRIORITY (Quick Reference)
+        # ============================================================
+        row += 2
+        ws.cell(row, 1, "🟢 LOW PRIORITY - Optional/Supplementary")
+        ws.cell(row, 1).font = Font(bold=True, color="FFFFFF", size=12)
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor=self.GREEN)
+        ws.merge_cells(f'A{row}:F{row}')
+        ws.row_dimensions[row].height = 25
+
+        row += 1
+        # Compact format for low priority
+        ws.cell(row, 1, "Pages")
+        ws.cell(row, 1).font = Font(bold=True, color=self.GREEN)
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor="DCFCE7")  # Light green
+        ws.cell(row, 1).border = self.thin_border
+
+        low_pages_str = ', '.join([f"{p} ({len(page_map[p])})" for p in sorted(low_priority)])
+        ws.cell(row, 2, low_pages_str if low_pages_str else "None")
+        ws.cell(row, 2).alignment = Alignment(wrap_text=True)
+        ws.cell(row, 2).border = self.thin_border
+        ws.merge_cells(f'B{row}:F{row}')
+
+        # ============================================================
+        # SECTION 6: RAW PAGE INDEX (Preserved Data)
+        # ============================================================
+        row += 3
+        ws.cell(row, 1, "📋 COMPLETE PAGE INDEX (Raw Data)")
+        ws.cell(row, 1).font = Font(bold=True, color="FFFFFF", size=12)
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor=self.NAVY)
+        ws.merge_cells(f'A{row}:F{row}')
+        ws.row_dimensions[row].height = 25
+
+        row += 1
+        index_headers = ["Page", "Question Count", "Questions Referencing This Page", "Sections", "Fragment Count"]
+        for col, header in enumerate(index_headers, 1):
+            cell = ws.cell(row, col, header)
+            cell.font = self.header_font
+            cell.fill = PatternFill("solid", fgColor=self.BLUE)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = self.thin_border
+        ws.row_dimensions[row].height = 22
+
         for page in sorted(page_map.keys()):
-            # Alternating row colors
+            row += 1
             row_fill = PatternFill("solid", fgColor=self.LIGHT_GRAY) if row % 2 == 0 else None
 
             ws.cell(row, 1, page)
-            ws.cell(row, 1).font = Font(bold=True, color=self.NAVY, size=12)
+            ws.cell(row, 1).font = Font(bold=True, color=self.NAVY, size=11)
             ws.cell(row, 1).alignment = Alignment(horizontal='center')
             ws.cell(row, 1).border = self.thin_border
             if row_fill:
                 ws.cell(row, 1).fill = row_fill
 
-            ws.cell(row, 2, ', '.join(page_map[page]))
-            ws.cell(row, 2).alignment = Alignment(wrap_text=True, vertical='top')
+            ref_count = len(page_map[page])
+            ws.cell(row, 2, ref_count)
+            ws.cell(row, 2).alignment = Alignment(horizontal='center')
             ws.cell(row, 2).border = self.thin_border
+            if ref_count >= 5:
+                ws.cell(row, 2).font = Font(bold=True, color=self.ORANGE)
             if row_fill:
                 ws.cell(row, 2).fill = row_fill
 
-            ref_count = len(page_map[page])
-            ws.cell(row, 3, ref_count)
-            ws.cell(row, 3).alignment = Alignment(horizontal='center')
+            ws.cell(row, 3, ', '.join(page_map[page]))
+            ws.cell(row, 3).alignment = Alignment(wrap_text=True, vertical='top')
             ws.cell(row, 3).border = self.thin_border
-            # Highlight high-reference pages
-            if ref_count >= 5:
-                ws.cell(row, 3).font = Font(bold=True, color=self.ORANGE)
             if row_fill:
                 ws.cell(row, 3).fill = row_fill
 
-            row += 1
+            sections = ', '.join(sorted(page_sections.get(page, set())))
+            ws.cell(row, 4, sections)
+            ws.cell(row, 4).border = self.thin_border
+            if row_fill:
+                ws.cell(row, 4).fill = row_fill
+
+            ws.cell(row, 5, page_fragments.get(page, 0))
+            ws.cell(row, 5).alignment = Alignment(horizontal='center')
+            ws.cell(row, 5).border = self.thin_border
+            if row_fill:
+                ws.cell(row, 5).fill = row_fill

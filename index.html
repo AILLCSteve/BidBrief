@@ -1671,7 +1671,7 @@ function renderUnitaryTable() {
             </div>
 
             <!-- Progress Stats -->
-            <div style="background: #f0f4ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+            <div class="unitary-stats" style="background: #f0f4ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
                 <div style="font-weight: 600; color: #1E3A8A;">
                     Answered: ${answeredCount}/${totalCount} questions (${((answeredCount/totalCount)*100).toFixed(1)}%)
                 </div>
@@ -1789,6 +1789,32 @@ function updateUnitaryTableRows(questionIds) {
     if (footnotesContainer) {
         footnotesContainer.outerHTML = renderFootnotesSection();
     }
+
+    // Update stats header with live counts
+    updateUnitaryStats();
+}
+
+function updateUnitaryStats() {
+    /**
+     * Update the stats header in the Unitary Log with live counts.
+     * Called after each row update to keep stats in sync with data.
+     */
+    const statsDiv = document.querySelector('.unitary-stats');
+    if (!statsDiv) return;
+
+    const questionsList = Object.values(allQuestions);
+    const answeredCount = questionsList.filter(q => q.status === 'found').length;
+    const totalCount = questionsList.length;
+    const totalFragments = questionsList.reduce((sum, q) => sum + (q.fragment_count || 0), 0);
+
+    statsDiv.innerHTML = `
+        <div style="font-weight: 600; color: #1E3A8A;">
+            Answered: ${answeredCount}/${totalCount} questions (${totalCount > 0 ? ((answeredCount/totalCount)*100).toFixed(1) : 0}%)
+        </div>
+        <div style="margin-top: 5px; color: #666;">
+            Footnotes: ${allFootnotes.length}${currentAnalysisMode === 'bestprep' ? ` | Fragments: ${totalFragments}` : ''}
+        </div>
+    `;
 }
 
 function truncateText(text, maxLength) {

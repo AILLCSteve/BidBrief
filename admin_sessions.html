@@ -699,6 +699,14 @@
             const sections = data.result?.sections || [];
             const bestprepData = data.bestprep_data || {};  // BestPrep-specific data
 
+            // Build fragment count map from bestprep_data (fragments tab data source)
+            const fragmentCountMap = {};
+            if (data.bestprep_data?.fragments) {
+                data.bestprep_data.fragments.forEach(f => {
+                    fragmentCountMap[f.question_id] = (fragmentCountMap[f.question_id] || 0) + 1;
+                });
+            }
+
             let totalQuestions = 0;
             let answeredQuestions = 0;
             let totalConfidence = 0;
@@ -718,10 +726,9 @@
                             confidenceCount++;
                         }
                     }
-                    // Count fragments for BestPrep
-                    if (q.fragment_count) {
-                        totalFragments += q.fragment_count;
-                    }
+                    // Count fragments for BestPrep - use fragmentCountMap first, fallback to q.fragment_count
+                    const qFragCount = fragmentCountMap[q.question_id] || q.fragment_count || 0;
+                    totalFragments += qFragCount;
                     if (q.footnote_count) {
                         totalFootnotes += q.footnote_count;
                     }
@@ -732,10 +739,14 @@
                 });
             });
 
+            // Use bestprep_data counts as authoritative source if available
+            const actualFragmentCount = data.bestprep_data?.fragments?.length || totalFragments;
+            const actualFootnoteCount = data.bestprep_data?.footnotes?.length || totalFootnotes;
+
             const answerRate = totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0;
             const avgConfidence = confidenceCount > 0 ? Math.round(totalConfidence / confidenceCount) : 'N/A';
-            const avgFragsPerQ = answeredQuestions > 0 ? (totalFragments / answeredQuestions).toFixed(1) : '0';
-            const avgFootnotesPerQ = answeredQuestions > 0 ? (totalFootnotes / answeredQuestions).toFixed(1) : '0';
+            const avgFragsPerQ = answeredQuestions > 0 ? (actualFragmentCount / answeredQuestions).toFixed(1) : '0';
+            const avgFootnotesPerQ = answeredQuestions > 0 ? (actualFootnoteCount / answeredQuestions).toFixed(1) : '0';
 
             let html = '';
 
@@ -811,11 +822,11 @@
                         <tbody>
                             <tr>
                                 <td style="width: 220px; font-weight: 600; background: #fff3e0; color: #e65100;">Total Fragments Collected</td>
-                                <td style="font-weight: 600; color: #e65100;">${totalFragments || bestprepData.total_fragments || 0}</td>
+                                <td style="font-weight: 600; color: #e65100;">${actualFragmentCount}</td>
                             </tr>
                             <tr>
                                 <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Total Citations/Footnotes</td>
-                                <td style="font-weight: 600; color: #e65100;">${totalFootnotes || bestprepData.total_footnotes || 0}</td>
+                                <td style="font-weight: 600; color: #e65100;">${actualFootnoteCount}</td>
                             </tr>
                             <tr>
                                 <td style="font-weight: 600; background: #fff3e0; color: #e65100;">Avg Fragments/Question</td>
@@ -898,6 +909,14 @@
             // BestPrep has additional column for fragment count
             const isBestPrep = mode === 'bestprep';
 
+            // Build fragment count map from bestprep_data (fragments tab data source)
+            const fragmentCountMap = {};
+            if (data.bestprep_data?.fragments) {
+                data.bestprep_data.fragments.forEach(f => {
+                    fragmentCountMap[f.question_id] = (fragmentCountMap[f.question_id] || 0) + 1;
+                });
+            }
+
             let html = `
                 <table class="results-table">
                     <thead>
@@ -919,7 +938,7 @@
                 (section.questions || []).forEach(q => {
                     const hasAnswer = q.answer && q.answer.trim();
                     const pages = (q.page_citations || []).join(', ') || '-';
-                    const fragmentCount = q.fragment_count || 0;
+                    const fragmentCount = fragmentCountMap[q.question_id] || q.fragment_count || 0;
 
                     // For BestPrep, show synthesized answer if available, otherwise show combined fragments
                     let displayAnswer = hasAnswer ? q.answer : '<em style="color: #999;">Not found in document</em>';
@@ -960,12 +979,21 @@
         function renderBySectionTab(data, mode) {
             const sections = data.result?.sections || [];
             const isBestPrep = mode === 'bestprep';
+
+            // Build fragment count map from bestprep_data (fragments tab data source)
+            const fragmentCountMap = {};
+            if (data.bestprep_data?.fragments) {
+                data.bestprep_data.fragments.forEach(f => {
+                    fragmentCountMap[f.question_id] = (fragmentCountMap[f.question_id] || 0) + 1;
+                });
+            }
+
             let html = '';
 
             sections.forEach(section => {
                 const questions = section.questions || [];
                 const answered = questions.filter(q => q.answer && q.answer.trim()).length;
-                const totalFrags = questions.reduce((sum, q) => sum + (q.fragment_count || 0), 0);
+                const totalFrags = questions.reduce((sum, q) => sum + (fragmentCountMap[q.question_id] || q.fragment_count || 0), 0);
 
                 html += `
                     <div style="margin-bottom: 30px;">
@@ -993,7 +1021,7 @@
                 questions.forEach((q, idx) => {
                     const hasAnswer = q.answer && q.answer.trim();
                     const pages = (q.page_citations || []).join(', ') || '-';
-                    const fragCount = q.fragment_count || 0;
+                    const fragCount = fragmentCountMap[q.question_id] || q.fragment_count || 0;
 
                     html += `
                         <tr>
