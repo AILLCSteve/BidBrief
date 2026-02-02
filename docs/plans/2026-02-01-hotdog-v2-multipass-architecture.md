@@ -16,6 +16,7 @@
 
 ## Table of Contents
 
+0. [Phase 0: Pipeline Mode Toggle - Classic vs v2](#phase-0-pipeline-mode-toggle)
 1. [Phase 1: Second Pass Integration for Bid/Spec Mode](#phase-1-second-pass-integration)
 2. [Phase 2: UI Augmentation - Question Selection Checkboxes](#phase-2-ui-augmentation)
 3. [Phase 3: Stage 1 - Comprehensive Quick-Scan Pass](#phase-3-comprehensive-quick-scan)
@@ -47,6 +48,169 @@
 │ Stage 4: Deep RAG (external similar projects with disclaimers)   │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Phase 0: Pipeline Mode Toggle - Classic vs v2
+
+**Objective:** Ensure users can choose between Classic (current) bid_spec processing and the new v2 Multi-Pass Pipeline. Classic mode remains the default.
+
+### Task 0.1: Add Pipeline Mode Selection to UI
+
+**Files:**
+- Modify: `index.html` (Advanced Options section, near the Recheck Empty Windows checkbox)
+
+**Step 1: Add pipeline mode radio buttons**
+
+In the Advanced Options section (~line 485), add:
+
+```html
+<!-- Pipeline Mode Selection -->
+<div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+    <strong style="color: #1E3A8A;">Analysis Pipeline Mode</strong>
+    <p style="color: #666; font-size: 12px; margin: 5px 0 10px 0;">
+        Choose how thoroughly to analyze the document.
+    </p>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+        <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: #f8fafc; border-radius: 6px; border: 2px solid #1E3A8A;">
+            <input type="radio" name="pipelineMode" value="classic" checked style="margin-top: 3px;">
+            <div>
+                <strong style="color: #1E3A8A;">Classic Mode (Recommended)</strong>
+                <p style="color: #666; font-size: 12px; margin: 3px 0 0 0;">
+                    Current exhaustive window-based processing. Analyzes all pages for all selected questions.
+                    Fast and reliable for most documents.
+                </p>
+            </div>
+        </label>
+
+        <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: #f8fafc; border-radius: 6px; border: 1px solid #ddd;">
+            <input type="radio" name="pipelineMode" value="v2_pipeline" style="margin-top: 3px;">
+            <div>
+                <strong style="color: #1E3A8A;">v2 Multi-Pass Pipeline</strong>
+                <p style="color: #666; font-size: 12px; margin: 3px 0 0 0;">
+                    4-stage intelligent pipeline: Quick-scan → Selective Exhaustive → Second Pass → Optional RAG.
+                    Better for large documents with clear structure (TOC, Index).
+                </p>
+            </div>
+        </label>
+    </div>
+</div>
+```
+
+**Step 2: Update startAnalysis() to pass pipeline mode**
+
+In the `startAnalysis()` function, add:
+
+```javascript
+const pipelineMode = document.querySelector('input[name="pipelineMode"]:checked').value;
+Logger.info(`📊 Pipeline mode: ${pipelineMode}`);
+
+// In the fetch body:
+body: JSON.stringify({
+    ...existingParams,
+    pipeline_mode: pipelineMode  // 'classic' or 'v2_pipeline'
+})
+```
+
+**Step 3: Commit**
+
+```bash
+git add index.html
+git commit -m "feat: Add pipeline mode selection (Classic vs v2) in Advanced Options"
+```
+
+### Task 0.2: Handle Pipeline Mode in Backend
+
+**Files:**
+- Modify: `app.py` (analyze_document endpoint)
+- Modify: `services/hotdog/orchestrator.py`
+
+**Step 1: Extract pipeline_mode in app.py**
+
+In the `/api/analyze` endpoint:
+
+```python
+pipeline_mode = data.get('pipeline_mode', 'classic')  # Default to classic
+logger.info(f"Pipeline mode: {pipeline_mode}")
+
+# Pass to orchestrator
+orchestrator = HotdogOrchestrator(
+    openai_api_key=openai_key,
+    config_path=config_path,
+    context_guardrails=context_guardrails,
+    progress_callback=progress_callback,
+    mode=analysis_mode,
+    recheck_empty_windows=recheck_empty_windows,
+    use_pipeline_v2=(pipeline_mode == 'v2_pipeline')  # NEW
+)
+```
+
+**Step 2: Add use_pipeline_v2 parameter to orchestrator**
+
+In `orchestrator.py` `__init__`:
+
+```python
+def __init__(
+    self,
+    openai_api_key: str,
+    config_path: Optional[str] = None,
+    max_parallel_experts: int = 5,
+    similarity_threshold: float = 0.75,
+    progress_callback: Optional[Callable] = None,
+    context_guardrails: Optional[str] = None,
+    mode: str = 'bid_spec',
+    recheck_empty_windows: bool = False,
+    use_pipeline_v2: bool = False  # NEW: Enable v2 multi-pass pipeline
+):
+    ...
+    self.use_pipeline_v2 = use_pipeline_v2
+
+    if self.use_pipeline_v2:
+        logger.info("   Pipeline: v2 Multi-Pass (Comprehensive → Exhaustive → Second Pass → RAG)")
+    else:
+        logger.info("   Pipeline: Classic (Exhaustive window-based)")
+```
+
+**Step 3: Branch logic in analyze_document**
+
+The orchestrator's `analyze_document` method should check `self.use_pipeline_v2`:
+
+```python
+# After Layer 2 experts generation
+if self.mode == AnalysisMode.BID_SPEC and self.use_pipeline_v2:
+    # ============================================================
+    # V2 PIPELINE: Multi-Pass Processing
+    # ============================================================
+    # ... (Phase 6 PipelineCoordinator code)
+    pass
+else:
+    # ============================================================
+    # CLASSIC PIPELINE: Current exhaustive window-based processing
+    # ============================================================
+    # ... (existing window processing loop - NO CHANGES)
+    for window_idx, window in enumerate(windows, 1):
+        # ... existing code remains unchanged
+```
+
+**Step 4: Commit**
+
+```bash
+git add app.py services/hotdog/orchestrator.py
+git commit -m "feat: Add use_pipeline_v2 flag with Classic mode as default"
+```
+
+### Architecture Decision: Classic vs v2
+
+| Aspect | Classic Mode | v2 Multi-Pass Pipeline |
+|--------|-------------|------------------------|
+| **Default** | ✅ Yes | No |
+| **Processing** | All windows, all questions | Selective based on confidence |
+| **Speed** | Consistent | Faster for structured docs |
+| **Best For** | Any document | Large docs with TOC/Index |
+| **Second Pass** | Optional (recheck empty) | Built-in for unanswered |
+| **Deep RAG** | Not available | User-triggered option |
+| **Question Selection** | Not needed | Checkboxes for targeting |
 
 ---
 
