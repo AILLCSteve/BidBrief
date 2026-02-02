@@ -440,10 +440,10 @@
                         <p style="color: #666; font-size: 12px; margin-top: 5px;">Smart deduplication, merge similar answers. Best for construction bid specs and RFPs.</p>
                     </div>
                 </label>
-                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #ddd; flex: 1; min-width: 280px;" id="modeLabel_bestprep">
+                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #ddd; flex: 1; min-width: 280px; display: none;" id="modeLabel_bestprep">
                     <input type="radio" name="analysisMode" value="bestprep" onchange="setAnalysisMode('bestprep')" style="margin-top: 3px;">
                     <div>
-                        <strong style="color: #1E3A8A;">BestPrep/TestPrep Mode</strong>
+                        <strong style="color: #1E3A8A;">BestPrep/TestPrep Mode <span style="background: #dc2626; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 5px;">ADMIN</span></strong>
                         <p style="color: #666; font-size: 12px; margin-top: 5px;">Exhaustive answers, never discard info, with synthesis. Best for textbooks and study materials.</p>
                     </div>
                 </label>
@@ -1706,11 +1706,14 @@ async function checkAdminStatus() {
             isUserAdmin = true;
             // Show Advanced Options section for admins
             document.getElementById('advancedOptionsSection').style.display = 'block';
-            Logger.info('🔐 Admin access granted - Advanced Options available');
+            // Show BestPrep mode option for admins
+            document.getElementById('modeLabel_bestprep').style.display = 'flex';
+            Logger.info('🔐 Admin access granted - Advanced Options & BestPrep available');
         } else {
             isUserAdmin = false;
             // Keep hidden for non-admins
             document.getElementById('advancedOptionsSection').style.display = 'none';
+            document.getElementById('modeLabel_bestprep').style.display = 'none';
         }
     } catch (error) {
         console.error('Failed to check admin status:', error);
