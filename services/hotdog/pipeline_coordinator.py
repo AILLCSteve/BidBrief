@@ -19,6 +19,7 @@ from datetime import datetime
 from enum import Enum
 
 from .models import Question, Answer, ParsedConfig, PageData, ExpertPersona, WindowContext
+from .document_navigator import DocumentNavigator, NavigationMap
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,12 @@ class PipelineCoordinator:
         self.accumulator = accumulator
         self.progress_callback = progress_callback
 
+        # Document Navigator for pre-scan analysis
+        self.navigator = DocumentNavigator()
+
+        # Current navigation map (set during pre-scan)
+        self.navigation_map: Optional[NavigationMap] = None
+
         self.state = PipelineState()
 
     def set_user_selections(
@@ -122,8 +129,28 @@ class PipelineCoordinator:
         logger.info("HOTDOG7ATE Multi-Pass Pipeline Starting")
         logger.info("="*64)
 
+        self._emit_progress('pipeline_start', {
+            'pipeline': 'HOTDOG7ATE',
+            'stages': ['pre_scan', 'quick_scan', 'exhaustive', 'second_pass', 'deep_rag']
+        })
+
         all_questions = list(config.question_map.values())
         self.state.all_questions = set(q.id for q in all_questions)
+
+        # ============================================================
+        # PRE-SCAN: Document Navigator Analysis
+        # ============================================================
+        try:
+            self.navigation_map = await self.navigator.create_navigation_map(
+                pages=pages,
+                questions=all_questions,
+                experts=experts,
+                progress_callback=self._emit_progress
+            )
+            logger.info(f"Navigation map created: {len(self.navigation_map.expert_assignments)} expert assignments")
+        except Exception as e:
+            logger.warning(f"Document Navigator failed (continuing without): {e}")
+            self.navigation_map = None
 
         # ============================================================
         # STAGE 1: Comprehensive Quick-Scan
@@ -164,6 +191,12 @@ class PipelineCoordinator:
 
         # Print pipeline summary
         self._print_summary()
+
+        # Emit pipeline complete event
+        self._emit_progress('pipeline_complete', {
+            'pipeline': 'HOTDOG7ATE',
+            'summary': self.get_pipeline_summary()
+        })
 
         # Return all accumulated answers
         return self.accumulator.get_accumulated_answers()
