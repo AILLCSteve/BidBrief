@@ -106,6 +106,7 @@ def load_authorized_users():
     Roles:
     - AUTH_USER1 = Admin (full access including /admin/sessions)
     - AUTH_USER2 = User (basic app access only)
+    - AUTH_USER3 = User (basic app access only)
     """
     users = {}
 
@@ -130,6 +131,18 @@ def load_authorized_users():
         users[user2_email.lower()] = {
             'password_hash': hashlib.sha256(user2_password.encode()).hexdigest(),
             'name': user2_name,
+            'role': 'user'
+        }
+
+    # User 3 - USER role (basic access only)
+    user3_email = os.getenv('AUTH_USER3_EMAIL')
+    user3_password = os.getenv('AUTH_USER3_PASSWORD')
+    user3_name = os.getenv('AUTH_USER3_NAME', 'User 3')
+
+    if user3_email and user3_password:
+        users[user3_email.lower()] = {
+            'password_hash': hashlib.sha256(user3_password.encode()).hexdigest(),
+            'name': user3_name,
             'role': 'user'
         }
 
