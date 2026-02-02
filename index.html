@@ -849,38 +849,100 @@ function handleEvent(data) {
             Logger.success(`✅ Synthesis complete: ${data.synthesized_count} answers synthesized`);
             ProgressTracker.update(95, 'Synthesis complete...');
         }
-        // V2 Pipeline Stage Events
-        else if (data.event === 'stage_1_start' || data.event === 'stage_start' && data.stage === 'quick_scan') {
-            Logger.info(`🚀 Stage 1: Comprehensive Quick-Scan starting...`);
-            ProgressTracker.update(25, 'Quick-scan: Analyzing document structure...');
+        // V2 Pipeline Lifecycle Events
+        else if (data.event === 'pipeline_start') {
+            Logger.info(`🚀 ${data.pipeline || 'HOTDOG7ATE'} Pipeline started`);
+            if (data.stages) {
+                Logger.info(`   ↳ Stages: ${data.stages.join(' → ')}`);
+            }
+            ProgressTracker.update(20, `Starting ${data.pipeline || 'HOTDOG7ATE'} Pipeline...`);
         }
-        else if (data.event === 'stage_1_complete' || data.event === 'stage_complete' && data.stage === 'quick_scan') {
-            Logger.success(`✅ Quick-scan complete: ${data.high_confidence_count || data.answers_found} high-confidence answers`);
+        else if (data.event === 'pipeline_complete') {
+            Logger.success(`✅ Pipeline complete!`);
+            if (data.summary) {
+                Logger.info(`   ↳ Stages completed: ${data.summary.stages_completed?.length || 0}`);
+                Logger.info(`   ↳ Questions answered: ${data.summary.answered_questions || 0}/${data.summary.total_questions || 0}`);
+            }
+        }
+        // Pre-scan Events (Document Navigator)
+        else if (data.event === 'prescan_start') {
+            Logger.info(`🗺️ Document Navigator analyzing structure...`);
+            Logger.info(`   ↳ Pages: ${data.total_pages || 0}, Questions: ${data.total_questions || 0}, Experts: ${data.total_experts || 0}`);
+            ProgressTracker.update(22, 'Analyzing document structure (TOC, index, headers)...');
+        }
+        else if (data.event === 'prescan_complete') {
+            Logger.success(`✅ Document structure analyzed`);
+            Logger.info(`   ↳ TOC: ${data.has_toc ? 'Found' : 'Not found'}, Index: ${data.has_index ? 'Found' : 'Not found'}`);
+            if (data.expert_assignments && data.expert_assignments.length > 0) {
+                data.expert_assignments.forEach(a => {
+                    Logger.info(`   ↳ ${a.expert}: ${a.total_pages} pages targeted`);
+                });
+            }
+            if (data.estimated_reduction) {
+                Logger.info(`   ↳ Estimated scan reduction: ${data.estimated_reduction}`);
+            }
+            ProgressTracker.update(25, 'Document structure mapped...');
+        }
+        // V2 Stage 1: Quick-Scan
+        else if (data.event === 'stage_1_start' || (data.event === 'stage_start' && data.stage === 'quick_scan')) {
+            Logger.info(`🔍 Stage 1: Comprehensive Quick-Scan starting...`);
+            Logger.info(`   ↳ ${data.questions_count || 0} questions to analyze`);
+            ProgressTracker.update(28, 'Quick-scan: Targeted extraction...');
+        }
+        else if (data.event === 'stage_1_complete' || (data.event === 'stage_complete' && data.stage === 'quick_scan')) {
+            Logger.success(`✅ Quick-scan complete: ${data.high_confidence_count || data.answers_found || 0} high-confidence answers`);
+            if (data.questions_for_exhaustive !== undefined) {
+                Logger.info(`   ↳ ${data.questions_for_exhaustive} questions need exhaustive pass`);
+            }
             ProgressTracker.update(40, 'Quick-scan complete...');
         }
-        else if (data.event === 'stage_start' && data.stage === 'exhaustive') {
-            Logger.info(`🔄 Stage 2: Selective Exhaustive Pass starting...`);
-            ProgressTracker.update(45, 'Exhaustive pass...');
+        // V2 Stage 2: Exhaustive Pass
+        else if (data.event === 'stage_2_start' || (data.event === 'stage_start' && data.stage === 'exhaustive')) {
+            Logger.info(`🔄 Exhaustive Analysis starting...`);
+            Logger.info(`   ↳ ${data.questions_count || 0} questions, ${data.windows_count || 0} windows`);
+            ProgressTracker.update(42, `Exhaustive: 0/${data.windows_count || 0} windows...`);
         }
-        else if (data.event === 'stage_complete' && data.stage === 'exhaustive') {
-            Logger.success(`✅ Exhaustive pass complete: ${data.answers_found} answers`);
+        else if (data.event === 'stage_2_progress') {
+            const pct = 42 + Math.round(((data.window || 0) / (data.total_windows || 1)) * 25);
+            ProgressTracker.update(pct, `Exhaustive: Window ${data.window}/${data.total_windows} (${data.answers_so_far || 0} answers)...`);
+        }
+        else if (data.event === 'stage_2_complete' || (data.event === 'stage_complete' && data.stage === 'exhaustive')) {
+            Logger.success(`✅ Exhaustive analysis complete: ${data.answers_found || 0} answers`);
             ProgressTracker.update(70, 'Exhaustive pass complete...');
         }
-        else if (data.event === 'second_pass_start' || data.event === 'stage_start' && data.stage === 'second_pass') {
-            Logger.info(`🔍 Second Pass: Retrying ${data.unanswered_count} unanswered questions...`);
-            ProgressTracker.update(75, 'Second pass: Enhanced scrutiny...');
+        // V2 Stage 3: Second Pass (Unanswered Only)
+        else if (data.event === 'stage_3_start' || data.event === 'second_pass_start' || (data.event === 'stage_start' && data.stage === 'second_pass')) {
+            Logger.info(`🔍 Second Pass: Enhanced scrutiny for unanswered...`);
+            Logger.info(`   ↳ Targeting ${data.unanswered_count || 0} unanswered questions`);
+            ProgressTracker.update(72, 'Second pass: Enhanced scrutiny...');
         }
-        else if (data.event === 'second_pass_complete' || data.event === 'stage_complete' && data.stage === 'second_pass') {
-            Logger.success(`✅ Second pass complete: ${data.answers_found} new answers, ${data.still_unanswered} still unanswered`);
+        else if (data.event === 'stage_3_complete' || data.event === 'second_pass_complete' || (data.event === 'stage_complete' && data.stage === 'second_pass')) {
+            Logger.success(`✅ Second pass complete: ${data.answers_found || 0} new answers`);
+            if (data.still_unanswered > 0) {
+                Logger.warn(`   ↳ Still unanswered: ${data.still_unanswered}`);
+            }
             ProgressTracker.update(85, 'Second pass complete...');
         }
-        else if (data.event === 'stage_start' && data.stage === 'deep_rag') {
-            Logger.info(`🔍 Stage 4: Deep RAG External Search starting...`);
-            ProgressTracker.update(88, 'Deep RAG: Searching external sources...');
+        // V2 Stage 4: Deep RAG
+        else if (data.event === 'stage_4_start' || (data.event === 'stage_start' && data.stage === 'deep_rag')) {
+            Logger.info(`🌐 Deep RAG: External search via TAVILY...`);
+            Logger.info(`   ↳ Searching for ${data.questions_count || 0} questions`);
+            ProgressTracker.update(87, 'Deep RAG: Searching external sources...');
         }
-        else if (data.event === 'stage_complete' && data.stage === 'deep_rag') {
-            Logger.success(`✅ Deep RAG complete: ${data.answers_found} external answers (with disclaimers)`);
+        else if (data.event === 'stage_4_complete' || (data.event === 'stage_complete' && data.stage === 'deep_rag')) {
+            Logger.success(`✅ Deep RAG complete: ${data.answers_found || 0} external answers`);
+            if (data.disclaimer) {
+                Logger.warn(`   ↳ ${data.disclaimer}`);
+            }
             ProgressTracker.update(92, 'Deep RAG complete...');
+        }
+        // Stage Pause Event (Interactive Pipeline)
+        else if (data.event === 'stage_pause') {
+            Logger.info(`⏸️ Pausing for user review: ${data.stage_name || 'Stage complete'}`);
+            // Show pause modal for user interaction
+            if (typeof showStagePauseModal === 'function') {
+                showStagePauseModal(data);
+            }
         }
         else if (data.event === 'recheck_start') {
             Logger.info(`🔄 Rechecking ${data.empty_window_count} empty windows...`);
