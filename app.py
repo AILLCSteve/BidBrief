@@ -686,7 +686,8 @@ def analyze_document():
     pdf_filename = data.get('pdf_filename', 'Unknown.pdf')  # Get original filename
     context_guardrails = data.get('context_guardrails', '')
     enabled_sections = data.get('enabled_sections', None)  # NEW: Optional list of enabled section IDs
-    analysis_mode = data.get('mode', 'bid_spec')  # NEW: Analysis mode (bid_spec or bestprep)
+    analysis_mode = data.get('mode', 'bid_spec')  # Analysis mode (bid_spec or bestprep)
+    recheck_empty_windows = data.get('recheck_empty_windows', False)  # Retry windows with 0 answers
     session_id = data.get('session_id', f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
     # Validate analysis mode
@@ -735,13 +736,14 @@ def analyze_document():
             # Get config path
             config_path = str(Config.BASE_DIR / 'config' / 'cipp_questions_default.json')
 
-            # Initialize orchestrator with mode
+            # Initialize orchestrator with mode and options
             orchestrator = HotdogOrchestrator(
                 openai_api_key=openai_key,
                 config_path=config_path,
                 context_guardrails=context_guardrails,
                 progress_callback=progress_callback,
-                mode=analysis_mode
+                mode=analysis_mode,
+                recheck_empty_windows=recheck_empty_windows
             )
 
             # Store in active_analyses IMMEDIATELY (for partial results)

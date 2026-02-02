@@ -77,7 +77,8 @@ class HotdogOrchestrator:
         similarity_threshold: float = 0.75,
         progress_callback: Optional[Callable] = None,
         context_guardrails: Optional[str] = None,
-        mode: str = 'bid_spec'
+        mode: str = 'bid_spec',
+        recheck_empty_windows: bool = False
     ):
         """
         Initialize the HOTDOG orchestrator.
@@ -92,6 +93,7 @@ class HotdogOrchestrator:
             context_guardrails: Optional global context rules for analysis
                               (e.g., "Only answer within CIPP lining context")
             mode: Analysis mode - 'bid_spec' (default) or 'bestprep'
+            recheck_empty_windows: If True, retry extraction on windows that found 0 answers
         """
         self.openai_client = AsyncOpenAI(api_key=openai_api_key)
         self.config_path = config_path
@@ -101,6 +103,7 @@ class HotdogOrchestrator:
         # Mode configuration
         self.mode_config = get_mode_config(mode)
         self.mode = self.mode_config.mode
+        self.recheck_empty_windows = recheck_empty_windows
 
         # Detect model limits using TokenOptimizer
         self.model = "gpt-4o"  # Most robust available model
@@ -323,6 +326,9 @@ class HotdogOrchestrator:
             logger.info(f"🔄 Processing {len(windows)} windows...")
             self._emit_progress('processing_start', {'total_windows': len(windows)})
 
+            # Track windows with no answers for potential recheck
+            empty_windows = []  # List of (window_idx, window) tuples
+
             for window_idx, window in enumerate(windows, 1):
                 # Check for stop request
                 if self.stop_requested:
@@ -381,6 +387,11 @@ class HotdogOrchestrator:
                     'answers_returned': len(window_result.answers),
                     'tokens_used': window_result.tokens_used
                 })
+
+                # Track empty windows for potential recheck
+                if len(window_result.answers) == 0:
+                    empty_windows.append((window_idx, window))
+                    logger.info(f"📝 Window {window_idx} returned 0 answers - marked for potential recheck")
 
                 # Record actual token usage
                 self.layer5_token_manager.record_usage(
@@ -509,6 +520,77 @@ class HotdogOrchestrator:
                         'total_windows': len(windows),
                         'progress_summary': progress_summary
                     })
+
+            # ============================================================
+            # RECHECK EMPTY WINDOWS (if enabled)
+            # ============================================================
+            if self.recheck_empty_windows and empty_windows:
+                logger.info(f"\n{'='*64}")
+                logger.info(f"🔄 RECHECKING {len(empty_windows)} EMPTY WINDOWS")
+                logger.info(f"{'='*64}")
+
+                self._emit_progress('recheck_start', {
+                    'empty_window_count': len(empty_windows),
+                    'windows_to_recheck': [w[0] for w in empty_windows]
+                })
+
+                recheck_answers_found = 0
+
+                for recheck_idx, (window_idx, window) in enumerate(empty_windows, 1):
+                    # Check for stop request
+                    if self.stop_requested:
+                        logger.warning(f"⏹️  Recheck stopped by user at window {recheck_idx}/{len(empty_windows)}")
+                        break
+
+                    logger.info(f"\n🔄 Rechecking Window {window_idx} ({recheck_idx}/{len(empty_windows)}): Pages {window.page_range_str}")
+
+                    self._emit_progress('recheck_window_processing', {
+                        'recheck_num': recheck_idx,
+                        'total_rechecks': len(empty_windows),
+                        'original_window_num': window_idx,
+                        'pages': window.page_range_str
+                    })
+
+                    # Re-process this window with the same experts
+                    window_result = await self.layer3_processor.process_window(
+                        window=window,
+                        questions=list(config.question_map.values()),
+                        experts=experts
+                    )
+
+                    logger.info(f"  ✅ Recheck found {len(window_result.answers)} answers from window {window_idx}")
+
+                    # Accumulate any new answers (mode-aware)
+                    if len(window_result.answers) > 0:
+                        recheck_answers_found += len(window_result.answers)
+
+                        if self.mode == AnalysisMode.BESTPREP:
+                            for question_id, answer in window_result.answers.items():
+                                self.bestprep_accumulator.add_answer(
+                                    question_id=question_id,
+                                    answer_text=answer.text,
+                                    pages=answer.pages,
+                                    confidence=answer.confidence,
+                                    window_index=window_idx,
+                                    expert_name=answer.expert + " (Recheck)",
+                                    raw_footnote=answer.footnote
+                                )
+                        else:
+                            # Bid/Spec mode: use smart accumulator
+                            self.layer4_accumulator.accumulate_window(window_result)
+
+                    self._emit_progress('recheck_window_complete', {
+                        'recheck_num': recheck_idx,
+                        'original_window_num': window_idx,
+                        'answers_found': len(window_result.answers)
+                    })
+
+                logger.info(f"\n✅ Recheck complete: Found {recheck_answers_found} additional answers from {len(empty_windows)} windows")
+
+                self._emit_progress('recheck_complete', {
+                    'windows_rechecked': len(empty_windows),
+                    'total_new_answers': recheck_answers_found
+                })
 
             # ============================================================
             # LAYER 7: SYNTHESIS (BestPrep mode only)

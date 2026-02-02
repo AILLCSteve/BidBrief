@@ -215,7 +215,7 @@ class MultiExpertProcessor:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.3,  # Lower temperature for factual extraction
+                    temperature=0.1,  # Very low temperature for thorough, consistent extraction
                     max_tokens=self.max_completion_tokens,  # API enforced limit
                     response_format={"type": "json_object"}
                 )

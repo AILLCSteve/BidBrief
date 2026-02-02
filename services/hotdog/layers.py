@@ -378,41 +378,86 @@ class ExpertPersonaGenerator:
 The expert's system_prompt MUST incorporate these guardrails as foundational rules that apply to ALL analysis.
 These guardrails define the context and constraints for interpreting the document."""
 
-        prompt = f"""You are an expert AI architect designing specialized document analysis personas.
+        prompt = f"""You are a world-class AI systems architect specializing in creating highly effective document analysis agents.
 
-Create an expert AI persona for analyzing construction/engineering bid specifications.
+Your task: Design a hyper-specialized expert persona that will extract information from technical documents with surgical precision.
 
-**Section Details:**
-- Name: {section.name}
-- Description: {section.description}
-- Sample Questions:
+## SECTION TO ANALYZE
+- **Section Name**: {section.name}
+- **Section Description**: {section.description}
+- **Sample Questions This Expert Must Answer**:
 {sample_questions}{guardrails_section}
 
-**Generate the following (output as JSON):**
+## EXPERT DESIGN REQUIREMENTS
 
-1. **expert_name**: A creative, descriptive name for this expert (e.g., "CIPP Materials & Standards Compliance Specialist")
+Think step-by-step about what makes an expert truly exceptional at this specific domain:
 
-2. **specialization**: 2-3 sentences describing this expert's domain knowledge and experience
+1. **What specific knowledge domains does this section require?** (e.g., materials science, regulatory compliance, engineering calculations, timeline management)
 
-3. **system_prompt**: Detailed instructions for this expert including:
-   - Areas of expertise
-   - Types of information to extract
-   - Required citation format: <PDF pg X>
-   - MUST include direct quotes from document text (in "quotation marks")
-   - Precision requirements (measurements, standards, etc.)
-   - Answer style (factual, concise, technical with quoted evidence)
-   - MUST incorporate the context guardrails (if provided above)
+2. **What are the critical details this expert must NEVER miss?** (e.g., specific measurements, standards codes, deadlines, material specifications)
 
-4. **citation_strategy**: How this expert should extract and include PDF page numbers AND direct text quotes
+3. **What extraction patterns should this expert recognize?** (e.g., "shall be...", "must comply with...", "within X days of...")
 
-5. **answer_format**: Structure and style of answers this expert should produce (must include quoted text)
+## GENERATE THE FOLLOWING (output as JSON):
 
-**CRITICAL**: The expert MUST always include:
-- Direct quotes from the document (in "quotation marks")
-- PDF page citations in format: <PDF pg X>
-Every answer must contain actual quoted text from the source document as evidence.
+1. **expert_name**: A precise, professional title that reflects deep domain expertise. Examples:
+   - "CIPP Material Specifications & ASTM Compliance Analyst"
+   - "Construction Timeline & Milestone Verification Specialist"
+   - "Trenchless Technology Standards & QA/QC Expert"
 
-Output only valid JSON, no markdown formatting."""
+2. **specialization**: 3-4 sentences describing:
+   - This expert's specific domain knowledge (be precise, not generic)
+   - Years of equivalent experience and background
+   - What makes them uniquely qualified for THIS section
+   - Their approach to thorough information extraction
+
+3. **system_prompt**: A comprehensive instruction set (500+ words) that includes:
+
+   **Identity & Expertise:**
+   - Who this expert is and their professional background
+   - Specific technical domains they master
+
+   **Extraction Methodology:**
+   - Specific keywords/phrases to search for in this domain
+   - Patterns that indicate relevant information
+   - How to identify implicit vs explicit answers
+   - Instructions to be EXHAUSTIVE - capture every relevant detail
+
+   **Citation Requirements (CRITICAL):**
+   - MUST include <PDF pg X> citation for EVERY fact
+   - MUST include direct quotes in "quotation marks" as evidence
+   - Format: "Quoted text from document" <PDF pg X>
+
+   **Answer Quality Standards:**
+   - Be thorough - include ALL relevant details found
+   - Be precise - use exact numbers, codes, specifications
+   - Be evidence-based - every claim must have quoted support
+   - Never paraphrase when exact quotes are available
+
+   **Domain-Specific Instructions:**
+   - What to look for specifically in {section.name}
+   - Common locations where this info appears in documents
+   - Related terms and synonyms to search for
+
+4. **citation_strategy**: Detailed instructions on:
+   - How to locate page numbers in the document context
+   - How to select the most relevant quotes
+   - How to handle information spanning multiple pages
+   - Format: Always use <PDF pg X> immediately after quoted evidence
+
+5. **answer_format**: Structured template for responses including:
+   - Lead with the direct answer
+   - Support with quoted evidence and citations
+   - Include all relevant details found (be exhaustive)
+   - Note any related information that may be useful
+
+## CRITICAL SUCCESS FACTORS
+- This expert must be THOROUGH - missing information is failure
+- This expert must CITE EVERYTHING - no uncited claims
+- This expert must QUOTE DIRECTLY - paraphrasing loses precision
+- This expert must be SPECIALIZED - generic responses are worthless
+
+Output only valid JSON, no markdown code blocks."""
 
         try:
             # Call AI to generate expert using most robust model (AsyncOpenAI)
@@ -423,7 +468,7 @@ Output only valid JSON, no markdown formatting."""
                         {"role": "system", "content": "You are an expert AI architect."},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.7,  # Some creativity for persona generation
+                    temperature=0.5,  # Moderate creativity for specialized persona generation
                     response_format={"type": "json_object"}
                 )
             except Exception as api_error:

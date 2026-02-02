@@ -480,6 +480,23 @@
             </div>
         </div>
 
+        <!-- Advanced Analysis Options -->
+        <div class="section">
+            <h3>⚙️ Advanced Options</h3>
+            <div style="background: rgba(255,255,255,0.95); padding: 15px; border-radius: 8px; border: 1px solid #ddd;">
+                <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+                    <input type="checkbox" id="recheckEmptyWindows" style="margin-top: 3px; width: 18px; height: 18px;">
+                    <div>
+                        <strong style="color: #1E3A8A;">Recheck Empty Windows</strong>
+                        <p style="color: #666; font-size: 12px; margin: 5px 0 0 0;">
+                            After first pass, retry extraction on any windows that found 0 answers.
+                            Increases thoroughness but adds processing time.
+                        </p>
+                    </div>
+                </label>
+            </div>
+        </div>
+
         <!-- Analysis Controls -->
         <div class="section">
             <h3>🎯 Analysis Controls</h3>
@@ -992,17 +1009,19 @@ async function startAnalysis() {
         Logger.info(`📊 Analyzing ${enabledSectionIds.length} enabled sections`);
 
         // STEP 4: Start analysis (returns immediately - runs in background)
-        Logger.info(`📊 Analysis mode: ${currentAnalysisMode}`);
+        const recheckEmpty = document.getElementById('recheckEmptyWindows').checked;
+        Logger.info(`📊 Analysis mode: ${currentAnalysisMode}, Recheck empty: ${recheckEmpty}`);
         const analyzeResp = await fetch('/api/analyze', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 session_id: currentSessionId,
                 pdf_path: pdfPath,
-                pdf_filename: pdfFilename,  // NEW: Include original filename
+                pdf_filename: pdfFilename,  // Include original filename
                 context_guardrails: contextGuardrails || undefined,
                 enabled_sections: enabledSectionIds,  // Only analyze enabled sections
-                mode: currentAnalysisMode  // NEW: Include analysis mode
+                mode: currentAnalysisMode,  // Analysis mode
+                recheck_empty_windows: recheckEmpty  // Retry windows with 0 answers
             })
         });
 

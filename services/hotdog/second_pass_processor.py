@@ -257,7 +257,7 @@ class SecondPassProcessor:
                         {"role": "system", "content": enhanced_system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    temperature=0.7,  # Higher temperature for creativity and inference
+                    temperature=0.1,  # Low temperature for thorough, consistent inference
                     max_tokens=self.max_completion_tokens  # Use full API limit for thorough answers
                 )
             except Exception as api_error:
