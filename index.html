@@ -825,9 +825,10 @@ function handleEvent(data) {
                 Logger.info(`   ↳ ${data.unitary_log}`);
             }
 
-            // NEW: Update unitary table with new answers
+            // NEW: Update unitary table with new answers (include stage for v2 pipeline)
             if (data.new_answers && data.new_answers.length > 0) {
-                updateUnitaryTableWithNewAnswers(data.new_answers);
+                const stage = data.stage || 'classic';
+                updateUnitaryTableWithNewAnswers(data.new_answers, stage);
             }
         }
         else if (data.event === 'progress_milestone') {
@@ -1741,8 +1742,25 @@ function initializeUnitaryTableState() {
     renderUnitaryTable();
 }
 
-function updateUnitaryTableWithNewAnswers(newAnswers) {
+function updateUnitaryTableWithNewAnswers(newAnswers, stage = 'classic') {
     const updatedQuestionIds = [];
+
+    // Stage labels and colors for v2 pipeline display
+    const stageLabels = {
+        'quick_scan': 'Quick-Scan',
+        'exhaustive': 'Exhaustive',
+        'second_pass': 'Second Pass',
+        'deep_rag': 'Deep RAG',
+        'classic': ''  // No badge for classic mode
+    };
+
+    const stageColors = {
+        'quick_scan': '#8b5cf6',  // Purple
+        'exhaustive': '#3b82f6',  // Blue
+        'second_pass': '#f59e0b', // Amber
+        'deep_rag': '#10b981',    // Green
+        'classic': '#6b7280'      // Gray (unused - no badge)
+    };
 
     newAnswers.forEach(answer => {
         if (allQuestions[answer.question_id]) {
@@ -1763,6 +1781,13 @@ function updateUnitaryTableWithNewAnswers(newAnswers) {
                 q.footnote = answer.footnote;
             }
 
+            // Store stage info for display (v2 pipeline only)
+            if (stage !== 'classic') {
+                q.stage = stage;
+                q.stageLabel = stageLabels[stage] || stage;
+                q.stageColor = stageColors[stage] || '#6b7280';
+            }
+
             updatedQuestionIds.push(answer.question_id);
 
             // Add footnote to global list if it exists and is not empty
@@ -1777,7 +1802,9 @@ function updateUnitaryTableWithNewAnswers(newAnswers) {
     // Update only the changed rows for efficiency
     updateUnitaryTableRows(updatedQuestionIds);
 
-    Logger.info(`📊 Updated ${updatedQuestionIds.length} questions in unitary table`);
+    // Log with stage info for v2 pipeline
+    const stageInfo = stage !== 'classic' ? ` [${stageLabels[stage] || stage}]` : '';
+    Logger.info(`📊 Updated ${updatedQuestionIds.length} questions in unitary table${stageInfo}`);
 }
 
 function updateUnitaryTableAsFinal(result, isPartial) {
@@ -2012,7 +2039,11 @@ function updateUnitaryTableRows(questionIds) {
                     const fragmentBadge = (currentAnalysisMode === 'bestprep' && q.fragment_count > 1)
                         ? `<span style="background: #ff9800; color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 5px;">${q.fragment_count} frags</span>`
                         : '';
-                    cells[3].innerHTML = `<span onclick="openAnswerDetailModal('${qid}')" style="cursor: pointer; color: #1E3A8A;" title="Click to view full answer">${truncatedAnswer}${fragmentBadge}</span>`;
+                    // Stage badge for v2 pipeline answers (shows which stage found this answer)
+                    const stageBadge = q.stageLabel
+                        ? `<span style="background: ${q.stageColor || '#6b7280'}; color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 5px;">${q.stageLabel}</span>`
+                        : '';
+                    cells[3].innerHTML = `<span onclick="openAnswerDetailModal('${qid}')" style="cursor: pointer; color: #1E3A8A;" title="Click to view full answer">${truncatedAnswer}${fragmentBadge}${stageBadge}</span>`;
                     cells[3].style.cursor = 'pointer';
                 }
                 cells[3].style.color = isPending ? '#999' : '';

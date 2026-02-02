@@ -174,19 +174,25 @@ class PipelineCoordinator:
         questions: List[Question],
         experts: Dict
     ) -> StageResult:
-        """Run Stage 1: Comprehensive Quick-Scan."""
+        """Run Stage 1: Comprehensive Quick-Scan with live updates."""
         self.state.current_stage = PipelineStage.QUICK_SCAN
         self._emit_progress('stage_1_start', {
             'stage': 'quick_scan',
-            'stage_name': 'Comprehensive Quick-Scan',
+            'stage_name': 'Quick-Scan - Targeted Extraction',
             'questions_count': len(questions)
         })
 
         start = datetime.now()
 
+        # Build question lookup for formatting new_answers
+        question_map = {q.id: q for q in questions}
+
         answers, remaining = await self.comprehensive.quick_scan(
             pages, questions, experts
         )
+
+        # Format new_answers for unitary log update
+        new_answers = []
 
         # Update state
         for qid, answer in answers.items():
@@ -194,11 +200,36 @@ class PipelineCoordinator:
             if answer.confidence >= 0.9:
                 self.state.high_confidence_questions.add(qid)
 
+            # Format for frontend
+            question = question_map.get(qid)
+            if question:
+                new_answers.append({
+                    'question_id': qid,
+                    'question_text': question.text,
+                    'section_id': question.section_id,
+                    'answer_text': answer.text,
+                    'pages': answer.pages,
+                    'confidence': answer.confidence,
+                    'expert': answer.expert,
+                    'footnote': getattr(answer, 'footnote', '')
+                })
+
         # Add to accumulator
         for qid, answer in answers.items():
             if qid not in self.accumulator.accumulation:
                 self.accumulator.accumulation[qid] = []
             self.accumulator.accumulation[qid].append(answer)
+
+        # Emit window_complete with all quick-scan answers for unitary log
+        if new_answers:
+            self._emit_progress('window_complete', {
+                'window_num': 0,  # Special: batch update from quick-scan
+                'total_windows': 1,
+                'pages': [],
+                'answers_found': len(new_answers),
+                'new_answers': new_answers,
+                'stage': 'quick_scan'
+            })
 
         duration = (datetime.now() - start).total_seconds()
 
@@ -228,11 +259,11 @@ class PipelineCoordinator:
         questions: List[Question],
         experts: Dict
     ) -> StageResult:
-        """Run Stage 2: Selective Exhaustive Pass."""
+        """Run Stage 2: Selective Exhaustive Pass with live unitary log updates."""
         self.state.current_stage = PipelineStage.EXHAUSTIVE
         self._emit_progress('stage_2_start', {
             'stage': 'exhaustive',
-            'stage_name': 'Selective Exhaustive Pass',
+            'stage_name': 'Exhaustive Analysis',
             'questions_count': len(questions),
             'windows_count': len(windows)
         })
@@ -240,23 +271,65 @@ class PipelineCoordinator:
         start = datetime.now()
         answers = {}
 
+        # Build question lookup for formatting new_answers
+        question_map = {q.id: q for q in questions}
+
         for window_idx, window in enumerate(windows, 1):
+            # Emit window processing start
+            self._emit_progress('window_processing', {
+                'window_num': window_idx,
+                'total_windows': len(windows),
+                'pages': window.pages,
+                'stage': 'exhaustive'
+            })
+
             result = await self.exhaustive.process_window(
                 window=window,
                 questions=questions,
                 experts=experts
             )
 
+            # Collect NEW answers for this window (for live unitary log)
+            new_answers = []
+
             # Accumulate answers
             for qid, answer in result.answers.items():
-                if qid not in answers:
+                is_new = qid not in answers
+
+                if is_new:
                     answers[qid] = answer
                     self.state.answered_questions.add(qid)
                     if answer.confidence >= 0.9:
                         self.state.high_confidence_questions.add(qid)
 
-                # Add to main accumulator
-                self.accumulator.accumulate_window(result)
+                    # Format for frontend unitary log update
+                    question = question_map.get(qid)
+                    if question:
+                        new_answers.append({
+                            'question_id': qid,
+                            'question_text': question.text,
+                            'section_id': question.section_id,
+                            'answer_text': answer.text,
+                            'pages': answer.pages,
+                            'confidence': answer.confidence,
+                            'expert': answer.expert,
+                            'footnote': getattr(answer, 'footnote', '')
+                        })
+
+            # Add to main accumulator
+            self.accumulator.accumulate_window(result)
+
+            # Emit window_complete with new_answers (same format as classic mode)
+            self._emit_progress('window_complete', {
+                'window_num': window_idx,
+                'total_windows': len(windows),
+                'pages': window.pages,
+                'answers_found': len(result.answers),
+                'tokens_used': result.tokens_used,
+                'processing_time': result.processing_time,
+                'new_answers': new_answers,
+                'stage': 'exhaustive'
+            })
 
             # Progress update every 5 windows
             if window_idx % 5 == 0:
@@ -293,15 +366,18 @@ class PipelineCoordinator:
         questions: List[Question],
         experts: Dict
     ) -> StageResult:
-        """Run Stage 3: Second Pass for unanswered questions."""
+        """Run Stage 3: Second Pass for unanswered questions with live updates."""
         self.state.current_stage = PipelineStage.SECOND_PASS
         self._emit_progress('stage_3_start', {
             'stage': 'second_pass',
-            'stage_name': 'Second Pass (Enhanced Scrutiny)',
+            'stage_name': 'Second Pass - Enhanced Scrutiny',
             'unanswered_count': len(questions)
         })
 
         start = datetime.now()
+
+        # Build question lookup for formatting new_answers
+        question_map = {q.id: q for q in questions}
 
         answers = await self.second_pass.process_unanswered_questions(
             windows=windows,
@@ -309,12 +385,41 @@ class PipelineCoordinator:
             experts=experts
         )
 
+        # Format new_answers for unitary log update
+        new_answers = []
+
         # Update state and accumulator
         for qid, answer in answers.items():
             self.state.answered_questions.add(qid)
             if qid not in self.accumulator.accumulation:
                 self.accumulator.accumulation[qid] = []
             self.accumulator.accumulation[qid].append(answer)
+
+            # Format for frontend
+            question = question_map.get(qid)
+            if question:
+                new_answers.append({
+                    'question_id': qid,
+                    'question_text': question.text,
+                    'section_id': question.section_id,
+                    'answer_text': answer.text,
+                    'pages': answer.pages,
+                    'confidence': answer.confidence,
+                    'expert': answer.expert,
+                    'footnote': getattr(answer, 'footnote', '')
+                })
+
+        # Emit window_complete with all new answers from second pass
+        # This updates the unitary log with second pass results
+        if new_answers:
+            self._emit_progress('window_complete', {
+                'window_num': 0,  # Special: batch update from second pass
+                'total_windows': len(windows),
+                'pages': [],
+                'answers_found': len(new_answers),
+                'new_answers': new_answers,
+                'stage': 'second_pass'
+            })
 
         duration = (datetime.now() - start).total_seconds()
 
