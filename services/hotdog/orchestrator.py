@@ -78,7 +78,10 @@ class HotdogOrchestrator:
         progress_callback: Optional[Callable] = None,
         context_guardrails: Optional[str] = None,
         mode: str = 'bid_spec',
-        recheck_empty_windows: bool = False
+        recheck_empty_windows: bool = False,
+        use_pipeline_v2: bool = False,
+        enable_second_pass: bool = False,
+        enable_deep_rag: bool = False
     ):
         """
         Initialize the HOTDOG orchestrator.
@@ -94,6 +97,9 @@ class HotdogOrchestrator:
                               (e.g., "Only answer within CIPP lining context")
             mode: Analysis mode - 'bid_spec' (default) or 'bestprep'
             recheck_empty_windows: If True, retry extraction on windows that found 0 answers
+            use_pipeline_v2: If True, use HOTDOG7ATE multi-pass pipeline (Bid/Spec only)
+            enable_second_pass: If True, run second pass for unanswered questions
+            enable_deep_rag: If True, enable Deep RAG with TAVILY for external search
         """
         self.openai_client = AsyncOpenAI(api_key=openai_api_key)
         self.config_path = config_path
@@ -104,6 +110,9 @@ class HotdogOrchestrator:
         self.mode_config = get_mode_config(mode)
         self.mode = self.mode_config.mode
         self.recheck_empty_windows = recheck_empty_windows
+        self.use_pipeline_v2 = use_pipeline_v2
+        self.enable_second_pass = enable_second_pass
+        self.enable_deep_rag = enable_deep_rag
 
         # Detect model limits using TokenOptimizer
         self.model = "gpt-4o"  # Most robust available model
@@ -165,11 +174,15 @@ class HotdogOrchestrator:
         # Stop flag for graceful cancellation
         self.stop_requested = False
 
-        logger.info("🔥 HOTDOG AI Orchestrator initialized")
+        logger.info("HOTDOG AI Orchestrator initialized")
         logger.info(f"   Mode: {self.mode.value}")
         logger.info(f"   Model: {self.model}")
-        logger.info(f"   Prompt Budget: {model_limits.recommended_prompt_tokens:,} tokens (18.75x improvement!)")
+        logger.info(f"   Prompt Budget: {model_limits.recommended_prompt_tokens:,} tokens")
         logger.info(f"   Completion Limit: {model_limits.recommended_completion_tokens:,} tokens")
+        if self.use_pipeline_v2 and self.mode == AnalysisMode.BID_SPEC:
+            logger.info("   Pipeline: HOTDOG7ATE Multi-Pass (Quick-Scan -> Exhaustive -> Second Pass -> RAG)")
+        else:
+            logger.info("   Pipeline: Classic (Exhaustive window-based)")
         if self.mode == AnalysisMode.BESTPREP:
             logger.info("   📚 BestPrep Mode: Append-only accumulation, synthesis enabled")
         if self.context_guardrails:
@@ -321,15 +334,77 @@ class HotdogOrchestrator:
             self.cached_experts = experts
 
             # ============================================================
-            # LAYERS 3, 4, 5: WINDOW PROCESSING LOOP
+            # PIPELINE SELECTION: HOTDOG7ATE vs Classic
             # ============================================================
-            logger.info(f"🔄 Processing {len(windows)} windows...")
-            self._emit_progress('processing_start', {'total_windows': len(windows)})
+            if self.mode == AnalysisMode.BID_SPEC and self.use_pipeline_v2:
+                # ============================================================
+                # HOTDOG7ATE MULTI-PASS PIPELINE
+                # ============================================================
+                logger.info("\n" + "="*64)
+                logger.info("HOTDOG7ATE Multi-Pass Pipeline")
+                logger.info("="*64)
+                self._emit_progress('pipeline_start', {
+                    'pipeline': 'HOTDOG7ATE',
+                    'stages': ['quick_scan', 'exhaustive', 'second_pass', 'deep_rag']
+                })
+
+                from .pipeline_coordinator import PipelineCoordinator
+                from .comprehensive_processor import ComprehensiveProcessor
+                from .deep_rag_processor import DeepRAGProcessor
+
+                # Initialize pipeline components
+                comprehensive = ComprehensiveProcessor(
+                    self.openai_client,
+                    self.model,
+                    confidence_threshold=0.90
+                )
+
+                rag = None
+                if self.enable_deep_rag:
+                    rag = DeepRAGProcessor()
+
+                coordinator = PipelineCoordinator(
+                    comprehensive_processor=comprehensive,
+                    exhaustive_processor=self.layer3_processor,
+                    second_pass_processor=self.layer3_5_second_pass,
+                    accumulator=self.layer4_accumulator,
+                    rag_processor=rag,
+                    progress_callback=self._emit_progress
+                )
+
+                # Run the full pipeline
+                accumulated_answers = await coordinator.run_full_pipeline(
+                    pages=pages,
+                    config=config,
+                    experts=experts,
+                    windows=windows,
+                    enable_second_pass=self.enable_second_pass,
+                    enable_rag=self.enable_deep_rag
+                )
+
+                self._emit_progress('pipeline_complete', {
+                    'pipeline': 'HOTDOG7ATE',
+                    'summary': coordinator.get_pipeline_summary()
+                })
+
+                # v2 pipeline handled all processing - skip classic loop
+                skip_classic_processing = True
+
+            else:
+                # ============================================================
+                # CLASSIC PIPELINE: Exhaustive window-based processing
+                # ============================================================
+                logger.info(f"Processing {len(windows)} windows...")
+                self._emit_progress('processing_start', {'total_windows': len(windows)})
+                skip_classic_processing = False
 
             # Track windows with no answers for potential recheck
             empty_windows = []  # List of (window_idx, window) tuples
 
-            for window_idx, window in enumerate(windows, 1):
+            # Classic processing loop (skipped if using v2 pipeline)
+            windows_to_process = [] if skip_classic_processing else list(enumerate(windows, 1))
+
+            for window_idx, window in windows_to_process:
                 # Check for stop request
                 if self.stop_requested:
                     logger.warning(f"⏹️  Analysis stopped by user at window {window_idx}/{len(windows)}")
