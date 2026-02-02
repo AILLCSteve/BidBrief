@@ -38,6 +38,7 @@ class NavigationMap:
     unassigned_questions: List[str]  # Question IDs with no structural hints
     total_pages_to_scan: int
     estimated_reduction: float  # % reduction vs exhaustive scan
+    all_keywords_by_expert: Dict[str, List[str]] = field(default_factory=dict)  # For audit
 
 
 class DocumentNavigator:
@@ -223,7 +224,8 @@ class DocumentNavigator:
             expert_assignments=expert_assignments,
             unassigned_questions=unassigned_questions,
             total_pages_to_scan=total_to_scan,
-            estimated_reduction=max(0, estimated_reduction)
+            estimated_reduction=max(0, estimated_reduction),
+            all_keywords_by_expert=expert_keywords  # Store all keywords for audit
         )
 
         if progress_callback:
@@ -236,13 +238,20 @@ class DocumentNavigator:
                 'expert_assignments': [
                     {
                         'expert': a.expert_name,
-                        'pages': a.primary_pages[:5],  # First 5 for display
+                        'section_id': a.section_id,
+                        'primary_pages': a.primary_pages,
+                        'context_pages': a.context_pages,
                         'total_pages': len(a.primary_pages) + len(a.context_pages),
-                        'keywords': a.keywords_found[:3]
+                        'keywords_matched': a.keywords_found,
+                        'all_keywords_searched': expert_keywords.get(a.section_id, [])
                     }
                     for a in expert_assignments.values()
                 ],
-                'unassigned_questions': len(unassigned_questions),
+                'unassigned_questions': unassigned_questions,
+                'all_keywords_by_section': {
+                    section_id: keywords
+                    for section_id, keywords in expert_keywords.items()
+                },
                 'estimated_reduction': f"{estimated_reduction*100:.0f}%"
             })
 
@@ -293,10 +302,41 @@ class DocumentNavigator:
         """Extract domain-specific technical terms from questions."""
         domain_terms = set()
 
-        # Common bid/spec domain patterns
+        # Comprehensive bid/spec domain patterns for CIPP and municipal projects
         domain_patterns = [
-            r'\b(cipp|hdpe|pvc|pipe|liner|lining)\b',
-            r'\b(warranty|bond|insurance|surety)\b',
+            # Pipe materials and methods
+            r'\b(cipp|hdpe|pvc|frp|grp|fiberglass|polyester|vinyl|ester)\b',
+            r'\b(pipe|liner|lining|rehabilitation|trenchless|relining)\b',
+            r'\b(manhole|lateral|mainline|sewer|storm|sanitary|culvert)\b',
+            # Specifications and standards
+            r'\b(astm|awwa|nassco|asce|ansi|iso)\b',
+            r'\b(specification|standard|requirement|compliance|certification)\b',
+            r'\b(pacp|lacp|macp|itpipes)\b',
+            # Bonding and insurance
+            r'\b(warranty|bond|insurance|surety|indemnity|liability)\b',
+            r'\b(performance|payment|bid|maintenance)\b',
+            # Construction terms
+            r'\b(cure|curing|installation|testing|inspection|bypass)\b',
+            r'\b(excavation|restoration|traffic|control|mobilization)\b',
+            # Measurements and specifications
+            r'\b(diameter|thickness|length|footage|lf|sf|cy)\b',
+            r'\b(psi|mil|inch|foot|gallon|hour|day)\b',
+            # Financial and timeline
+            r'\b(payment|retention|retainage|schedule|timeline|deadline)\b',
+            r'\b(liquidated|damages|penalty|penalties|extension)\b',
+            r'\b(progress|final|partial|invoice|billing)\b',
+            # Submittal and documentation
+            r'\b(submittal|rfi|shop|drawing|sample|mockup)\b',
+            r'\b(certification|license|qualification|experience)\b',
+            # Quality and testing
+            r'\b(quality|control|assurance|test|inspection|cctv)\b',
+            r'\b(deflection|ovality|wrinkle|delamination|infiltration)\b',
+            # Safety and environment
+            r'\b(safety|osha|confined|space|permit|environmental)\b',
+            r'\b(hazardous|waste|disposal|erosion|sediment)\b',
+            # Equipment and materials
+            r'\b(inversion|pull|ambient|steam|uv|ultraviolet)\b',
+            r'\b(resin|felt|tube|bladder|calibration|hose)\b',
             r'\b(specifications?|requirements?|standards?)\b',
             r'\b(diameter|thickness|length|footage)\b',
             r'\b(cure|curing|installation|testing)\b',

@@ -165,6 +165,7 @@ class HotdogOrchestrator:
             model=self.model
         )
         self.extracted_key_requirements = {}  # Store extracted requirements
+        self.quick_scan_data = {}  # Store v2 pipeline navigation/quick-scan data for exports
 
         # Store windows and experts for second pass
         self.cached_windows = []
@@ -369,7 +370,8 @@ class HotdogOrchestrator:
                     second_pass_processor=self.layer3_5_second_pass,
                     accumulator=self.layer4_accumulator,
                     rag_processor=rag,
-                    progress_callback=self._emit_progress
+                    progress_callback=self._emit_progress,
+                    stop_check_callback=lambda: self.stop_requested  # Pass stop flag check
                 )
 
                 # Run the full pipeline
@@ -381,6 +383,37 @@ class HotdogOrchestrator:
                     enable_second_pass=self.enable_second_pass,
                     enable_rag=self.enable_deep_rag
                 )
+
+                # Store navigation map data for exports/modals
+                if coordinator.navigation_map:
+                    nav_map = coordinator.navigation_map
+                    self.quick_scan_data = {
+                        'pipeline': 'HOTDOG7ATE',
+                        'structure': {
+                            'has_toc': nav_map.structure.has_toc,
+                            'has_index': nav_map.structure.has_index,
+                            'has_appendix': nav_map.structure.has_appendix,
+                            'toc_entries_count': len(nav_map.structure.toc_entries),
+                            'index_terms_count': len(nav_map.structure.index_entries),
+                            'appendix_pages': nav_map.structure.appendix_pages
+                        },
+                        'expert_assignments': [
+                            {
+                                'expert': a.expert_name,
+                                'section_id': a.section_id,
+                                'primary_pages': a.primary_pages,
+                                'context_pages': a.context_pages,
+                                'total_pages': len(a.primary_pages) + len(a.context_pages),
+                                'keywords_matched': a.keywords_found,
+                                'confidence': a.confidence
+                            }
+                            for a in nav_map.expert_assignments.values()
+                        ],
+                        'all_keywords_by_section': nav_map.all_keywords_by_expert,
+                        'unassigned_questions': nav_map.unassigned_questions,
+                        'estimated_reduction': f"{nav_map.estimated_reduction*100:.0f}%" if nav_map.estimated_reduction else 'N/A',
+                        'stage_results': coordinator.get_pipeline_summary()
+                    }
 
                 self._emit_progress('pipeline_complete', {
                     'pipeline': 'HOTDOG7ATE',

@@ -99,9 +99,10 @@ class ExcelDashboardGenerator:
         'Location': ['location', 'project location', 'city', 'municipality', 'address'],
     }
 
-    def __init__(self, analysis_result, is_partial=False, api_key_requirements=None):
+    def __init__(self, analysis_result, is_partial=False, api_key_requirements=None, quick_scan_data=None):
         self.result = analysis_result
         self.is_partial = is_partial
+        self.quick_scan_data = quick_scan_data  # V2 pipeline document navigator data
         self.wb = Workbook()
         self.footnotes = self._collect_footnotes()
         # Use API-extracted key requirements if provided, otherwise extract from sections
@@ -111,7 +112,7 @@ class ExcelDashboardGenerator:
             self.key_requirements = self._extract_key_requirements()
 
     def generate(self):
-        """Generate complete 4-sheet report package"""
+        """Generate complete 4-5 sheet report package"""
         if 'Sheet' in self.wb.sheetnames:
             del self.wb['Sheet']
 
@@ -119,6 +120,10 @@ class ExcelDashboardGenerator:
         self._create_detailed_results()       # Sheet 2: Detailed Results
         self._create_by_section()             # Sheet 3: By Section
         self._create_footnotes_sheet()        # Sheet 4: Footnotes
+
+        # Sheet 5: Quick Scan (V2 Pipeline only - document navigator audit data)
+        if self.quick_scan_data:
+            self._create_quick_scan_sheet()
 
         output = io.BytesIO()
         self.wb.save(output)
@@ -672,6 +677,172 @@ class ExcelDashboardGenerator:
                     cell_fn.fill = self.ALT_ROW_FILL
 
                 ws.row_dimensions[row].height = 50
+
+    def _create_quick_scan_sheet(self):
+        """Sheet 5: Quick Scan - V2 Pipeline Document Navigator Audit Data
+
+        Shows pages targeted by each expert and keywords searched for audit purposes.
+        Only created when quick_scan_data is available (V2 pipeline analyses).
+        """
+        ws = self.wb.create_sheet('Quick Scan')
+
+        # Title
+        ws.merge_cells('A1:F1')
+        ws['A1'] = 'V2 PIPELINE - QUICK SCAN AUDIT'
+        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
+        ws.row_dimensions[1].height = 30
+
+        # Subtitle explaining what this is
+        ws.merge_cells('A2:F2')
+        ws['A2'] = 'Document Navigator pre-scan analysis showing which pages each expert was directed to and why'
+        ws['A2'].font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+        ws.row_dimensions[2].height = 25
+
+        row = 4
+
+        # Document Structure Summary
+        structure = self.quick_scan_data.get('structure', {})
+        ws.merge_cells(f'A{row}:F{row}')
+        ws[f'A{row}'] = 'DOCUMENT STRUCTURE DETECTED'
+        ws[f'A{row}'].font = Font(name='Calibri', size=13, bold=True, color="FFFFFF")
+        ws[f'A{row}'].fill = self.HEADER_FILL
+        ws.row_dimensions[row].height = 28
+        row += 1
+
+        structure_items = [
+            ('Table of Contents', 'Yes' if structure.get('has_toc') else 'No', f"{structure.get('toc_entries_count', 0)} entries"),
+            ('Index', 'Yes' if structure.get('has_index') else 'No', f"{structure.get('index_terms_count', 0)} terms"),
+            ('Appendix', 'Yes' if structure.get('has_appendix') else 'No', f"{len(structure.get('appendix_pages', []))} pages"),
+        ]
+
+        for label, found, details in structure_items:
+            ws.cell(row, 1, label).font = self.STAT_LABEL_FONT
+            ws.cell(row, 2, found).font = self.DATA_FONT_BOLD
+            ws.cell(row, 2).fill = self.ANSWERED_FILL if found == 'Yes' else self.UNANSWERED_FILL
+            ws.cell(row, 3, details).font = self.DATA_FONT
+            for col in range(1, 4):
+                ws.cell(row, col).border = self.BORDER_THIN
+            row += 1
+
+        row += 1  # Spacer
+
+        # Expert Assignments
+        expert_assignments = self.quick_scan_data.get('expert_assignments', [])
+        all_keywords = self.quick_scan_data.get('all_keywords_by_section', {})
+
+        ws.merge_cells(f'A{row}:F{row}')
+        ws[f'A{row}'] = 'EXPERT PAGE ASSIGNMENTS'
+        ws[f'A{row}'].font = Font(name='Calibri', size=13, bold=True, color="FFFFFF")
+        ws[f'A{row}'].fill = self.HEADER_FILL
+        ws.row_dimensions[row].height = 28
+        row += 1
+
+        # Headers for expert assignments
+        headers = ['Expert', 'Section', 'Primary Pages', 'Context Pages', 'Total Pages', 'Keywords Matched']
+        widths = [25, 20, 25, 25, 12, 50]
+
+        for col, (header, width) in enumerate(zip(headers, widths), start=1):
+            cell = ws.cell(row, col, header)
+            cell.font = self.SUBHEADER_FONT
+            cell.fill = self.SUBHEADER_FILL
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = self.BORDER_THIN
+            ws.column_dimensions[get_column_letter(col)].width = width
+        ws.row_dimensions[row].height = 25
+        row += 1
+
+        if expert_assignments:
+            for idx, assignment in enumerate(expert_assignments):
+                is_alt = idx % 2 == 1
+
+                primary_pages = assignment.get('primary_pages', [])
+                context_pages = assignment.get('context_pages', [])
+                keywords_matched = assignment.get('keywords_matched', [])
+
+                ws.cell(row, 1, assignment.get('expert', '')).font = self.DATA_FONT_BOLD
+                ws.cell(row, 2, assignment.get('section_id', '')).font = self.DATA_FONT
+                ws.cell(row, 3, ', '.join(map(str, primary_pages[:15])) + ('...' if len(primary_pages) > 15 else '')).font = self.DATA_FONT
+                ws.cell(row, 4, ', '.join(map(str, context_pages[:15])) + ('...' if len(context_pages) > 15 else '')).font = self.DATA_FONT
+                ws.cell(row, 5, assignment.get('total_pages', len(primary_pages) + len(context_pages))).font = self.DATA_FONT_BOLD
+                ws.cell(row, 6, ', '.join(keywords_matched[:5]) + ('...' if len(keywords_matched) > 5 else '')).font = self.DATA_FONT
+
+                for col in range(1, 7):
+                    cell = ws.cell(row, col)
+                    cell.border = self.BORDER_THIN
+                    if is_alt:
+                        cell.fill = self.ALT_ROW_FILL
+                    cell.alignment = Alignment(horizontal='left' if col in [1, 2, 3, 4, 6] else 'center', vertical='top', wrap_text=True)
+
+                ws.row_dimensions[row].height = 35
+                row += 1
+        else:
+            ws.cell(row, 1, 'No expert assignments (document structure not found or all questions require exhaustive scan)')
+            ws.cell(row, 1).font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+            row += 1
+
+        row += 1  # Spacer
+
+        # Keywords by Section
+        ws.merge_cells(f'A{row}:F{row}')
+        ws[f'A{row}'] = 'ALL KEYWORDS SEARCHED BY SECTION'
+        ws[f'A{row}'].font = Font(name='Calibri', size=13, bold=True, color="FFFFFF")
+        ws[f'A{row}'].fill = self.HEADER_FILL
+        ws.row_dimensions[row].height = 28
+        row += 1
+
+        headers = ['Section ID', 'Keywords Searched']
+        for col, header in enumerate(headers, start=1):
+            cell = ws.cell(row, col, header)
+            cell.font = self.SUBHEADER_FONT
+            cell.fill = self.SUBHEADER_FILL
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = self.BORDER_THIN
+        ws.row_dimensions[row].height = 25
+        row += 1
+
+        if all_keywords:
+            for idx, (section_id, keywords) in enumerate(all_keywords.items()):
+                is_alt = idx % 2 == 1
+
+                ws.cell(row, 1, section_id).font = self.DATA_FONT_BOLD
+                ws.cell(row, 2, ', '.join(keywords) if keywords else 'No keywords extracted').font = self.DATA_FONT
+
+                for col in range(1, 3):
+                    cell = ws.cell(row, col)
+                    cell.border = self.BORDER_THIN
+                    if is_alt:
+                        cell.fill = self.ALT_ROW_FILL
+                    cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+
+                ws.row_dimensions[row].height = max(25, min(80, len(keywords) * 2))  # Dynamic height
+                row += 1
+        else:
+            ws.cell(row, 1, 'No keywords data available')
+            ws.cell(row, 1).font = Font(name='Calibri', size=11, italic=True, color="6B7280")
+            row += 1
+
+        row += 1  # Spacer
+
+        # Reduction Estimate
+        reduction = self.quick_scan_data.get('estimated_reduction', 'N/A')
+        unassigned = self.quick_scan_data.get('unassigned_questions', [])
+
+        ws.merge_cells(f'A{row}:F{row}')
+        ws[f'A{row}'] = 'EFFICIENCY SUMMARY'
+        ws[f'A{row}'].font = Font(name='Calibri', size=13, bold=True, color="FFFFFF")
+        ws[f'A{row}'].fill = self.HEADER_FILL
+        ws.row_dimensions[row].height = 28
+        row += 1
+
+        ws.cell(row, 1, 'Estimated Page Reduction:').font = self.STAT_LABEL_FONT
+        ws.cell(row, 2, reduction).font = self.DATA_FONT_BOLD
+        ws.cell(row, 2).fill = self.ANSWERED_FILL
+        row += 1
+
+        ws.cell(row, 1, 'Questions Requiring Full Scan:').font = self.STAT_LABEL_FONT
+        ws.cell(row, 2, str(len(unassigned)) if unassigned else '0').font = self.DATA_FONT_BOLD
+        row += 1
 
     def _get_timestamp(self):
         """Get formatted timestamp"""

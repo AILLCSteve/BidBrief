@@ -607,6 +607,7 @@ let currentFile = null;
 let currentSessionId = null;
 let currentAnalysisResult = null;
 let currentKeyRequirements = null;  // Store key requirements from analysis
+let currentQuickScanData = null;  // Store quick scan data from V2 pipeline
 let activeEventSource = null;  // LEGACY: Kept for backward compatibility
 let pollingInterval = null;  // NEW: Polling interval
 let lastEventIndex = 0;  // NEW: Track which events we've already processed
@@ -882,6 +883,20 @@ function handleEvent(data) {
             if (data.estimated_reduction) {
                 Logger.info(`   ↳ Estimated scan reduction: ${data.estimated_reduction}`);
             }
+            // Store quick scan data for display in modal and export
+            currentQuickScanData = {
+                structure: {
+                    has_toc: data.has_toc,
+                    has_index: data.has_index,
+                    has_appendix: data.has_appendix,
+                    toc_entries_count: data.toc_entries,
+                    index_terms_count: data.index_terms
+                },
+                expert_assignments: data.expert_assignments || [],
+                all_keywords_by_section: data.all_keywords_by_section || {},
+                estimated_reduction: data.estimated_reduction,
+                unassigned_questions: data.unassigned_questions || []
+            };
             ProgressTracker.update(25, 'Document structure mapped...');
         }
         // V2 Stage 1: Quick-Scan
@@ -976,6 +991,11 @@ function handleEvent(data) {
             // Also extract key requirements from result if available
             if (data.result && data.result.key_requirements) {
                 currentKeyRequirements = data.result.key_requirements;
+            }
+            // Extract quick scan data for V2 pipeline if available
+            if (data.result && data.result.quick_scan_data) {
+                currentQuickScanData = data.result.quick_scan_data;
+                Logger.info(`📊 Quick scan data received (V2 pipeline)`);
             }
             Logger.info(`✅ Results received via polling (${data.result.sections?.length || 0} sections)`);
         }
@@ -2836,6 +2856,14 @@ function openViewModal() {
     }
     renderFullViewFootnotesTab();
 
+    // Show Quick Scan tab for V2 pipeline analyses
+    if (currentQuickScanData && Object.keys(currentQuickScanData).length > 0) {
+        document.getElementById('fullViewQuickScanTabBtn').style.display = 'inline-block';
+        renderFullViewQuickScanTab();
+    } else {
+        document.getElementById('fullViewQuickScanTabBtn').style.display = 'none';
+    }
+
     // Set default tab
     switchFullViewTab('summary');
 }
@@ -3244,6 +3272,150 @@ function renderFullViewFootnotesTab() {
     document.getElementById('fv-footnotesContent').innerHTML = html;
 }
 
+function renderFullViewQuickScanTab() {
+    if (!currentQuickScanData || Object.keys(currentQuickScanData).length === 0) {
+        document.getElementById('fv-quickScanContent').innerHTML = `
+            <div style="text-align: center; padding: 60px; color: #9ca3af;">
+                <p style="font-size: 18px; margin-bottom: 10px;">No Quick Scan data available</p>
+                <p style="font-size: 14px;">This tab shows V2 pipeline document navigator audit data</p>
+            </div>
+        `;
+        return;
+    }
+
+    const data = currentQuickScanData;
+    const structure = data.structure || {};
+    const expertAssignments = data.expert_assignments || [];
+    const allKeywords = data.all_keywords_by_section || {};
+    const reduction = data.estimated_reduction || 'N/A';
+    const unassigned = data.unassigned_questions || [];
+
+    let html = `
+        <div style="background: linear-gradient(135deg, #7c3aed, #a855f7); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 8px 0; font-size: 16px;">V2 Pipeline - Document Navigator Audit</h3>
+            <p style="margin: 0; opacity: 0.9; font-size: 13px;">Pre-scan analysis showing which pages each expert was directed to examine</p>
+        </div>
+
+        <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Document Structure Detected</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+            <tbody>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb; width: 200px;">Table of Contents</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                        <span style="background: ${structure.has_toc ? '#dcfce7' : '#fee2e2'}; color: ${structure.has_toc ? '#166534' : '#991b1b'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                            ${structure.has_toc ? 'Found' : 'Not Found'}
+                        </span>
+                        ${structure.toc_entries_count ? `<span style="color: #6b7280; margin-left: 8px;">(${structure.toc_entries_count} entries)</span>` : ''}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Index</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                        <span style="background: ${structure.has_index ? '#dcfce7' : '#fee2e2'}; color: ${structure.has_index ? '#166534' : '#991b1b'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                            ${structure.has_index ? 'Found' : 'Not Found'}
+                        </span>
+                        ${structure.index_terms_count ? `<span style="color: #6b7280; margin-left: 8px;">(${structure.index_terms_count} terms)</span>` : ''}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Appendix</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">
+                        <span style="background: ${structure.has_appendix ? '#dcfce7' : '#fee2e2'}; color: ${structure.has_appendix ? '#166534' : '#991b1b'}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                            ${structure.has_appendix ? 'Found' : 'Not Found'}
+                        </span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Expert Page Assignments</h3>
+    `;
+
+    if (expertAssignments.length > 0) {
+        html += `
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+                <thead>
+                    <tr style="background: #1E3A8A; color: white;">
+                        <th style="padding: 12px; text-align: left; font-weight: 600;">Expert</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600;">Section</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600;">Primary Pages</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600;">Context Pages</th>
+                        <th style="padding: 12px; text-align: center; font-weight: 600;">Total</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600;">Keywords Matched</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        expertAssignments.forEach((assignment, idx) => {
+            const primaryPages = assignment.primary_pages || [];
+            const contextPages = assignment.context_pages || [];
+            const keywordsMatched = assignment.keywords_matched || [];
+            const isAlt = idx % 2 === 1;
+
+            html += `
+                <tr style="${isAlt ? 'background: #f9fafb;' : ''}">
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600;">${assignment.expert || 'Unknown'}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">${assignment.section_id || ''}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-size: 12px;">${primaryPages.slice(0, 10).join(', ')}${primaryPages.length > 10 ? '...' : ''}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-size: 12px;">${contextPages.slice(0, 10).join(', ')}${contextPages.length > 10 ? '...' : ''}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center; font-weight: 600; color: #1E3A8A;">${assignment.total_pages || (primaryPages.length + contextPages.length)}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-size: 11px; color: #6b7280;">${keywordsMatched.slice(0, 3).join(', ')}${keywordsMatched.length > 3 ? '...' : ''}</td>
+                </tr>
+            `;
+        });
+
+        html += '</tbody></table>';
+    } else {
+        html += `
+            <div style="padding: 20px; background: #fef3c7; border-radius: 8px; margin-bottom: 25px; color: #92400e;">
+                <strong>No targeted assignments:</strong> Document structure not found or all questions require exhaustive scan.
+            </div>
+        `;
+    }
+
+    // Keywords by Section
+    html += `<h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">All Keywords Searched by Section</h3>`;
+
+    if (Object.keys(allKeywords).length > 0) {
+        html += `<div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 25px;">`;
+
+        for (const [sectionId, keywords] of Object.entries(allKeywords)) {
+            html += `
+                <div style="flex: 1; min-width: 300px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px;">
+                    <h4 style="margin: 0 0 10px 0; color: #1E3A8A; font-size: 14px;">${sectionId}</h4>
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                        ${(keywords || []).map(kw => `<span style="background: #E8EEF7; color: #1E3A8A; padding: 2px 8px; border-radius: 4px; font-size: 11px;">${kw}</span>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        html += '</div>';
+    } else {
+        html += `<p style="color: #6b7280; font-style: italic;">No keyword data available</p>`;
+    }
+
+    // Efficiency Summary
+    html += `
+        <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">Efficiency Summary</h3>
+        <table style="width: 50%; border-collapse: collapse; margin-bottom: 25px;">
+            <tbody>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #dcfce7; border: 1px solid #e5e7eb; width: 200px;">Estimated Page Reduction</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #166534;">${reduction}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: 600; background: #f9fafb; border: 1px solid #e5e7eb;">Questions Requiring Full Scan</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">${unassigned.length}</td>
+                </tr>
+            </tbody>
+        </table>
+    `;
+
+    document.getElementById('fv-quickScanContent').innerHTML = html;
+}
+
     </script>
 
     <!-- Question Manager Modal -->
@@ -3289,6 +3461,7 @@ function renderFullViewFootnotesTab() {
                     <button class="fv-tab-btn" id="fullViewFragmentsTabBtn" onclick="switchFullViewTab('fragments')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">All Fragments</button>
                     <button class="fv-tab-btn" onclick="switchFullViewTab('footnotes')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent;">Footnotes</button>
                     <button class="fv-tab-btn" id="fullViewPageIndexTabBtn" onclick="switchFullViewTab('pageIndex')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">Page Index</button>
+                    <button class="fv-tab-btn" id="fullViewQuickScanTabBtn" onclick="switchFullViewTab('quickScan')" style="padding: 15px 25px; background: transparent; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; display: none;">Quick Scan</button>
                 </div>
             </div>
 
@@ -3311,6 +3484,9 @@ function renderFullViewFootnotesTab() {
                 </div>
                 <div id="fv-tab-pageIndex" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
                     <div id="fv-pageIndexContent"></div>
+                </div>
+                <div id="fv-tab-quickScan" class="fv-tab-content" style="display: none; padding: 25px; max-height: 70vh; overflow-y: auto;">
+                    <div id="fv-quickScanContent"></div>
                 </div>
             </div>
         </div>

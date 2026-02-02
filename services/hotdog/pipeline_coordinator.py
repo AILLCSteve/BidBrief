@@ -76,7 +76,8 @@ class PipelineCoordinator:
         second_pass_processor,
         accumulator,
         rag_processor=None,  # Optional - only if TAVILY configured
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        stop_check_callback: Optional[Callable] = None  # NEW: Callback to check if stop requested
     ):
         self.comprehensive = comprehensive_processor
         self.exhaustive = exhaustive_processor
@@ -84,6 +85,7 @@ class PipelineCoordinator:
         self.rag = rag_processor
         self.accumulator = accumulator
         self.progress_callback = progress_callback
+        self.stop_check_callback = stop_check_callback  # Returns True if stop requested
 
         # Document Navigator for pre-scan analysis
         self.navigator = DocumentNavigator()
@@ -92,6 +94,21 @@ class PipelineCoordinator:
         self.navigation_map: Optional[NavigationMap] = None
 
         self.state = PipelineState()
+
+    def _check_stop(self) -> bool:
+        """Check if stop has been requested. Returns True if should stop."""
+        if self.stop_check_callback:
+            return self.stop_check_callback()
+        return False
+
+    def _raise_if_stopped(self, stage: str, context: str = ""):
+        """Raise exception if stop requested, with descriptive message."""
+        if self._check_stop():
+            msg = f"Analysis stopped by user during {stage}"
+            if context:
+                msg += f" ({context})"
+            logger.warning(f"⏹️ {msg}")
+            raise Exception("Analysis stopped by user")
 
     def set_user_selections(
         self,
@@ -140,6 +157,8 @@ class PipelineCoordinator:
         # ============================================================
         # PRE-SCAN: Document Navigator Analysis
         # ============================================================
+        self._raise_if_stopped('pre-scan', 'before document analysis')
+
         try:
             self.navigation_map = await self.navigator.create_navigation_map(
                 pages=pages,
@@ -149,12 +168,15 @@ class PipelineCoordinator:
             )
             logger.info(f"Navigation map created: {len(self.navigation_map.expert_assignments)} expert assignments")
         except Exception as e:
+            if "stopped by user" in str(e):
+                raise
             logger.warning(f"Document Navigator failed (continuing without): {e}")
             self.navigation_map = None
 
         # ============================================================
         # STAGE 1: Comprehensive Quick-Scan
         # ============================================================
+        self._raise_if_stopped('Stage 1', 'before quick-scan')
         stage_1_result = await self._run_stage_1(pages, all_questions, experts)
 
         # Determine questions for Stage 2
@@ -166,6 +188,7 @@ class PipelineCoordinator:
         # ============================================================
         # STAGE 2: Selective Exhaustive Pass
         # ============================================================
+        self._raise_if_stopped('Stage 2', 'before exhaustive pass')
         if questions_for_stage_2:
             stage_2_result = await self._run_stage_2(
                 windows, questions_for_stage_2, experts
@@ -174,6 +197,7 @@ class PipelineCoordinator:
         # ============================================================
         # STAGE 3: Second Pass (if enabled and there are unanswered)
         # ============================================================
+        self._raise_if_stopped('Stage 3', 'before second pass')
         if enable_second_pass:
             unanswered = self._get_unanswered_questions(all_questions)
             if unanswered:
@@ -184,6 +208,7 @@ class PipelineCoordinator:
         # ============================================================
         # STAGE 4: Deep RAG (if enabled and configured)
         # ============================================================
+        self._raise_if_stopped('Stage 4', 'before deep RAG')
         if enable_rag and self.rag and self.rag.is_available:
             rag_questions = self._get_questions_for_rag(all_questions)
             if rag_questions:
@@ -308,6 +333,9 @@ class PipelineCoordinator:
         question_map = {q.id: q for q in questions}
 
         for window_idx, window in enumerate(windows, 1):
+            # CHECK FOR STOP REQUEST at each window
+            self._raise_if_stopped('Stage 2 Exhaustive', f'window {window_idx}/{len(windows)}')
+
             # Emit window processing start
             self._emit_progress('window_processing', {
                 'window_num': window_idx,

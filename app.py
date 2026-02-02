@@ -1027,6 +1027,10 @@ def get_results(session_id):
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
 
+        # Add quick scan data for v2 pipeline (document navigator audit)
+        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
+            response['quick_scan_data'] = orchestrator.quick_scan_data
+
         return jsonify(response)
 
     elif session_type == 'legacy':
@@ -1069,6 +1073,10 @@ def get_results(session_id):
         bestprep_data = _extract_bestprep_data(orchestrator)
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
+
+        # Add quick scan data for v2 pipeline (document navigator audit)
+        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
+            response['quick_scan_data'] = orchestrator.quick_scan_data
 
         return jsonify(response)
 
@@ -1144,6 +1152,10 @@ def get_results(session_id):
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
 
+        # Add quick scan data for v2 pipeline (document navigator audit)
+        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
+            response['quick_scan_data'] = orchestrator.quick_scan_data
+
         return jsonify(response)
 
     elif session_type == 'active':
@@ -1210,6 +1222,10 @@ def get_results(session_id):
         bestprep_data = _extract_bestprep_data(orchestrator)
         if bestprep_data:
             response['bestprep_data'] = bestprep_data
+
+        # Add quick scan data for v2 pipeline (document navigator audit)
+        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
+            response['quick_scan_data'] = orchestrator.quick_scan_data
 
         return jsonify(response)
 
@@ -1326,8 +1342,18 @@ def export_excel_dashboard(session_id):
         # Extract API key requirements if available (from KeyRequirementsExtractor)
         api_key_requirements = browser_output.get('key_requirements', {})
 
+        # Extract quick scan data for V2 pipeline (document navigator audit)
+        quick_scan_data = None
+        if hasattr(orchestrator, 'quick_scan_data') and orchestrator.quick_scan_data:
+            quick_scan_data = orchestrator.quick_scan_data
+
         # Generate Excel dashboard (now works with both complete and partial)
-        generator = ExcelDashboardGenerator(legacy_result, is_partial=is_partial, api_key_requirements=api_key_requirements)
+        generator = ExcelDashboardGenerator(
+            legacy_result,
+            is_partial=is_partial,
+            api_key_requirements=api_key_requirements,
+            quick_scan_data=quick_scan_data
+        )
         excel_file = generator.generate()
 
         # Build filename from project name (KRP) + date + mode
