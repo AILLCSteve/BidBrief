@@ -9,5 +9,6 @@ Each prompt module contains:
 
 # Pre-flight prompts
 from .pf1_municipality_normalizer import get_prompt as get_pf1_prompt
+from .pf2_jurisdiction_mapper import get_prompt as get_pf2_prompt
 
-__all__ = ['get_pf1_prompt']
+__all__ = ['get_pf1_prompt', 'get_pf2_prompt']
