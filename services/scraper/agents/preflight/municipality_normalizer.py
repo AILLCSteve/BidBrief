@@ -44,6 +44,34 @@ class MunicipalityNormalizerAgent(BaseAgent):
         """Get base system prompt (without input substitution)."""
         return get_prompt("{{municipality_input}}")
 
+    def _extract_json_from_response(self, content: str) -> str:
+        """Safely extract JSON from LLM response."""
+        try:
+            # Try markdown JSON block
+            if '```json' in content:
+                parts = content.split('```json', 1)
+                if len(parts) > 1:
+                    end_parts = parts[1].split('```', 1)
+                    if len(end_parts) > 0:
+                        return end_parts[0].strip()
+
+            # Try generic markdown block
+            if '```' in content:
+                parts = content.split('```', 2)
+                if len(parts) >= 3:
+                    return parts[1].strip()
+
+            # Try raw JSON (find first { and last })
+            start = content.find('{')
+            end = content.rfind('}')
+            if start != -1 and end > start:
+                return content[start:end+1]
+
+            return content.strip()
+        except (IndexError, AttributeError) as e:
+            logger.error(f"Failed to extract JSON structure: {e}")
+            raise ValueError(f"LLM response did not contain valid JSON structure: {str(e)}")
+
     async def process(self, request: AgentRequest) -> AgentResponse:
         """
         Process municipality normalization request.
@@ -60,6 +88,18 @@ class MunicipalityNormalizerAgent(BaseAgent):
 
         municipality_input = request.input_data.get('municipality_input', '')
 
+        # Type validation
+        if not isinstance(municipality_input, str):
+            return AgentResponse(
+                agent_id=self.AGENT_ID,
+                task=request.task,
+                success=False,
+                output_data={},
+                errors=[f"municipality_input must be string, got {type(municipality_input).__name__}"]
+            )
+
+        municipality_input = municipality_input.strip()
+
         if not municipality_input:
             return AgentResponse(
                 agent_id=self.AGENT_ID,
@@ -69,7 +109,19 @@ class MunicipalityNormalizerAgent(BaseAgent):
                 errors=["municipality_input is required"]
             )
 
+        # Length check
+        if len(municipality_input) > 200:
+            return AgentResponse(
+                agent_id=self.AGENT_ID,
+                task=request.task,
+                success=False,
+                output_data={},
+                errors=[f"municipality_input too long ({len(municipality_input)} chars, max 200)"]
+            )
+
         try:
+            content = ''  # Initialize before any operation
+
             # Emit event for UI activity feed
             self.emit_event("processing", f"Normalizing municipality: {municipality_input}")
 
@@ -83,20 +135,28 @@ class MunicipalityNormalizerAgent(BaseAgent):
             )
 
             # Parse JSON from response
-            content = result['content']
+            content = result.get('content', '')
 
             # Extract JSON from response (handle markdown code blocks)
-            if '```json' in content:
-                json_str = content.split('```json')[1].split('```')[0].strip()
-            elif '```' in content:
-                json_str = content.split('```')[1].split('```')[0].strip()
-            else:
-                json_str = content.strip()
+            json_str = self._extract_json_from_response(content)
 
             output_data = json.loads(json_str)
 
             # Validate output
             errors = self.validate_output(output_data)
+
+            if errors:
+                logger.warning(f"PF-1 validation failed: {errors}")
+                self.emit_event(f"Validation errors: {'; '.join(errors)}")
+                return AgentResponse(
+                    agent_id=self.AGENT_ID,
+                    task=request.task,
+                    success=False,
+                    output_data={'validation_errors': errors, 'raw_output': output_data},
+                    errors=errors,
+                    tokens_used=result.get('tokens_used', 0),
+                    processing_time_seconds=time.time() - start_time
+                )
 
             elapsed = time.time() - start_time
 
@@ -107,9 +167,9 @@ class MunicipalityNormalizerAgent(BaseAgent):
             return AgentResponse(
                 agent_id=self.AGENT_ID,
                 task=request.task,
-                success=len(errors) == 0,
+                success=True,
                 output_data=output_data,
-                errors=errors,
+                errors=[],
                 tokens_used=result.get('tokens_used', 0),
                 processing_time_seconds=elapsed
             )
@@ -120,7 +180,7 @@ class MunicipalityNormalizerAgent(BaseAgent):
                 agent_id=self.AGENT_ID,
                 task=request.task,
                 success=False,
-                output_data={'raw_response': content if 'content' in dir() else ''},
+                output_data={'raw_response': content},
                 errors=[f"JSON parse error: {e}"]
             )
         except Exception as e:
@@ -129,29 +189,47 @@ class MunicipalityNormalizerAgent(BaseAgent):
                 agent_id=self.AGENT_ID,
                 task=request.task,
                 success=False,
-                output_data={},
+                output_data={'raw_response': content} if content else {},
                 errors=[str(e)]
             )
 
     def validate_output(self, output: Dict[str, Any]) -> List[str]:
-        """Validate normalizer output."""
+        """Validate normalizer output against spec."""
         errors = []
 
-        # Check required fields
+        # Check required top-level fields
         if 'normalized' not in output:
             errors.append("Missing 'normalized' field")
-            return errors
 
-        normalized = output['normalized']
+        if 'validation_status' not in output:
+            errors.append("Missing 'validation_status' field")
+        elif output['validation_status'] not in ['VALID', 'AMBIGUOUS', 'INVALID']:
+            errors.append(f"Invalid validation_status: {output['validation_status']}")
 
+        # AMBIGUOUS status requires clarification
+        if output.get('validation_status') == 'AMBIGUOUS':
+            if not output.get('clarification_needed') and not output.get('ambiguities'):
+                errors.append("AMBIGUOUS status requires 'clarification_needed' or 'ambiguities'")
+
+        normalized = output.get('normalized', {})
+
+        # Required normalized fields
         if not normalized.get('city'):
             errors.append("Missing normalized city name")
 
         if not normalized.get('state'):
             errors.append("Missing normalized state name")
 
-        if output.get('validation_status') not in ['VALID', 'AMBIGUOUS', 'INVALID']:
-            errors.append("Invalid validation_status")
+        # municipality_type validation
+        valid_types = ['city', 'town', 'village', 'borough', 'township', 'consolidated']
+        mtype = normalized.get('municipality_type')
+        if mtype and mtype not in valid_types:
+            errors.append(f"Invalid municipality_type: {mtype}")
+
+        # Confidence validation
+        confidence = output.get('confidence')
+        if confidence and confidence not in ['HIGH', 'MEDIUM', 'LOW']:
+            errors.append(f"Invalid confidence: {confidence}")
 
         return errors
 
