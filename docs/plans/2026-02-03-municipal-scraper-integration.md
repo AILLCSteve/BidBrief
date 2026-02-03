@@ -10,6 +10,49 @@
 
 ---
 
+## Critical Requirements (NON-NEGOTIABLE)
+
+### 1. Preserve Existing Functionality
+- **BidBrief and BestPrep MUST continue working exactly as before**
+- No modifications to existing HOTDOG AI core processing
+- CityScraper is an ADDITION, not a replacement
+- All existing API endpoints remain unchanged
+
+### 2. Admin-Only Access
+- CityScraper features visible ONLY to admin users
+- Use existing `is_admin` session check pattern from app.py
+- Non-admin users see only BidBrief/BestPrep tabs
+
+### 3. Separate Tab UI (NOT Collapsed Container)
+- CityScraper displayed as its own **TAB** alongside BidBrief/BestPrep
+- Tab structure: `[BidBrief] [BestPrep*] [CityScraper*]` (*admin-only)
+- Each tab has completely independent state and UI
+
+### 4. Dedicated Analysis Window
+CityScraper gets its own live analysis interface mirroring BidBrief's:
+- **Progress Bar**: Overall research progress (0-100%)
+- **Agent Activity Feed**: Real-time display of which agents are running
+  - "PF-1: Normalizing municipality..."
+  - "PF-2: Mapping jurisdiction..."
+  - "EX-1: Extracting infrastructure data..."
+- **Debug Window**: Collapsible panel showing detailed agent logs
+- **Stop Button**: Graceful cancellation support
+
+### 5. Clear Source Flagging for HOTDOG Integration
+When CityScraper data augments HOTDOG document analysis:
+- **ALWAYS mark as `[External Research]`** in the answer
+- **NEVER blend with document-sourced answers** without clear distinction
+- Display format:
+  ```
+  [From Document]: The project location is Springfield, IL. <PDF pg 3>
+
+  [External Research - CityScraper]: Springfield has 236 miles of
+  sanitary sewer mains. Source: City CIP 2024
+  ```
+- In exports, use separate columns or clear labels for external data
+
+---
+
 ## Table of Contents
 
 1. [Phase 1: Foundation & Data Models](#phase-1-foundation--data-models)
@@ -2283,29 +2326,411 @@ EOF
 ## Phase 8: API Endpoints & Frontend
 
 ### Task 8.1: Flask API Endpoints
-```python
-# Scraper endpoints to add to app.py
 
-POST   /api/scraper/research           # Start standalone research
-GET    /api/scraper/research/<session> # Get research progress
-POST   /api/scraper/enrich/<session>   # Enrich existing analysis
-POST   /api/scraper/compare            # Compare multiple municipalities
-GET    /api/scraper/downloads/<session># List downloadable documents
-GET    /api/scraper/download/<doc_id>  # Download specific document
-POST   /api/scraper/analyze/summary    # Generate summaries
-POST   /api/scraper/analyze/brainstorm # Generate opportunities
-POST   /api/scraper/analyze/research   # Deep research trails
-POST   /api/scraper/analyze/bid        # Analyze specific bid
+**Files:**
+- Modify: `app.py` (add new endpoints, preserve all existing)
+
+```python
+# ═══════════════════════════════════════════════════════════════════════════
+# CITYSCRAPER API ENDPOINTS (ADD TO app.py - DO NOT MODIFY EXISTING ENDPOINTS)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Session Management
+POST   /api/scraper/research              # Start standalone research session
+GET    /api/scraper/research/<session>    # Get research status and results
+GET    /api/scraper/events/<session>      # Poll for agent activity events
+POST   /api/scraper/stop/<session>        # Stop research gracefully
+
+# Document Enrichment (Bridge to HOTDOG)
+POST   /api/scraper/enrich/<hotdog_session>  # Enrich existing HOTDOG analysis
+GET    /api/scraper/enrich/status/<session>  # Get enrichment status
+
+# Comparative Intelligence
+POST   /api/scraper/compare               # Compare multiple municipalities
+GET    /api/scraper/compare/<session>     # Get comparison results
+
+# Document Downloads
+GET    /api/scraper/downloads/<session>   # List downloadable bid documents
+GET    /api/scraper/download/<doc_id>     # Download specific document
+
+# Analysis Features (commsdev preserved functionality)
+POST   /api/scraper/analyze/summary       # Generate 4-perspective summaries
+POST   /api/scraper/analyze/brainstorm    # Generate 10 opportunities
+POST   /api/scraper/analyze/research      # Deep research trails
+POST   /api/scraper/analyze/bid           # Analyze specific bid
+
+# Exports
+GET    /api/scraper/export/excel/<session>     # Download Excel workbook
+GET    /api/scraper/export/markdown/<session>  # Download markdown tables
+
+# Admin check (reuse existing pattern)
+GET    /api/scraper/admin-check           # Verify admin access for CityScraper
 ```
 
-### Task 8.2: Frontend Integration
-- New "Municipal Research" tab in UI
-- Municipality input with normalization feedback
-- Table mode selector
-- Progress tracking for scraper sessions
-- Results display matching markdown schemas
-- Analysis features (summary, brainstorm, research)
-- Export buttons for Excel/markdown
+### Task 8.2: Frontend - CityScraper Tab Structure
+
+**Files:**
+- Modify: `index.html` (add CityScraper tab, preserve existing tabs)
+
+**Tab Structure:**
+```html
+<!-- Tab Navigation (admin sees all 3, non-admin sees only BidBrief) -->
+<div class="tab-navigation">
+    <button class="tab-btn active" data-tab="bidbrief">BidBrief</button>
+    <button class="tab-btn admin-only" data-tab="bestprep">BestPrep</button>
+    <button class="tab-btn admin-only" data-tab="cityscraper">CityScraper</button>
+</div>
+
+<!-- Tab Content Panels -->
+<div id="bidbrief-tab" class="tab-content active">
+    <!-- Existing BidBrief UI - DO NOT MODIFY -->
+</div>
+
+<div id="bestprep-tab" class="tab-content admin-only">
+    <!-- Existing BestPrep UI - DO NOT MODIFY -->
+</div>
+
+<div id="cityscraper-tab" class="tab-content admin-only">
+    <!-- NEW CityScraper UI - see Task 8.3 -->
+</div>
+```
+
+### Task 8.3: Frontend - CityScraper Analysis Window
+
+**CityScraper tab contains dedicated analysis interface:**
+
+```html
+<div id="cityscraper-tab" class="tab-content admin-only">
+    <!-- Header -->
+    <div class="cityscraper-header">
+        <h2>CityScraper - Municipal Research</h2>
+        <p class="subtitle">AI-powered municipal infrastructure and bid research</p>
+    </div>
+
+    <!-- Input Section -->
+    <div class="cityscraper-input-section">
+        <div class="municipality-input">
+            <label>Municipality</label>
+            <input type="text" id="cs-municipality" placeholder="e.g., Springfield, IL">
+            <div id="cs-normalization-feedback" class="feedback"></div>
+        </div>
+
+        <div class="table-mode-selector">
+            <label>Research Mode</label>
+            <select id="cs-table-mode">
+                <option value="systems_info">Municipal Systems Information</option>
+                <option value="public_bids">Municipal Public Bids</option>
+                <option value="both">Both Tables</option>
+            </select>
+        </div>
+
+        <div class="action-buttons">
+            <button id="cs-start-research" class="primary-btn">Start Research</button>
+            <button id="cs-stop-research" class="danger-btn" disabled>Stop</button>
+        </div>
+    </div>
+
+    <!-- Progress Section (mirrors BidBrief pattern) -->
+    <div id="cs-progress-section" class="progress-section hidden">
+        <!-- Overall Progress Bar -->
+        <div class="progress-container">
+            <div class="progress-label">
+                <span id="cs-progress-phase">Initializing...</span>
+                <span id="cs-progress-percent">0%</span>
+            </div>
+            <div class="progress-bar">
+                <div id="cs-progress-fill" class="progress-fill" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Agent Activity Feed (UNIQUE TO CITYSCRAPER) -->
+        <div class="agent-activity-feed">
+            <h4>Agent Activity</h4>
+            <div id="cs-agent-feed" class="agent-feed">
+                <!-- Populated dynamically -->
+                <!-- Example:
+                <div class="agent-activity active">
+                    <span class="agent-id">PF-1</span>
+                    <span class="agent-name">Municipality Normalizer</span>
+                    <span class="agent-status">Validating input...</span>
+                    <span class="agent-spinner">⟳</span>
+                </div>
+                -->
+            </div>
+        </div>
+
+        <!-- Debug Window (Collapsible) -->
+        <details class="debug-window">
+            <summary>Debug Log</summary>
+            <div id="cs-debug-log" class="debug-content">
+                <!-- Detailed agent logs -->
+            </div>
+        </details>
+    </div>
+
+    <!-- Results Section -->
+    <div id="cs-results-section" class="results-section hidden">
+        <!-- Results Tabs -->
+        <div class="results-tabs">
+            <button class="results-tab active" data-results="table">Data Table</button>
+            <button class="results-tab" data-results="sources">Sources</button>
+            <button class="results-tab" data-results="analysis">Analysis</button>
+            <button class="results-tab" data-results="downloads">Downloads</button>
+        </div>
+
+        <!-- Data Table View -->
+        <div id="cs-results-table" class="results-content active">
+            <!-- Rendered markdown table or formatted display -->
+        </div>
+
+        <!-- Sources View -->
+        <div id="cs-results-sources" class="results-content">
+            <!-- List of all sources with URLs and citations -->
+        </div>
+
+        <!-- Analysis View (Summary, Brainstorm, Deep Research) -->
+        <div id="cs-results-analysis" class="results-content">
+            <div class="analysis-actions">
+                <button id="cs-gen-summary">Generate Summary</button>
+                <button id="cs-gen-brainstorm">Brainstorm Opportunities</button>
+                <button id="cs-gen-research">Deep Research</button>
+            </div>
+            <div id="cs-analysis-output"></div>
+        </div>
+
+        <!-- Downloads View -->
+        <div id="cs-results-downloads" class="results-content">
+            <!-- List of downloadable bid documents -->
+        </div>
+
+        <!-- Export Buttons -->
+        <div class="export-buttons">
+            <button id="cs-export-excel">Export Excel</button>
+            <button id="cs-export-markdown">Export Markdown</button>
+        </div>
+    </div>
+</div>
+```
+
+### Task 8.4: Frontend - Agent Activity Event Handling
+
+**JavaScript for real-time agent activity display:**
+
+```javascript
+// ═══════════════════════════════════════════════════════════════════════════
+// CITYSCRAPER EVENT HANDLING (ADD TO index.html - DO NOT MODIFY EXISTING JS)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let csSessionId = null;
+let csPollingInterval = null;
+
+// Start research
+async function startCityScraperResearch() {
+    const municipality = document.getElementById('cs-municipality').value;
+    const tableMode = document.getElementById('cs-table-mode').value;
+
+    if (!municipality) {
+        alert('Please enter a municipality');
+        return;
+    }
+
+    // Show progress section
+    document.getElementById('cs-progress-section').classList.remove('hidden');
+    document.getElementById('cs-results-section').classList.add('hidden');
+
+    // Start research
+    const response = await fetch('/api/scraper/research', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({municipality, table_mode: tableMode})
+    });
+
+    const data = await response.json();
+    csSessionId = data.session_id;
+
+    // Start polling for events
+    csPollingInterval = setInterval(pollCityScraperEvents, 1000);
+}
+
+// Poll for agent activity events
+async function pollCityScraperEvents() {
+    if (!csSessionId) return;
+
+    const response = await fetch(`/api/scraper/events/${csSessionId}`);
+    const data = await response.json();
+
+    // Update progress bar
+    updateCSProgress(data.progress);
+
+    // Update agent activity feed
+    updateAgentFeed(data.agent_events);
+
+    // Update debug log
+    updateDebugLog(data.debug_events);
+
+    // Check if complete
+    if (data.status === 'completed' || data.status === 'failed') {
+        clearInterval(csPollingInterval);
+        if (data.status === 'completed') {
+            loadCityScraperResults();
+        }
+    }
+}
+
+// Update agent activity feed
+function updateAgentFeed(events) {
+    const feed = document.getElementById('cs-agent-feed');
+
+    events.forEach(event => {
+        const existing = feed.querySelector(`[data-agent="${event.agent_id}"]`);
+
+        if (existing) {
+            // Update existing agent status
+            existing.querySelector('.agent-status').textContent = event.status;
+            existing.classList.toggle('active', event.is_active);
+            existing.classList.toggle('completed', event.is_completed);
+        } else {
+            // Add new agent entry
+            const div = document.createElement('div');
+            div.className = `agent-activity ${event.is_active ? 'active' : ''}`;
+            div.dataset.agent = event.agent_id;
+            div.innerHTML = `
+                <span class="agent-id">${event.agent_id}</span>
+                <span class="agent-name">${event.agent_name}</span>
+                <span class="agent-status">${event.status}</span>
+                <span class="agent-spinner">${event.is_active ? '⟳' : '✓'}</span>
+            `;
+            feed.appendChild(div);
+        }
+    });
+}
+
+// Update debug log
+function updateDebugLog(events) {
+    const log = document.getElementById('cs-debug-log');
+    events.forEach(event => {
+        const line = document.createElement('div');
+        line.className = `debug-line ${event.level}`;
+        line.textContent = `[${event.timestamp}] [${event.agent_id}] ${event.message}`;
+        log.appendChild(line);
+    });
+    log.scrollTop = log.scrollHeight;
+}
+```
+
+### Task 8.5: Frontend - External Research Flagging in HOTDOG Results
+
+**When CityScraper data augments HOTDOG analysis, clearly mark the source:**
+
+```javascript
+// ═══════════════════════════════════════════════════════════════════════════
+// EXTERNAL RESEARCH FLAGGING (MODIFY renderAnswer function in existing code)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderAnswer(answer) {
+    // Check if answer has external research component
+    const hasExternal = answer.external_research && answer.external_research.length > 0;
+
+    let html = '';
+
+    // Document-sourced answer
+    if (answer.text) {
+        html += `
+            <div class="answer-section document-source">
+                <div class="source-label">[From Document]</div>
+                <div class="answer-text">${answer.text}</div>
+            </div>
+        `;
+    }
+
+    // External research (CityScraper) - CLEARLY SEPARATED
+    if (hasExternal) {
+        html += `
+            <div class="answer-section external-source">
+                <div class="source-label external-label">
+                    [External Research - CityScraper]
+                    <span class="external-warning">⚠ Not from uploaded document</span>
+                </div>
+                ${answer.external_research.map(ext => `
+                    <div class="external-item">
+                        <div class="external-text">${ext.text}</div>
+                        <div class="external-citation">
+                            Source: ${ext.source_title} (${ext.source_url})
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    return html;
+}
+```
+
+**CSS for external research styling:**
+
+```css
+/* External Research Styling - CLEARLY DISTINCT FROM DOCUMENT ANSWERS */
+.external-source {
+    background-color: #fff8e6;  /* Light yellow background */
+    border-left: 4px solid #f59e0b;  /* Orange border */
+    padding: 12px;
+    margin-top: 12px;
+}
+
+.external-label {
+    color: #b45309;
+    font-weight: bold;
+}
+
+.external-warning {
+    font-size: 0.85em;
+    color: #92400e;
+    margin-left: 8px;
+}
+
+.external-citation {
+    font-size: 0.85em;
+    color: #78716c;
+    margin-top: 4px;
+}
+
+/* Agent Activity Feed Styling */
+.agent-activity {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.agent-activity.active {
+    background-color: #eff6ff;
+}
+
+.agent-activity.completed .agent-spinner {
+    color: #22c55e;
+}
+
+.agent-id {
+    font-family: monospace;
+    font-weight: bold;
+    width: 50px;
+}
+
+.agent-spinner {
+    margin-left: auto;
+    animation: spin 1s linear infinite;
+}
+
+.agent-activity.completed .agent-spinner {
+    animation: none;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+```
 
 ---
 
@@ -2357,11 +2782,16 @@ POST   /api/scraper/analyze/bid        # Analyze specific bid
 - [ ] Phase 5: Bridge Agents (4 tasks)
 - [ ] Phase 6: Analysis Agents (4 tasks)
 - [ ] Phase 7: Orchestrators (4 tasks)
-- [ ] Phase 8: API & Frontend (2 tasks)
+- [ ] Phase 8: API & Frontend (5 tasks)
+  - [ ] Task 8.1: Flask API Endpoints
+  - [ ] Task 8.2: CityScraper Tab Structure
+  - [ ] Task 8.3: CityScraper Analysis Window (progress, agent feed, debug)
+  - [ ] Task 8.4: Agent Activity Event Handling
+  - [ ] Task 8.5: External Research Flagging in HOTDOG Results
 - [ ] Phase 9: Excel Exports (2 tasks)
 - [ ] Phase 10: Testing (4 tasks)
 
-**Total: 40 tasks across 10 phases**
+**Total: 43 tasks across 10 phases**
 
 ---
 
