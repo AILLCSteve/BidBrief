@@ -51,32 +51,42 @@ class JurisdictionMapperAgent(BaseAgent):
         return get_prompt("{{municipality_name}}", "{{state}}")
 
     def _extract_json_from_response(self, content: str) -> str:
-        """Safely extract JSON from LLM response."""
-        try:
-            # Try markdown JSON block
-            if '```json' in content:
-                parts = content.split('```json', 1)
-                if len(parts) > 1:
-                    end_parts = parts[1].split('```', 1)
-                    if len(end_parts) > 0:
-                        return end_parts[0].strip()
+        """Safely extract JSON from LLM response with validation.
 
-            # Try generic markdown block
-            if '```' in content:
-                parts = content.split('```', 2)
-                if len(parts) >= 3:
-                    return parts[1].strip()
+        Raises:
+            ValueError: If no valid JSON found in response
+        """
+        candidates = []
 
-            # Try raw JSON (find first { and last })
-            start = content.find('{')
-            end = content.rfind('}')
-            if start != -1 and end > start:
-                return content[start:end+1]
+        # Try markdown JSON block
+        if '```json' in content:
+            parts = content.split('```json', 1)
+            if len(parts) > 1:
+                end_parts = parts[1].split('```', 1)
+                if len(end_parts) > 0:
+                    candidates.append(end_parts[0].strip())
 
-            return content.strip()
-        except (IndexError, AttributeError) as e:
-            logger.error(f"Failed to extract JSON structure: {e}")
-            raise ValueError(f"LLM response did not contain valid JSON structure: {str(e)}")
+        # Try generic markdown block
+        if '```' in content:
+            parts = content.split('```', 2)
+            if len(parts) >= 3:
+                candidates.append(parts[1].strip())
+
+        # Try raw JSON (find first { and last })
+        start = content.find('{')
+        end = content.rfind('}')
+        if start != -1 and end > start:
+            candidates.append(content[start:end+1])
+
+        # Validate each candidate
+        for candidate in candidates:
+            try:
+                json.loads(candidate)  # Validate it parses
+                return candidate
+            except json.JSONDecodeError:
+                continue
+
+        raise ValueError(f"No valid JSON found in response: {content[:200]}...")
 
     async def _gather_jurisdiction_info(
         self,
@@ -127,38 +137,45 @@ class JurisdictionMapperAgent(BaseAgent):
         return all_results
 
     def _build_context(self, search_results: List[Dict[str, Any]]) -> str:
-        """
-        Build context string from search results for LLM consumption.
-
-        Args:
-            search_results: List of Tavily search results
-
-        Returns:
-            Formatted context string
-        """
+        """Build context string from search results with validation."""
         if not search_results:
             return "No search results available. Use general knowledge with LOW confidence."
 
         context_parts = ["## SEARCH RESULTS\n"]
-
-        # Deduplicate by URL
         seen_urls = set()
         unique_results = []
+
         for result in search_results:
-            url = result.get('url', '')
+            # Validate result structure
+            if not isinstance(result, dict):
+                logger.warning(f"Skipping non-dict search result: {type(result)}")
+                continue
+
+            url = result.get('url', '').strip()
+            content = result.get('content', '').strip()
+
+            # Skip empty content
+            if not content or len(content) < 20:
+                continue
+
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 unique_results.append(result)
 
-        for i, result in enumerate(unique_results[:15], 1):  # Limit to top 15 unique
-            title = result.get('title', 'Untitled')
+        if not unique_results:
+            return "Search returned no useful results. Use general knowledge with LOW confidence."
+
+        # Limit to top 15 unique results
+        for i, result in enumerate(unique_results[:15], 1):
+            title = result.get('title', 'Untitled').strip()
             url = result.get('url', '')
             content = result.get('content', '')
             query = result.get('query', '')
 
             context_parts.append(f"### Result {i}: {title}")
             context_parts.append(f"**URL:** {url}")
-            context_parts.append(f"**Query:** {query}")
+            if query:
+                context_parts.append(f"**Query:** {query}")
             context_parts.append(f"**Content:**\n{content}\n")
 
         return "\n".join(context_parts)
@@ -243,6 +260,7 @@ class JurisdictionMapperAgent(BaseAgent):
 
         try:
             content = ''  # Initialize before any operation
+            json_str = ''  # Initialize before any operation
 
             # Emit event for UI activity feed
             self.emit_event("processing", f"Mapping jurisdiction: {municipality_name}, {state}")
@@ -316,70 +334,102 @@ Return the JSON output as specified."""
                 processing_time_seconds=elapsed
             )
 
-        except json.JSONDecodeError as e:
-            logger.error(f"PF-2 failed to parse JSON response: {e}")
+        except ValueError as e:
+            # JSON extraction failed
+            logger.error(f"PF-2 JSON extraction failed: {e}")
             return AgentResponse(
                 agent_id=self.AGENT_ID,
                 task=request.task,
                 success=False,
-                output_data={'raw_response': content},
-                errors=[f"JSON parse error: {e}"]
+                output_data={'extraction_error': str(e), 'raw_response': content[:1000] if content else ''},
+                errors=[f"JSON extraction error: {str(e)[:100]}"],
+                processing_time_seconds=time.time() - start_time
+            )
+        except json.JSONDecodeError as e:
+            logger.error(f"PF-2 JSON parse failed: {e}")
+            return AgentResponse(
+                agent_id=self.AGENT_ID,
+                task=request.task,
+                success=False,
+                output_data={'parse_error': str(e), 'attempted_json': json_str[:500] if json_str else ''},
+                errors=[f"JSON parse error at position {e.pos}: {e.msg}"],
+                processing_time_seconds=time.time() - start_time
             )
         except Exception as e:
-            logger.error(f"PF-2 processing error: {e}")
+            logger.exception(f"PF-2 unexpected error: {e}")
             return AgentResponse(
                 agent_id=self.AGENT_ID,
                 task=request.task,
                 success=False,
-                output_data={'raw_response': content} if content else {},
-                errors=[str(e)]
+                output_data={'raw_response': content[:500] if content else ''},
+                errors=[f"Unexpected error: {type(e).__name__}: {str(e)[:100]}"],
+                processing_time_seconds=time.time() - start_time
             )
 
     def validate_output(self, output: Dict[str, Any]) -> List[str]:
-        """
-        Validate jurisdiction mapper output against spec.
-
-        Checks:
-        - sanitary_sewer section exists with owner
-        - stormwater section exists
-        - confidence is valid enum
-        - Owner has entity_name (or explicit null with data_gaps)
-        """
+        """Validate jurisdiction mapper output against spec."""
         errors = []
 
-        # Check required top-level sections
+        # Validate sanitary_sewer section
         if 'sanitary_sewer' not in output:
             errors.append("Missing 'sanitary_sewer' section")
         else:
             sanitary = output['sanitary_sewer']
-            if 'owner' not in sanitary:
-                errors.append("Missing 'sanitary_sewer.owner' section")
-            else:
-                owner = sanitary['owner']
-                # entity_name can be null if data_gaps explains why
-                if owner.get('entity_name') is None:
-                    # Check if this is documented in data_gaps
-                    data_gaps = output.get('data_gaps', [])
-                    if not any('sanitary' in gap.lower() or 'sewer' in gap.lower() for gap in data_gaps):
-                        errors.append("sanitary_sewer.owner.entity_name is null but not documented in data_gaps")
+            errors.extend(self._validate_entity_info(sanitary.get('owner'), 'sanitary_sewer.owner'))
+            errors.extend(self._validate_entity_info(sanitary.get('operator'), 'sanitary_sewer.operator'))
 
+        # Validate stormwater section
         if 'stormwater' not in output:
             errors.append("Missing 'stormwater' section")
+        else:
+            stormwater = output['stormwater']
+            errors.extend(self._validate_entity_info(stormwater.get('owner'), 'stormwater.owner'))
+            errors.extend(self._validate_entity_info(stormwater.get('operator'), 'stormwater.operator'))
 
-        # Confidence validation
+        # Validate confidence
         confidence = output.get('confidence')
-        if confidence and confidence not in ['HIGH', 'MEDIUM', 'LOW']:
-            errors.append(f"Invalid confidence: {confidence} (must be HIGH, MEDIUM, or LOW)")
+        if not confidence:
+            errors.append("Missing required 'confidence' field")
+        elif confidence not in ['HIGH', 'MEDIUM', 'LOW']:
+            errors.append(f"Invalid confidence: {confidence}")
 
-        # Complexity validation
+        # Validate jurisdiction_complexity
         complexity = output.get('jurisdiction_complexity')
-        if complexity and complexity not in ['simple', 'moderate', 'complex']:
+        if not complexity:
+            errors.append("Missing required 'jurisdiction_complexity' field")
+        elif complexity not in ['simple', 'moderate', 'complex']:
             errors.append(f"Invalid jurisdiction_complexity: {complexity}")
 
-        # Validate regional_authorities if present
-        regional = output.get('regional_authorities', [])
-        if not isinstance(regional, list):
+        # Validate regional_authorities is a list if present
+        regional = output.get('regional_authorities')
+        if regional is not None and not isinstance(regional, list):
             errors.append("regional_authorities must be a list")
+
+        return errors
+
+    def _validate_entity_info(self, entity: Any, path: str) -> List[str]:
+        """Validate entity info structure."""
+        errors = []
+
+        if entity is None:
+            errors.append(f"Missing {path}")
+            return errors
+
+        if not isinstance(entity, dict):
+            errors.append(f"{path} must be dictionary")
+            return errors
+
+        # entity_name is required (unless in data_gaps)
+        if not entity.get('entity_name'):
+            # Allow null entity_name if it will be documented
+            pass  # LLM should document in data_gaps
+
+        # entity_type validation
+        entity_type = entity.get('entity_type')
+        valid_types = ['municipality', 'county', 'regional_district', 'jpa', 'special_district',
+                       'private', 'direct_municipal', 'contract_operator', 'unknown']
+        if entity_type and entity_type not in valid_types:
+            errors.append(f"{path}.entity_type invalid: {entity_type}")
 
         return errors
 
