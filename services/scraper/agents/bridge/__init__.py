@@ -12,8 +12,10 @@ BR-4: Scraper Dispatcher - Triggers appropriate scraper workflows
 
 from .municipality_detector import MunicipalityDetectorAgent
 from .gap_analyzer import GapAnalyzerAgent
+from .data_merger import DataMergerAgent
 
 __all__ = [
     'MunicipalityDetectorAgent',
-    'GapAnalyzerAgent'
+    'GapAnalyzerAgent',
+    'DataMergerAgent'
 ]
