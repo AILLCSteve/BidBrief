@@ -3308,6 +3308,170 @@ def delete_scraper_session(session_id):
     })
 
 
+@app.route('/api/scraper/export/excel/<session_id>', methods=['GET'])
+def export_scraper_excel(session_id):
+    """Export CityScraper results as Excel workbook (admin only)."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    available, error_response = _check_scraper_available()
+    if not available:
+        return error_response
+
+    with session_lock:
+        if session_id not in cityscraper_results:
+            return jsonify({'error': 'Session not found or not completed'}), 404
+
+        result = cityscraper_results[session_id]
+
+    # Check if we have extraction data
+    extraction_result = result.get('extraction_result') or result.get('presentation_result', {}).get('extraction_data')
+    if not extraction_result:
+        return jsonify({'error': 'No extraction data available for export'}), 400
+
+    # Get municipality info
+    municipality = result.get('municipality', {})
+
+    try:
+        # Use ExcelGeneratorAgent
+        from services.scraper.agents.presentation import ExcelGeneratorAgent
+        from services.scraper.models import AgentRequest
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            agent = ExcelGeneratorAgent()
+            request = AgentRequest(
+                agent_id="pr-2",
+                task=f"export-excel-{session_id}",
+                input_data={
+                    'extraction_result': extraction_result,
+                    'municipality': municipality,
+                    'output_dir': 'exports'
+                }
+            )
+
+            response = loop.run_until_complete(agent.process(request))
+
+            if not response.success:
+                return jsonify({
+                    'success': False,
+                    'error': 'Excel generation failed',
+                    'details': response.errors
+                }), 500
+
+            file_path = response.output_data.get('file_path')
+            if not file_path or not os.path.exists(file_path):
+                return jsonify({'error': 'Generated file not found'}), 500
+
+            # Send file
+            return send_file(
+                file_path,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=os.path.basename(file_path)
+            )
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.exception(f"Excel export error: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Excel export failed',
+            'details': str(e)
+        }), 500
+
+
+@app.route('/api/scraper/export/markdown/<session_id>', methods=['GET'])
+def export_scraper_markdown(session_id):
+    """Export CityScraper results as Markdown tables (admin only)."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    available, error_response = _check_scraper_available()
+    if not available:
+        return error_response
+
+    with session_lock:
+        if session_id not in cityscraper_results:
+            return jsonify({'error': 'Session not found or not completed'}), 404
+
+        result = cityscraper_results[session_id]
+
+    # Check if we have extraction data
+    extraction_result = result.get('extraction_result') or result.get('presentation_result', {}).get('extraction_data')
+    if not extraction_result:
+        return jsonify({'error': 'No extraction data available for export'}), 400
+
+    # Get municipality info
+    municipality = result.get('municipality', {})
+
+    try:
+        # Use TableFormatterAgent
+        from services.scraper.agents.presentation import TableFormatterAgent
+        from services.scraper.models import AgentRequest
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            agent = TableFormatterAgent()
+            request = AgentRequest(
+                agent_id="pr-1",
+                task=f"export-markdown-{session_id}",
+                input_data={
+                    'extraction_result': extraction_result,
+                    'municipality': municipality
+                }
+            )
+
+            response = loop.run_until_complete(agent.process(request))
+
+            if not response.success:
+                return jsonify({
+                    'success': False,
+                    'error': 'Markdown generation failed',
+                    'details': response.errors
+                }), 500
+
+            # Get markdown content
+            markdown_content = response.output_data.get('markdown_tables', '')
+            if not markdown_content:
+                markdown_content = response.output_data.get('systems_info_table', '')
+                if response.output_data.get('public_bids_table'):
+                    markdown_content += '\n\n' + response.output_data.get('public_bids_table', '')
+
+            if not markdown_content:
+                return jsonify({'error': 'No markdown content generated'}), 500
+
+            # Generate filename
+            city = municipality.get('city', 'Unknown') if isinstance(municipality, dict) else 'Unknown'
+            state = municipality.get('state', 'XX') if isinstance(municipality, dict) else 'XX'
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"CityScraper_{city}_{state}_{timestamp}.md"
+
+            # Return as downloadable file
+            response = make_response(markdown_content)
+            response.headers['Content-Type'] = 'text/markdown; charset=utf-8'
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.exception(f"Markdown export error: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Markdown export failed',
+            'details': str(e)
+        }), 500
+
+
 # ============================================================================
 # HEALTH CHECK
 # ============================================================================
