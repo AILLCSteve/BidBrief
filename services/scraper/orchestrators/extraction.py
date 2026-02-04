@@ -175,25 +175,25 @@ class ExtractionOrchestrator:
             bid_results: Dict[str, PipelineResult] = {}
 
             # Determine which pipelines to run based on table mode
-            run_systems_info = table_mode in [
-                TableMode.MUNICIPAL_SYSTEMS_INFO,
-            ]
-            run_bids = table_mode in [
-                TableMode.MUNICIPAL_PUBLIC_BIDS,
-            ]
-
-            # Handle "Both" mode - check if table_mode name suggests both
-            # In a real implementation, you might have a BOTH enum value
-            if not run_systems_info and not run_bids:
-                # Default to systems info if mode is unclear
-                run_systems_info = True
-
-            # Check if user wants both (could be a combined mode)
-            # For now, we run both if specifically requested or if mode is BOTH
+            # NOTE: TableMode enum has MUNICIPAL_SYSTEMS_INFO and MUNICIPAL_PUBLIC_BIDS
+            # "Both" mode can be requested via string value containing "both"
             table_mode_str = str(table_mode.value).lower()
-            if "both" in table_mode_str or (run_systems_info and run_bids):
+
+            if "both" in table_mode_str:
+                # Explicit "both" mode - run all agents
                 run_systems_info = True
                 run_bids = True
+            elif table_mode == TableMode.MUNICIPAL_SYSTEMS_INFO:
+                run_systems_info = True
+                run_bids = False
+            elif table_mode == TableMode.MUNICIPAL_PUBLIC_BIDS:
+                run_systems_info = False
+                run_bids = True
+            else:
+                # Unknown mode - default to systems info
+                logger.warning(f"Unknown table mode {table_mode}, defaulting to systems info")
+                run_systems_info = True
+                run_bids = False
 
             # Run Systems Info extraction (EX-1 through EX-4) - can run in parallel
             if run_systems_info:
@@ -286,14 +286,22 @@ class ExtractionOrchestrator:
             )
 
             for i, (agent_id, _) in enumerate(tasks):
-                if isinstance(stage_results[i], Exception):
+                result = stage_results[i]
+                if isinstance(result, Exception):
                     results[agent_id] = PipelineResult(
                         stage_id=agent_id,
                         success=False,
-                        error=str(stage_results[i])
+                        error=str(result)
                     )
+                elif isinstance(result, PipelineResult):
+                    results[agent_id] = result
                 else:
-                    results[agent_id] = stage_results[i]
+                    # Unexpected return type - wrap in failure result
+                    results[agent_id] = PipelineResult(
+                        stage_id=agent_id,
+                        success=False,
+                        error=f"Unexpected return type: {type(result).__name__}"
+                    )
 
         return results
 
