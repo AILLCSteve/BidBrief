@@ -19,8 +19,9 @@ from .ex1_infrastructure import get_prompt as get_ex1_prompt
 from .ex2_equipment import get_prompt as get_ex2_prompt
 from .ex3_maintenance import get_prompt as get_ex3_prompt
 from .ex4_incident import get_prompt as get_ex4_prompt
+from .ex5_bid import get_prompt as get_ex5_prompt
 
 __all__ = [
     'get_pf1_prompt', 'get_pf2_prompt', 'get_pf3_prompt', 'get_pf4_prompt', 'get_pf5_prompt',
-    'get_ex1_prompt', 'get_ex2_prompt', 'get_ex3_prompt', 'get_ex4_prompt'
+    'get_ex1_prompt', 'get_ex2_prompt', 'get_ex3_prompt', 'get_ex4_prompt', 'get_ex5_prompt'
 ]
