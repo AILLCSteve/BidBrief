@@ -21,7 +21,7 @@ Responsibilities:
 import asyncio
 import logging
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Type
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -35,6 +35,7 @@ from services.scraper.models import (
     TableMode,
     AgentActivityEvent
 )
+from services.scraper.agents.base import BaseAgent
 from services.scraper.agents.preflight import (
     MunicipalityNormalizerAgent,
     JurisdictionMapperAgent,
@@ -51,7 +52,7 @@ class PipelineStage:
     """Configuration for a pipeline stage."""
     agent_id: str
     agent_name: str
-    agent_class: type
+    agent_class: Type[BaseAgent]  # Must be BaseAgent subclass
     max_retries: int = 2
     retry_delay: float = 2.0
     required: bool = True
@@ -128,6 +129,21 @@ class PreflightOrchestrator:
         self._cancelled = True
         logger.info("PF-O: Cancellation requested")
 
+    def _resolve_table_mode(self, table_mode_input: str) -> TableMode:
+        """Resolve table mode from input string."""
+        if not table_mode_input:
+            return TableMode.MUNICIPAL_SYSTEMS_INFO
+
+        normalized = table_mode_input.strip().upper()
+
+        if "SYSTEMS" in normalized or "INFORMATION" in normalized:
+            return TableMode.MUNICIPAL_SYSTEMS_INFO
+        elif "BIDS" in normalized or "PUBLIC" in normalized:
+            return TableMode.MUNICIPAL_PUBLIC_BIDS
+
+        logger.warning(f"Unknown table_mode '{table_mode_input}', defaulting to MUNICIPAL_SYSTEMS_INFO")
+        return TableMode.MUNICIPAL_SYSTEMS_INFO
+
     async def run(
         self,
         municipality_input: str,
@@ -143,6 +159,16 @@ class PreflightOrchestrator:
         Returns:
             PreflightResult with aggregated validation results
         """
+        # Input validation
+        if not municipality_input or not municipality_input.strip():
+            return self._create_failed_result(
+                municipality="UNKNOWN",
+                table_mode=table_mode,
+                error="Municipality input cannot be empty"
+            )
+
+        municipality_input = municipality_input.strip()
+
         self.started_at = datetime.now()
         self._cancelled = False
         self.results = {}
@@ -240,6 +266,8 @@ class PreflightOrchestrator:
 
             if pf5_result.success and pf5_result.response:
                 # Use PF-5's conversion to PreflightResult
+                # Note: Creates new instance - acceptable as validator __init__ is lightweight
+                # Future: Consider making to_preflight_result() a static method
                 validator = ReadinessValidatorAgent()
                 preflight_result = validator.to_preflight_result(
                     output=pf5_result.response.output_data,
@@ -284,6 +312,7 @@ class PreflightOrchestrator:
         self.emit_event(f"Running {stage.agent_name}...", stage.agent_id)
 
         while retries <= stage.max_retries:
+            agent = None  # Initialize outside try for finally block access
             try:
                 # Create agent instance
                 agent = stage.agent_class(
@@ -300,9 +329,6 @@ class PreflightOrchestrator:
 
                 # Run agent
                 response = await agent.process(request)
-
-                # Cleanup
-                await agent.cleanup()
 
                 duration = time.time() - start_time
 
@@ -324,6 +350,13 @@ class PreflightOrchestrator:
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"{stage.agent_id} exception: {e}")
+            finally:
+                # CRITICAL: Always cleanup agent resources to prevent leaks
+                if agent:
+                    try:
+                        await agent.cleanup()
+                    except Exception as cleanup_error:
+                        logger.error(f"Cleanup error in {stage.agent_id}: {cleanup_error}")
 
             # Retry logic
             retries += 1
@@ -358,7 +391,7 @@ class PreflightOrchestrator:
 
         return PreflightResult(
             municipality=Municipality(city=municipality, state=state or "Unknown"),
-            table_mode=TableMode.MUNICIPAL_SYSTEMS_INFO if "Systems" in table_mode else TableMode.MUNICIPAL_PUBLIC_BIDS,
+            table_mode=self._resolve_table_mode(table_mode),
             status=PreflightStatus.FAIL,
             gaps=[error],
             recommendations=["Review error and retry"],
@@ -377,7 +410,7 @@ class PreflightOrchestrator:
 
         return PreflightResult(
             municipality=Municipality(city=municipality, state=state or "Unknown"),
-            table_mode=TableMode.MUNICIPAL_SYSTEMS_INFO if "Systems" in table_mode else TableMode.MUNICIPAL_PUBLIC_BIDS,
+            table_mode=self._resolve_table_mode(table_mode),
             status=PreflightStatus.FAIL,
             gaps=["Pipeline cancelled by user"],
             recommendations=["Restart pre-flight when ready"],
@@ -420,7 +453,7 @@ class PreflightOrchestrator:
 
         return PreflightResult(
             municipality=Municipality(city=municipality_name, state=state or "Unknown"),
-            table_mode=TableMode.MUNICIPAL_SYSTEMS_INFO if "Systems" in table_mode else TableMode.MUNICIPAL_PUBLIC_BIDS,
+            table_mode=self._resolve_table_mode(table_mode),
             status=status,
             gaps=gaps,
             recommendations=["Review pre-flight results before extraction"],
