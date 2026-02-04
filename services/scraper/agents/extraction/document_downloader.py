@@ -477,7 +477,44 @@ class DocumentDownloaderAgent(BaseAgent):
 
             # Generate safe filename
             safe_name = self._safe_filename(title, url, detected_type or '')
-            local_path = str(download_dir / safe_name)
+            local_path = download_dir / safe_name
+
+            # SECURITY: Verify path stays within download_dir (prevent path traversal)
+            try:
+                resolved_path = local_path.resolve()
+                base_dir = download_dir.resolve()
+                if not str(resolved_path).startswith(str(base_dir)):
+                    logger.warning(f"EX-6 path traversal attempt detected: {safe_name}")
+                    downloads.append({
+                        'original_url': url,
+                        'title': title,
+                        'bid_title': bid_title,
+                        'status': 'skipped',
+                        'local_path': '',
+                        'file_size_bytes': 0,
+                        'file_type': detected_type or 'unknown',
+                        'error_message': 'Invalid filename: path traversal detected',
+                        'download_time_seconds': 0.0
+                    })
+                    summary['skipped'] += 1
+                    continue
+            except Exception as e:
+                logger.warning(f"EX-6 path validation error: {e}")
+                downloads.append({
+                    'original_url': url,
+                    'title': title,
+                    'bid_title': bid_title,
+                    'status': 'skipped',
+                    'local_path': '',
+                    'file_size_bytes': 0,
+                    'file_type': detected_type or 'unknown',
+                    'error_message': f'Path validation error: {str(e)[:50]}',
+                    'download_time_seconds': 0.0
+                })
+                summary['skipped'] += 1
+                continue
+
+            local_path = str(local_path)
 
             # Handle duplicate filenames
             base_path = local_path
