@@ -2668,10 +2668,21 @@ def start_scraper_research():
             asyncio.set_event_loop(loop)
 
             try:
-                # Create orchestrator
+                # Event callback to capture agent activity
+                def on_event(event):
+                    with session_lock:
+                        if session_id in cityscraper_events:
+                            cityscraper_events[session_id].append({
+                                'agent_id': getattr(event, 'agent_id', 'SYS'),
+                                'agent_name': getattr(event, 'agent_name', 'System'),
+                                'status': getattr(event, 'status', 'processing'),
+                                'message': getattr(event, 'message', ''),
+                                'timestamp': datetime.now().isoformat()
+                            })
+
+                # Create orchestrator with event callback
                 orchestrator = StandaloneResearchOrchestrator(
-                    municipality=municipality,
-                    table_mode=table_mode
+                    event_callback=on_event
                 )
 
                 with session_lock:
@@ -2679,19 +2690,12 @@ def start_scraper_research():
                         cityscraper_sessions[session_id]['orchestrator'] = orchestrator
                         cityscraper_sessions[session_id]['status'] = 'running'
 
-                # Event callback to capture agent activity
-                def on_event(event):
-                    with session_lock:
-                        if session_id in cityscraper_events:
-                            cityscraper_events[session_id].append({
-                                'agent': getattr(event, 'agent_name', 'unknown'),
-                                'action': getattr(event, 'action', 'unknown'),
-                                'message': getattr(event, 'message', ''),
-                                'timestamp': datetime.now().isoformat()
-                            })
-
-                # Run the research
-                result = loop.run_until_complete(orchestrator.run(on_event=on_event))
+                # Run the research with municipality and table_mode
+                result = loop.run_until_complete(orchestrator.run(
+                    municipality_input=municipality,
+                    table_mode=table_mode,
+                    session_id=session_id
+                ))
 
                 with session_lock:
                     if session_id in cityscraper_sessions:
