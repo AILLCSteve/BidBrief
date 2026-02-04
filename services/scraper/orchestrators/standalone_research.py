@@ -425,6 +425,8 @@ class StandaloneResearchOrchestrator:
 
             return result
 
+        except (SystemExit, KeyboardInterrupt):
+            raise
         except Exception as e:
             logger.exception(f"UC-2 PF-O error: {e}")
             self.stage_results[self.STAGE_PREFLIGHT] = {
@@ -472,6 +474,8 @@ class StandaloneResearchOrchestrator:
 
             return result
 
+        except (SystemExit, KeyboardInterrupt):
+            raise
         except Exception as e:
             logger.exception(f"UC-2 EX-O error: {e}")
             self.stage_results[self.STAGE_EXTRACTION] = {
@@ -526,6 +530,8 @@ class StandaloneResearchOrchestrator:
                 logger.warning(f"UC-2 PR-3 failed: {response.errors}")
                 return None
 
+        except (SystemExit, KeyboardInterrupt):
+            raise
         except Exception as e:
             logger.exception(f"UC-2 PR-3 error: {e}")
             self.stage_results[self.STAGE_PRESENTATION] = {
