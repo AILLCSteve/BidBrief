@@ -373,6 +373,7 @@ require LLM assistance. If invoked, help with dispatch decisions."""
 
         self.emit_event("processing", "Packaging results for UI...")
 
+        packager = None
         try:
             packager = UIDataPackagerAgent(
                 config=self.config,
@@ -390,9 +391,6 @@ require LLM assistance. If invoked, help with dispatch decisions."""
             )
 
             response = await packager.process(request)
-
-            # Cleanup packager resources
-            await packager.cleanup()
 
             if not response.success:
                 errors_msg = "; ".join(response.errors) if response.errors else "Packaging failed"
@@ -417,6 +415,13 @@ require LLM assistance. If invoked, help with dispatch decisions."""
                 'result': None,
                 'error': f"Packaging error: {str(e)[:200]}"
             }
+        finally:
+            # Ensure packager resources are cleaned up
+            if packager is not None:
+                try:
+                    await packager.cleanup()
+                except Exception as cleanup_error:
+                    logger.warning(f"BR-4 packager cleanup error: {cleanup_error}")
 
     # =========================================================================
     # MAIN PROCESS METHOD
@@ -669,10 +674,10 @@ require LLM assistance. If invoked, help with dispatch decisions."""
                 'table_mode': extraction_result.table_mode.value,
                 'total_sources_searched': extraction_result.total_sources_searched,
                 'total_data_points_extracted': extraction_result.total_data_points_extracted,
-                'systems_info_rows_count': len(extraction_result.systems_info_rows),
-                'public_bid_rows_count': len(extraction_result.public_bid_rows),
-                'data_gaps': extraction_result.data_gaps[:10],  # Limit for output
-                'downloaded_documents_count': len(extraction_result.downloaded_documents),
+                'systems_info_rows_count': len(extraction_result.systems_info_rows or []),
+                'public_bid_rows_count': len(extraction_result.public_bid_rows or []),
+                'data_gaps': (extraction_result.data_gaps or [])[:10],  # Limit for output
+                'downloaded_documents_count': len(extraction_result.downloaded_documents or []),
             }
         except (AttributeError, TypeError) as e:
             logger.warning(f"BR-4 extraction serialization error: {e}")
