@@ -394,6 +394,167 @@
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(30, 58, 138, 0.3);
         }
+
+        /* Main Navigation Tabs */
+        .main-tabs {
+            display: flex;
+            gap: 0;
+            margin-left: 30px;
+        }
+        .main-tab-btn {
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.7);
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        .main-tab-btn:hover {
+            color: white;
+            background: rgba(255,255,255,0.1);
+        }
+        .main-tab-btn.active {
+            color: white;
+            border-bottom-color: white;
+        }
+        .main-tab-content {
+            display: none;
+        }
+        .main-tab-content.active {
+            display: block;
+        }
+
+        /* CityScraper Styles */
+        .cityscraper-header { text-align: center; margin-bottom: 2rem; }
+        .cityscraper-header h2 { margin-bottom: 0.5rem; color: #fff; }
+        .cityscraper-header .subtitle { color: rgba(255,255,255,0.8); }
+        .cityscraper-input-section {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .municipality-input, .table-mode-selector { flex: 1; min-width: 200px; }
+        .municipality-input label, .table-mode-selector label { color: #1E3A8A; font-weight: 600; margin-bottom: 8px; }
+        .municipality-input input, .table-mode-selector select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .action-buttons { display: flex; gap: 10px; }
+        .primary-btn {
+            background: linear-gradient(45deg, #5B7FCC, #1E3A8A);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4); }
+        .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .danger-btn {
+            background: linear-gradient(45deg, #dc2626, #991b1b);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .danger-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .feedback { font-size: 12px; color: #666; margin-top: 5px; }
+        .agent-activity-feed { margin-top: 1rem; }
+        .agent-feed {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 0.5rem;
+            background: white;
+        }
+        .agent-activity { display: flex; gap: 0.5rem; padding: 0.25rem; border-bottom: 1px solid #eee; font-size: 13px; }
+        .agent-activity.completed { color: green; }
+        .agent-activity.failed { color: red; }
+        .agent-id { font-family: monospace; font-weight: bold; min-width: 50px; color: #1E3A8A; }
+        .agent-name { color: #666; min-width: 100px; }
+        .agent-status { flex: 1; }
+        .debug-window { margin-top: 1rem; }
+        .debug-window summary { cursor: pointer; color: #fff; font-weight: 600; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 4px; }
+        .debug-content {
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.8rem;
+            background: #1a1a2e;
+            color: #0f0;
+            padding: 0.5rem;
+            border-radius: 0 0 4px 4px;
+        }
+        .progress-section {
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        .progress-section.hidden { display: none; }
+        .progress-container { margin-bottom: 15px; }
+        .progress-label { display: flex; justify-content: space-between; margin-bottom: 8px; color: #1E3A8A; font-weight: 600; }
+        .progress-bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(45deg, #5B7FCC, #1E3A8A); transition: width 0.3s; }
+        .results-section.hidden { display: none; }
+        .results-section {
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .results-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; padding-bottom: 0; }
+        .results-tab {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-weight: 600;
+            color: #6b7280;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+        .results-tab:hover { color: #1E3A8A; }
+        .results-tab.active { color: #1E3A8A; border-bottom-color: #1E3A8A; }
+        .results-content { display: none; }
+        .results-content.active { display: block; }
+        .analysis-actions { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        .analysis-actions button {
+            background: #f3f4f6;
+            border: 1px solid #ddd;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .analysis-actions button:hover { background: #e5e7eb; }
+        .export-buttons { margin-top: 1rem; display: flex; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid #eee; }
+        .export-buttons button {
+            background: linear-gradient(45deg, #5B7FCC, #1E3A8A);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .export-buttons button:hover { transform: translateY(-1px); }
     </style>
 </head>
 <body>
@@ -402,12 +563,18 @@
             <img src="/pics/navbar.png" alt="BidBrief">
             <span class="app-title">BidBrief - AI Document Analysis</span>
         </div>
+        <div class="main-tabs">
+            <button class="main-tab-btn active" data-tab="analyzer" onclick="switchMainTab('analyzer')">Document Analysis</button>
+            <button class="main-tab-btn" data-tab="cityscraper" id="cityscraperTabBtn" onclick="switchMainTab('cityscraper')" style="display: none;">CityScraper</button>
+        </div>
         <div class="nav-buttons">
             <a href="#" class="nav-link" onclick="openAboutModal(); return false;">About</a>
             <a href="/auth/logout" class="nav-link logout-link">Logout</a>
         </div>
     </nav>
 
+    <!-- Main Tab: Document Analysis -->
+    <div id="analyzer-tab" class="main-tab-content active">
     <div class="container">
         <div class="header">
             <h1>BidBrief</h1>
@@ -599,6 +766,85 @@
             <div id="resultsContent"></div>
         </div>
     </div>
+    </div><!-- End analyzer-tab -->
+
+    <!-- Main Tab: CityScraper (Admin Only) -->
+    <div id="cityscraper-tab" class="main-tab-content" style="display: none;">
+        <div class="container">
+            <!-- Header -->
+            <div class="cityscraper-header">
+                <h2>CityScraper - Municipal Research</h2>
+                <p class="subtitle">AI-powered municipal infrastructure and bid research</p>
+            </div>
+
+            <!-- Input Section -->
+            <div class="cityscraper-input-section">
+                <div class="municipality-input">
+                    <label>Municipality</label>
+                    <input type="text" id="cs-municipality" placeholder="e.g., Springfield, IL">
+                    <div id="cs-normalization-feedback" class="feedback"></div>
+                </div>
+                <div class="table-mode-selector">
+                    <label>Research Mode</label>
+                    <select id="cs-table-mode">
+                        <option value="systems_info">Municipal Systems Information</option>
+                        <option value="public_bids">Municipal Public Bids</option>
+                        <option value="both">Both Tables</option>
+                    </select>
+                </div>
+                <div class="action-buttons">
+                    <button id="cs-start-research" class="primary-btn">Start Research</button>
+                    <button id="cs-stop-research" class="danger-btn" disabled>Stop</button>
+                </div>
+            </div>
+
+            <!-- Progress Section -->
+            <div id="cs-progress-section" class="progress-section hidden">
+                <div class="progress-container">
+                    <div class="progress-label">
+                        <span id="cs-progress-phase">Initializing...</span>
+                        <span id="cs-progress-percent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div id="cs-progress-fill" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="agent-activity-feed">
+                    <h4 style="color: #1E3A8A; margin-bottom: 10px;">Agent Activity</h4>
+                    <div id="cs-agent-feed" class="agent-feed"></div>
+                </div>
+                <details class="debug-window">
+                    <summary>Debug Log</summary>
+                    <div id="cs-debug-log" class="debug-content"></div>
+                </details>
+            </div>
+
+            <!-- Results Section -->
+            <div id="cs-results-section" class="results-section hidden">
+                <div class="results-tabs">
+                    <button class="results-tab active" data-results="table" onclick="switchCSResultsTab('table')">Data Table</button>
+                    <button class="results-tab" data-results="sources" onclick="switchCSResultsTab('sources')">Sources</button>
+                    <button class="results-tab" data-results="analysis" onclick="switchCSResultsTab('analysis')">Analysis</button>
+                    <button class="results-tab" data-results="downloads" onclick="switchCSResultsTab('downloads')">Downloads</button>
+                </div>
+                <div id="cs-results-table" class="results-content active"></div>
+                <div id="cs-results-sources" class="results-content"></div>
+                <div id="cs-results-analysis" class="results-content">
+                    <div class="analysis-actions">
+                        <button id="cs-gen-summary">Generate Summary</button>
+                        <button id="cs-gen-brainstorm">Brainstorm Opportunities</button>
+                        <button id="cs-gen-research">Deep Research</button>
+                    </div>
+                    <div id="cs-analysis-output"></div>
+                </div>
+                <div id="cs-results-downloads" class="results-content"></div>
+                <div class="export-buttons">
+                    <button id="cs-export-excel">Export Excel</button>
+                    <button id="cs-export-markdown">Export Markdown</button>
+                </div>
+            </div>
+        </div>
+    </div><!-- End cityscraper-tab -->
 
     <script>
 // ============================================================================
@@ -1708,12 +1954,22 @@ async function checkAdminStatus() {
             document.getElementById('advancedOptionsSection').style.display = 'block';
             // Show BestPrep mode option for admins
             document.getElementById('modeLabel_bestprep').style.display = 'flex';
-            Logger.info('🔐 Admin access granted - Advanced Options & BestPrep available');
+            // Show CityScraper tab for admins
+            const cityscraperTabBtn = document.getElementById('cityscraperTabBtn');
+            if (cityscraperTabBtn) {
+                cityscraperTabBtn.style.display = 'inline-block';
+            }
+            Logger.info('🔐 Admin access granted - Advanced Options, BestPrep & CityScraper available');
         } else {
             isUserAdmin = false;
             // Keep hidden for non-admins
             document.getElementById('advancedOptionsSection').style.display = 'none';
             document.getElementById('modeLabel_bestprep').style.display = 'none';
+            // Hide CityScraper tab for non-admins
+            const cityscraperTabBtn = document.getElementById('cityscraperTabBtn');
+            if (cityscraperTabBtn) {
+                cityscraperTabBtn.style.display = 'none';
+            }
         }
     } catch (error) {
         console.error('Failed to check admin status:', error);
@@ -3678,6 +3934,338 @@ function renderFullViewRagTab() {
 
     document.getElementById('fv-ragContent').innerHTML = html;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN TAB SWITCHING
+// ═══════════════════════════════════════════════════════════════════════════
+
+function switchMainTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.main-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.tab === tabName) {
+            btn.classList.add('active');
+        }
+    });
+
+    // Update tab content
+    document.querySelectorAll('.main-tab-content').forEach(content => {
+        content.classList.remove('active');
+        content.style.display = 'none';
+    });
+
+    const targetTab = document.getElementById(tabName + '-tab');
+    if (targetTab) {
+        targetTab.classList.add('active');
+        targetTab.style.display = 'block';
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CITYSCRAPER EVENT HANDLING
+// ═══════════════════════════════════════════════════════════════════════════
+
+let csSessionId = null;
+let csPollingInterval = null;
+let csEventIndex = 0;
+
+async function startCityScraperResearch() {
+    const municipality = document.getElementById('cs-municipality').value;
+    const tableMode = document.getElementById('cs-table-mode').value;
+
+    if (!municipality) {
+        alert('Please enter a municipality');
+        return;
+    }
+
+    // Reset state
+    csEventIndex = 0;
+    document.getElementById('cs-progress-section').classList.remove('hidden');
+    document.getElementById('cs-results-section').classList.add('hidden');
+    document.getElementById('cs-agent-feed').innerHTML = '';
+    document.getElementById('cs-debug-log').innerHTML = '';
+    document.getElementById('cs-start-research').disabled = true;
+    document.getElementById('cs-stop-research').disabled = false;
+    document.getElementById('cs-progress-phase').textContent = 'Initializing...';
+    document.getElementById('cs-progress-percent').textContent = '0%';
+    document.getElementById('cs-progress-fill').style.width = '0%';
+
+    try {
+        const response = await fetch('/api/scraper/research', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')
+            },
+            body: JSON.stringify({municipality, table_mode: tableMode})
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to start research');
+        }
+
+        csSessionId = data.session_id;
+        addCSDebugLog('Session started: ' + csSessionId);
+        csPollingInterval = setInterval(pollCityScraperEvents, 1000);
+    } catch (error) {
+        alert('Error starting research: ' + error.message);
+        document.getElementById('cs-start-research').disabled = false;
+        document.getElementById('cs-stop-research').disabled = true;
+    }
+}
+
+async function pollCityScraperEvents() {
+    if (!csSessionId) return;
+
+    try {
+        const response = await fetch(`/api/scraper/events/${csSessionId}?since=${csEventIndex}`, {
+            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+        });
+        const data = await response.json();
+
+        // Update event index
+        csEventIndex = data.total_events || csEventIndex;
+
+        // Update agent feed
+        updateCSAgentFeed(data.events || []);
+
+        // Update progress if available
+        if (data.progress) {
+            updateCSProgress(data.progress);
+        }
+
+        // Check if complete
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+            clearInterval(csPollingInterval);
+            document.getElementById('cs-start-research').disabled = false;
+            document.getElementById('cs-stop-research').disabled = true;
+            if (data.status === 'completed') {
+                document.getElementById('cs-progress-phase').textContent = 'Complete!';
+                document.getElementById('cs-progress-percent').textContent = '100%';
+                document.getElementById('cs-progress-fill').style.width = '100%';
+                loadCityScraperResults();
+            } else if (data.status === 'failed') {
+                document.getElementById('cs-progress-phase').textContent = 'Failed';
+                addCSDebugLog('Research failed: ' + (data.error || 'Unknown error'));
+            } else if (data.status === 'cancelled') {
+                document.getElementById('cs-progress-phase').textContent = 'Cancelled';
+            }
+        }
+    } catch (error) {
+        console.error('Polling error:', error);
+        addCSDebugLog('Polling error: ' + error.message);
+    }
+}
+
+function updateCSAgentFeed(events) {
+    const feed = document.getElementById('cs-agent-feed');
+    events.forEach(event => {
+        const div = document.createElement('div');
+        div.className = 'agent-activity ' + (event.status || 'processing');
+        div.innerHTML = `
+            <span class="agent-id">${event.agent_id || 'SYS'}</span>
+            <span class="agent-name">${event.agent_name || ''}</span>
+            <span class="agent-status">${event.message || ''}</span>
+        `;
+        feed.appendChild(div);
+        feed.scrollTop = feed.scrollHeight;
+
+        // Also add to debug log
+        addCSDebugLog(`[${event.agent_id || 'SYS'}] ${event.message || ''}`);
+    });
+}
+
+function updateCSProgress(progress) {
+    if (progress.phase) {
+        document.getElementById('cs-progress-phase').textContent = progress.phase;
+    }
+    if (progress.percent !== undefined) {
+        document.getElementById('cs-progress-percent').textContent = progress.percent + '%';
+        document.getElementById('cs-progress-fill').style.width = progress.percent + '%';
+    }
+}
+
+function addCSDebugLog(message) {
+    const log = document.getElementById('cs-debug-log');
+    const timestamp = new Date().toLocaleTimeString();
+    log.innerHTML += `[${timestamp}] ${message}\n`;
+    log.scrollTop = log.scrollHeight;
+}
+
+async function loadCityScraperResults() {
+    try {
+        const response = await fetch(`/api/scraper/research/${csSessionId}`, {
+            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+        });
+        const data = await response.json();
+
+        if (data.success && data.result) {
+            displayCityScraperResults(data.result);
+        }
+    } catch (error) {
+        console.error('Error loading results:', error);
+        addCSDebugLog('Error loading results: ' + error.message);
+    }
+}
+
+function displayCityScraperResults(result) {
+    document.getElementById('cs-progress-section').classList.add('hidden');
+    document.getElementById('cs-results-section').classList.remove('hidden');
+
+    // Display table data
+    const tableDiv = document.getElementById('cs-results-table');
+    if (result.presentation_result && result.presentation_result.markdown_tables) {
+        tableDiv.innerHTML = '<pre style="white-space: pre-wrap; font-family: monospace; background: #f5f5f5; padding: 15px; border-radius: 8px; overflow-x: auto;">' +
+            escapeHtml(result.presentation_result.markdown_tables) + '</pre>';
+    } else if (result.tables) {
+        // Render tables directly
+        let html = '';
+        for (const [tableName, tableData] of Object.entries(result.tables)) {
+            html += `<h4 style="color: #1E3A8A; margin: 15px 0 10px;">${tableName}</h4>`;
+            html += '<div style="overflow-x: auto;"><table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
+            if (tableData.headers) {
+                html += '<thead><tr>';
+                tableData.headers.forEach(h => {
+                    html += `<th style="padding: 10px; text-align: left; background: #f5f5f5; border: 1px solid #ddd;">${escapeHtml(h)}</th>`;
+                });
+                html += '</tr></thead>';
+            }
+            if (tableData.rows) {
+                html += '<tbody>';
+                tableData.rows.forEach((row, idx) => {
+                    html += `<tr style="${idx % 2 === 1 ? 'background: #fafafa;' : ''}">`;
+                    row.forEach(cell => {
+                        html += `<td style="padding: 10px; border: 1px solid #ddd;">${escapeHtml(String(cell || ''))}</td>`;
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody>';
+            }
+            html += '</table></div>';
+        }
+        tableDiv.innerHTML = html || '<p>No table data available.</p>';
+    } else {
+        tableDiv.innerHTML = '<p>No table data available.</p>';
+    }
+
+    // Display sources
+    const sourcesDiv = document.getElementById('cs-results-sources');
+    if (result.sources && result.sources.length > 0) {
+        let sourcesHtml = '<ul style="list-style: none; padding: 0;">';
+        result.sources.forEach(source => {
+            sourcesHtml += `<li style="padding: 10px; border-bottom: 1px solid #eee;">
+                <a href="${escapeHtml(source.url || '#')}" target="_blank" style="color: #1E3A8A; text-decoration: none;">
+                    ${escapeHtml(source.title || source.url || 'Unknown source')}
+                </a>
+                ${source.snippet ? `<p style="color: #666; font-size: 12px; margin: 5px 0 0;">${escapeHtml(source.snippet)}</p>` : ''}
+            </li>`;
+        });
+        sourcesHtml += '</ul>';
+        sourcesDiv.innerHTML = sourcesHtml;
+    } else {
+        sourcesDiv.innerHTML = '<p>No sources available.</p>';
+    }
+
+    // Display downloads
+    const downloadsDiv = document.getElementById('cs-results-downloads');
+    if (result.exports) {
+        let downloadsHtml = '<div style="display: flex; gap: 10px; flex-wrap: wrap;">';
+        if (result.exports.excel) {
+            downloadsHtml += `<a href="${result.exports.excel}" download class="primary-btn" style="text-decoration: none;">Download Excel</a>`;
+        }
+        if (result.exports.markdown) {
+            downloadsHtml += `<a href="${result.exports.markdown}" download class="primary-btn" style="text-decoration: none; background: linear-gradient(45deg, #666, #333);">Download Markdown</a>`;
+        }
+        downloadsHtml += '</div>';
+        downloadsDiv.innerHTML = downloadsHtml;
+    } else {
+        downloadsDiv.innerHTML = '<p>No downloads available yet. Use the export buttons below.</p>';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function stopCityScraperResearch() {
+    if (!csSessionId) return;
+
+    try {
+        await fetch(`/api/scraper/stop/${csSessionId}`, {
+            method: 'POST',
+            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+        });
+        addCSDebugLog('Stop request sent');
+    } catch (error) {
+        console.error('Stop error:', error);
+        addCSDebugLog('Stop error: ' + error.message);
+    }
+}
+
+function switchCSResultsTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('#cs-results-section .results-tab').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.results === tabName) {
+            btn.classList.add('active');
+        }
+    });
+
+    // Update tab content
+    document.querySelectorAll('#cs-results-section .results-content').forEach(content => {
+        content.classList.remove('active');
+    });
+
+    const targetContent = document.getElementById('cs-results-' + tabName);
+    if (targetContent) {
+        targetContent.classList.add('active');
+    }
+}
+
+async function exportCityScraperResults(format) {
+    if (!csSessionId) {
+        alert('No research session to export');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/scraper/export/${csSessionId}?format=${format}`, {
+            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+        });
+
+        if (!response.ok) {
+            throw new Error('Export failed');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cityscraper_${csSessionId}.${format === 'excel' ? 'xlsx' : 'md'}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        alert('Export error: ' + error.message);
+    }
+}
+
+// CityScraper event listeners initialization
+document.addEventListener('DOMContentLoaded', function() {
+    const startBtn = document.getElementById('cs-start-research');
+    const stopBtn = document.getElementById('cs-stop-research');
+    const exportExcelBtn = document.getElementById('cs-export-excel');
+    const exportMdBtn = document.getElementById('cs-export-markdown');
+
+    if (startBtn) startBtn.addEventListener('click', startCityScraperResearch);
+    if (stopBtn) stopBtn.addEventListener('click', stopCityScraperResearch);
+    if (exportExcelBtn) exportExcelBtn.addEventListener('click', () => exportCityScraperResults('excel'));
+    if (exportMdBtn) exportMdBtn.addEventListener('click', () => exportCityScraperResults('markdown'));
+});
 
     </script>
 
