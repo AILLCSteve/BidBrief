@@ -90,6 +90,15 @@ class BrainstormerAgent(BaseAgent):
     MIN_DATA_BACKING_ITEMS = 2
     MIN_NEXT_STEPS_ITEMS = 2
 
+    # Display labels for approaches (UI-friendly names)
+    APPROACH_LABELS = {
+        "direct_need": "Direct Need",
+        "gap_exploitation": "Gap Exploitation",
+        "timing_play": "Timing Play",
+        "relationship_build": "Relationship Building",
+        "lateral_thinking": "Lateral Thinking"
+    }
+
     def get_system_prompt(self) -> str:
         """Get base system prompt (without input substitution)."""
         return get_prompt(
@@ -157,6 +166,10 @@ class BrainstormerAgent(BaseAgent):
         Returns:
             Formatted string for prompt
         """
+        # Type validation - ensure extraction_result is dict
+        if not isinstance(extraction_result, dict):
+            return "Invalid extraction data type."
+
         if not extraction_result:
             return "No extraction data provided."
 
@@ -676,22 +689,14 @@ Return the complete JSON output as specified in your instructions."""
         """
         opportunities = output.get('opportunities', [])
 
-        # Format opportunities for display with approach labels
-        approach_labels = {
-            'direct_need': 'Direct Need',
-            'gap_exploitation': 'Gap Exploitation',
-            'timing_play': 'Timing Play',
-            'relationship_build': 'Relationship Build',
-            'lateral_thinking': 'Lateral Thinking'
-        }
-
+        # Format opportunities for display with approach labels (using class constant)
         formatted_opportunities = []
         for opp in opportunities:
             approach = opp.get('approach', 'unknown')
             formatted_opportunities.append({
                 'title': opp.get('title', ''),
                 'approach': approach,
-                'approach_label': approach_labels.get(approach, approach.replace('_', ' ').title()),
+                'approach_label': self.APPROACH_LABELS.get(approach, approach.replace('_', ' ').title()),
                 'description': opp.get('description', ''),
                 'data_backing': opp.get('data_backing', []),
                 'plausibility': opp.get('plausibility', 'UNKNOWN'),
