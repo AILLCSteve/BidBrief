@@ -5,6 +5,9 @@ Each prompt module contains:
 - SYSTEM_PROMPT: The detailed expert prompt
 - get_prompt(): Function to get prompt with substitutions
 - PROMPT DEVELOPMENT HISTORY: Documentation of critique cycles
+
+Note: EX-6 (Document Downloader) does not use LLM prompts.
+Its configuration file (ex6_download.py) provides download settings.
 """
 
 # Pre-flight prompts
@@ -21,7 +24,11 @@ from .ex3_maintenance import get_prompt as get_ex3_prompt
 from .ex4_incident import get_prompt as get_ex4_prompt
 from .ex5_bid import get_prompt as get_ex5_prompt
 
+# Extraction configuration (no LLM prompt)
+from .ex6_download import get_config as get_ex6_config
+
 __all__ = [
     'get_pf1_prompt', 'get_pf2_prompt', 'get_pf3_prompt', 'get_pf4_prompt', 'get_pf5_prompt',
-    'get_ex1_prompt', 'get_ex2_prompt', 'get_ex3_prompt', 'get_ex4_prompt', 'get_ex5_prompt'
+    'get_ex1_prompt', 'get_ex2_prompt', 'get_ex3_prompt', 'get_ex4_prompt', 'get_ex5_prompt',
+    'get_ex6_config'
 ]
