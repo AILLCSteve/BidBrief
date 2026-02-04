@@ -2763,12 +2763,13 @@ def get_scraper_events(session_id):
             return jsonify({'error': 'Session not found'}), 404
 
         events = cityscraper_events[session_id][since_index:]
+        total_events = len(cityscraper_events[session_id])
         status = cityscraper_sessions.get(session_id, {}).get('status', 'unknown')
 
     return jsonify({
         'success': True,
         'events': events,
-        'total_events': len(cityscraper_events.get(session_id, [])),
+        'total_events': total_events,
         'status': status
     })
 
