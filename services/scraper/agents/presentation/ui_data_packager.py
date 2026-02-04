@@ -516,8 +516,16 @@ require LLM assistance. If invoked, help with formatting decisions."""
                 elif isinstance(citation, dict):
                     source_url = citation.get('source_url', '')
 
-                if source_url in sources_map:
+                if source_url and source_url in sources_map:
                     sources_map[source_url]['citations_count'] += 1
+                elif source_url:
+                    # Citation references a source not in our map - add it
+                    sources_map[source_url] = {
+                        'url': source_url,
+                        'title': 'Untitled',
+                        'type': 'Unknown',
+                        'citations_count': 1,
+                    }
 
         # Collect from public bid rows
         for row in result.public_bid_rows:
@@ -536,8 +544,16 @@ require LLM assistance. If invoked, help with formatting decisions."""
                 elif isinstance(citation, dict):
                     source_url = citation.get('source_url', '')
 
-                if source_url in sources_map:
+                if source_url and source_url in sources_map:
                     sources_map[source_url]['citations_count'] += 1
+                elif source_url:
+                    # Citation references a source not in our map - add it
+                    sources_map[source_url] = {
+                        'url': source_url,
+                        'title': 'Untitled',
+                        'type': 'Unknown',
+                        'citations_count': 1,
+                    }
 
         return list(sources_map.values())
 
@@ -594,6 +610,8 @@ require LLM assistance. If invoked, help with formatting decisions."""
 
         # From public bid rows downloadable documents
         for row in result.public_bid_rows:
+            if not hasattr(row, 'downloadable_documents') or not row.downloadable_documents:
+                continue
             for doc in row.downloadable_documents:
                 if isinstance(doc, dict):
                     status = doc.get('status', 'available')
@@ -763,11 +781,8 @@ require LLM assistance. If invoked, help with formatting decisions."""
                 'downloads': downloads,
                 'agent_activity': agent_activity,
                 'export_urls': export_urls,
-                'data_gaps': extraction_result.data_gaps,
-                'warnings': [
-                    f"Conflict detected: {c.get('field', 'unknown')}"
-                    for c in extraction_result.conflicts_detected
-                ] if extraction_result.conflicts_detected else [],
+                'data_gaps': self._serialize_data_gaps(extraction_result.data_gaps),
+                'warnings': self._serialize_conflicts(extraction_result.conflicts_detected),
             }
 
             # Include raw data if requested
@@ -886,6 +901,66 @@ require LLM assistance. If invoked, help with formatting decisions."""
             'started_at': self._format_datetime(result.started_at),
             'completed_at': self._format_datetime(result.completed_at),
         }
+
+    def _serialize_data_gaps(self, data_gaps: Optional[List[Any]]) -> List[str]:
+        """Safely serialize data_gaps to JSON-compatible list of strings.
+
+        Args:
+            data_gaps: List of data gaps which may contain various types
+
+        Returns:
+            List of string representations safe for JSON serialization
+        """
+        if not data_gaps:
+            return []
+
+        result = []
+        for gap in data_gaps:
+            if gap is None:
+                continue
+            elif isinstance(gap, str):
+                result.append(gap)
+            elif isinstance(gap, dict):
+                # Convert dict to readable string
+                field = gap.get('field', 'unknown')
+                reason = gap.get('reason', gap.get('message', 'Not found'))
+                result.append(f"{field}: {reason}")
+            else:
+                # Fallback: convert to string
+                try:
+                    result.append(str(gap))
+                except (ValueError, TypeError):
+                    result.append("Unknown data gap")
+        return result
+
+    def _serialize_conflicts(self, conflicts: Optional[List[Any]]) -> List[str]:
+        """Safely serialize conflicts to JSON-compatible list of warning strings.
+
+        Args:
+            conflicts: List of conflict dictionaries or objects
+
+        Returns:
+            List of warning strings safe for JSON serialization
+        """
+        if not conflicts:
+            return []
+
+        result = []
+        for conflict in conflicts:
+            if conflict is None:
+                continue
+            elif isinstance(conflict, str):
+                result.append(f"Conflict detected: {conflict}")
+            elif isinstance(conflict, dict):
+                field = conflict.get('field', 'unknown')
+                result.append(f"Conflict detected: {field}")
+            else:
+                # Fallback: convert to string
+                try:
+                    result.append(f"Conflict detected: {str(conflict)}")
+                except (ValueError, TypeError):
+                    result.append("Conflict detected: Unknown")
+        return result
 
     def validate_output(self, output: Dict[str, Any]) -> List[str]:
         """Validate UI packager output."""
