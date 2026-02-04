@@ -4113,52 +4113,74 @@ function displayCityScraperResults(result) {
     document.getElementById('cs-progress-section').classList.add('hidden');
     document.getElementById('cs-results-section').classList.remove('hidden');
 
+    // Get presentation data from result
+    const presentation = result.presentation_result || {};
+    const dataTable = presentation.data_table || {};
+    const sources = presentation.sources || [];
+    const exportUrls = presentation.export_urls || {};
+
     // Display table data
     const tableDiv = document.getElementById('cs-results-table');
-    if (result.presentation_result && result.presentation_result.markdown_tables) {
-        tableDiv.innerHTML = '<pre style="white-space: pre-wrap; font-family: monospace; background: #f5f5f5; padding: 15px; border-radius: 8px; overflow-x: auto;">' +
-            escapeHtml(result.presentation_result.markdown_tables) + '</pre>';
-    } else if (result.tables) {
-        // Render tables directly
-        let html = '';
-        for (const [tableName, tableData] of Object.entries(result.tables)) {
-            html += `<h4 style="color: #1E3A8A; margin: 15px 0 10px;">${tableName}</h4>`;
-            html += '<div style="overflow-x: auto;"><table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
-            if (tableData.headers) {
-                html += '<thead><tr>';
-                tableData.headers.forEach(h => {
-                    html += `<th style="padding: 10px; text-align: left; background: #f5f5f5; border: 1px solid #ddd;">${escapeHtml(h)}</th>`;
+    if (dataTable.headers && dataTable.rows && dataTable.rows.length > 0) {
+        let html = '<div style="overflow-x: auto;">';
+        html += '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
+
+        // Render headers
+        html += '<thead><tr>';
+        dataTable.headers.forEach(h => {
+            html += `<th style="padding: 10px; text-align: left; background: #f5f5f5; border: 1px solid #ddd; white-space: nowrap;">${escapeHtml(h)}</th>`;
+        });
+        html += '</tr></thead>';
+
+        // Render rows with confidence colors
+        html += '<tbody>';
+        dataTable.rows.forEach((row, idx) => {
+            html += `<tr style="${idx % 2 === 1 ? 'background: #fafafa;' : ''}">`;
+            if (row.cells && Array.isArray(row.cells)) {
+                row.cells.forEach(cell => {
+                    const value = cell.value || cell || '';
+                    const bgColor = cell.confidence_color ? `background-color: ${cell.confidence_color}15;` : '';
+                    const borderColor = cell.confidence_color ? `border-left: 3px solid ${cell.confidence_color};` : '';
+                    html += `<td style="padding: 10px; border: 1px solid #ddd; ${bgColor} ${borderColor}">${escapeHtml(String(value))}</td>`;
                 });
-                html += '</tr></thead>';
-            }
-            if (tableData.rows) {
-                html += '<tbody>';
-                tableData.rows.forEach((row, idx) => {
-                    html += `<tr style="${idx % 2 === 1 ? 'background: #fafafa;' : ''}">`;
-                    row.forEach(cell => {
-                        html += `<td style="padding: 10px; border: 1px solid #ddd;">${escapeHtml(String(cell || ''))}</td>`;
-                    });
-                    html += '</tr>';
+            } else if (Array.isArray(row)) {
+                row.forEach(cell => {
+                    html += `<td style="padding: 10px; border: 1px solid #ddd;">${escapeHtml(String(cell || ''))}</td>`;
                 });
-                html += '</tbody>';
             }
-            html += '</table></div>';
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+
+        // Add summary if available
+        if (presentation.summary) {
+            const s = presentation.summary;
+            html += `<div style="margin-top: 15px; padding: 10px; background: #f9f9f9; border-radius: 8px; font-size: 13px;">
+                <strong>Summary:</strong> ${s.total_data_points || 0} data points extracted
+                (<span style="color: #2e7d32;">${s.high_confidence_count || 0} high</span>,
+                <span style="color: #ed6c02;">${s.medium_confidence_count || 0} medium</span>,
+                <span style="color: #d32f2f;">${s.low_confidence_count || 0} low</span>,
+                <span style="color: #666;">${s.not_found_count || 0} not found</span>)
+                from ${s.sources_count || 0} sources
+            </div>`;
         }
-        tableDiv.innerHTML = html || '<p>No table data available.</p>';
+
+        tableDiv.innerHTML = html;
     } else {
         tableDiv.innerHTML = '<p>No table data available.</p>';
     }
 
     // Display sources
     const sourcesDiv = document.getElementById('cs-results-sources');
-    if (result.sources && result.sources.length > 0) {
+    if (sources.length > 0) {
         let sourcesHtml = '<ul style="list-style: none; padding: 0;">';
-        result.sources.forEach(source => {
+        sources.forEach(source => {
+            const citationsText = source.citations_count > 0 ? ` (${source.citations_count} citations)` : '';
             sourcesHtml += `<li style="padding: 10px; border-bottom: 1px solid #eee;">
                 <a href="${escapeHtml(source.url || '#')}" target="_blank" style="color: #1E3A8A; text-decoration: none;">
                     ${escapeHtml(source.title || source.url || 'Unknown source')}
                 </a>
-                ${source.snippet ? `<p style="color: #666; font-size: 12px; margin: 5px 0 0;">${escapeHtml(source.snippet)}</p>` : ''}
+                <span style="color: #888; font-size: 12px;"> [${escapeHtml(source.type || 'Unknown')}]${citationsText}</span>
             </li>`;
         });
         sourcesHtml += '</ul>';
@@ -4167,20 +4189,42 @@ function displayCityScraperResults(result) {
         sourcesDiv.innerHTML = '<p>No sources available.</p>';
     }
 
-    // Display downloads
+    // Display downloads/exports
     const downloadsDiv = document.getElementById('cs-results-downloads');
-    if (result.exports) {
+    if (exportUrls.excel || exportUrls.markdown) {
         let downloadsHtml = '<div style="display: flex; gap: 10px; flex-wrap: wrap;">';
-        if (result.exports.excel) {
-            downloadsHtml += `<a href="${result.exports.excel}" download class="primary-btn" style="text-decoration: none;">Download Excel</a>`;
+        if (exportUrls.excel) {
+            downloadsHtml += `<a href="${exportUrls.excel}" download class="primary-btn" style="text-decoration: none;">Download Excel</a>`;
         }
-        if (result.exports.markdown) {
-            downloadsHtml += `<a href="${result.exports.markdown}" download class="primary-btn" style="text-decoration: none; background: linear-gradient(45deg, #666, #333);">Download Markdown</a>`;
+        if (exportUrls.markdown) {
+            downloadsHtml += `<a href="${exportUrls.markdown}" download class="primary-btn" style="text-decoration: none; background: linear-gradient(45deg, #666, #333);">Download Markdown</a>`;
         }
         downloadsHtml += '</div>';
         downloadsDiv.innerHTML = downloadsHtml;
     } else {
         downloadsDiv.innerHTML = '<p>No downloads available yet. Use the export buttons below.</p>';
+    }
+
+    // Display warnings if any
+    if (presentation.warnings && presentation.warnings.length > 0) {
+        const warningsHtml = `<div style="margin-top: 15px; padding: 10px; background: #fff3e0; border-left: 3px solid #ed6c02; border-radius: 4px;">
+            <strong style="color: #ed6c02;">Warnings:</strong>
+            <ul style="margin: 5px 0 0 20px; padding: 0;">
+                ${presentation.warnings.map(w => `<li style="color: #666; font-size: 13px;">${escapeHtml(w)}</li>`).join('')}
+            </ul>
+        </div>`;
+        tableDiv.innerHTML += warningsHtml;
+    }
+
+    // Display data gaps if any
+    if (presentation.data_gaps && presentation.data_gaps.length > 0) {
+        const gapsHtml = `<div style="margin-top: 10px; padding: 10px; background: #fce4ec; border-left: 3px solid #d32f2f; border-radius: 4px;">
+            <strong style="color: #d32f2f;">Data Gaps:</strong>
+            <ul style="margin: 5px 0 0 20px; padding: 0;">
+                ${presentation.data_gaps.map(g => `<li style="color: #666; font-size: 13px;">${escapeHtml(g)}</li>`).join('')}
+            </ul>
+        </div>`;
+        tableDiv.innerHTML += gapsHtml;
     }
 }
 
