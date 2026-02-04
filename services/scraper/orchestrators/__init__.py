@@ -5,6 +5,7 @@ from .extraction import ExtractionOrchestrator
 from .document_enrichment import DocumentEnrichmentOrchestrator
 from .standalone_research import StandaloneResearchOrchestrator
 from .comparative_intelligence import ComparativeIntelligenceOrchestrator
+from .bid_download import BidDownloadOrchestrator
 
 __all__ = [
     'PreflightOrchestrator',
@@ -12,6 +13,7 @@ __all__ = [
     'DocumentEnrichmentOrchestrator',
     'StandaloneResearchOrchestrator',
     'ComparativeIntelligenceOrchestrator',
+    'BidDownloadOrchestrator',
     'PipelineStage',
     'PipelineResult'
 ]
