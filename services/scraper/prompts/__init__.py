@@ -16,8 +16,9 @@ from .pf5_readiness_validator import get_prompt as get_pf5_prompt
 
 # Extraction prompts
 from .ex1_infrastructure import get_prompt as get_ex1_prompt
+from .ex2_equipment import get_prompt as get_ex2_prompt
 
 __all__ = [
     'get_pf1_prompt', 'get_pf2_prompt', 'get_pf3_prompt', 'get_pf4_prompt', 'get_pf5_prompt',
-    'get_ex1_prompt'
+    'get_ex1_prompt', 'get_ex2_prompt'
 ]

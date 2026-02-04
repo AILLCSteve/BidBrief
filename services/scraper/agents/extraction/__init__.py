@@ -6,5 +6,6 @@ discovered during the pre-flight phase.
 """
 
 from .infrastructure_extractor import InfrastructureExtractorAgent
+from .equipment_extractor import EquipmentExtractorAgent
 
-__all__ = ['InfrastructureExtractorAgent']
+__all__ = ['InfrastructureExtractorAgent', 'EquipmentExtractorAgent']
