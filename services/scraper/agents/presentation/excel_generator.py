@@ -264,7 +264,8 @@ require LLM assistance. If invoked, help with formatting decisions."""
                         lines = cell_text.split('\n')
                         for line in lines:
                             max_length = max(max_length, len(line))
-                except:
+                except (AttributeError, TypeError, ValueError):
+                    # Skip cells that can't be processed for width calculation
                     pass
 
             # Apply width with limits
