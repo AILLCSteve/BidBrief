@@ -42,6 +42,28 @@ from services.hotdog import HotdogOrchestrator
 # This prevents app crash if openpyxl isn't installed
 import asyncio
 
+# CityScraper imports (lazy loaded to prevent startup failures if modules not installed)
+# These will be imported when endpoints are called
+CITYSCRAPER_AVAILABLE = False
+try:
+    from services.scraper.orchestrators import (
+        StandaloneResearchOrchestrator,
+        DocumentEnrichmentOrchestrator,
+        ComparativeIntelligenceOrchestrator,
+        BidDownloadOrchestrator
+    )
+    from services.scraper.agents.analysis import (
+        SummaryGeneratorAgent,
+        BrainstormerAgent,
+        DeepResearcherAgent,
+        BidAnalyzerAgent
+    )
+    from services.scraper.models import AgentRequest
+    CITYSCRAPER_AVAILABLE = True
+except ImportError as e:
+    # CityScraper modules not installed - endpoints will return 503
+    pass
+
 # Configure logging
 logging.basicConfig(
     level=os.getenv('LOG_LEVEL', 'INFO'),
@@ -87,6 +109,11 @@ active_analyses = {}  # session_id -> {'orchestrator': HotdogOrchestrator, 'conf
 completed_analyses = {}  # session_id -> {'orchestrator': ..., 'result': ..., 'config_path': ..., 'completed_at': datetime, 'status': 'completed'}
 partial_analyses = {}  # session_id -> {'orchestrator': ..., 'config_path': ..., 'stopped_at': datetime, 'status': 'stopped'}
 session_timestamps = {}  # session_id -> last_access_time (for cleanup)
+
+# CityScraper session management
+cityscraper_sessions = {}  # session_id -> {'orchestrator': ..., 'status': 'running'|'completed'|'cancelled'}
+cityscraper_events = {}  # session_id -> [AgentActivityEvent list]
+cityscraper_results = {}  # session_id -> result dict
 
 logger.info(f"📊 Session dicts initialized: module_id={MODULE_LOAD_ID}, pid={os.getpid()}")
 
@@ -2524,6 +2551,760 @@ try:
 except ImportError as e:
     logger.warning(f"Visual Project Summary not available: {e}")
     dash_app = None
+
+
+# ===============================================================================
+# CITYSCRAPER API ENDPOINTS (ADMIN-ONLY)
+# ===============================================================================
+
+def _check_scraper_admin():
+    """
+    Check if current request has admin access for CityScraper endpoints.
+    Returns (user_data, None) on success, or (None, error_response) on failure.
+    """
+    auth_header = request.headers.get('Authorization', '')
+
+    # Try Bearer token first (API calls)
+    if auth_header.startswith('Bearer '):
+        session_token = auth_header.split(' ')[1]
+        if session_token not in active_sessions:
+            return None, (jsonify({'error': 'Invalid session'}), 401)
+        user_data = active_sessions[session_token]
+        if user_data.get('role') != 'admin':
+            return None, (jsonify({'error': 'Admin access required'}), 403)
+        return user_data, None
+
+    # Try cookie auth (browser requests)
+    session = check_auth_cookie()
+    if not session:
+        return None, (jsonify({'error': 'Authentication required'}), 401)
+    if session.get('role') != 'admin':
+        return None, (jsonify({'error': 'Admin access required'}), 403)
+    return session, None
+
+
+def _check_scraper_available():
+    """Check if CityScraper modules are available."""
+    if not CITYSCRAPER_AVAILABLE:
+        return jsonify({
+            'error': 'CityScraper not available',
+            'details': 'Required modules not installed'
+        }), 503
+    return None
+
+
+@app.route('/api/scraper/admin-check', methods=['GET'])
+def scraper_admin_check():
+    """Check if current user has admin access for CityScraper features."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        # Return false instead of error for permission check
+        return jsonify({
+            'success': True,
+            'is_admin': False,
+            'scraper_available': CITYSCRAPER_AVAILABLE
+        })
+
+    return jsonify({
+        'success': True,
+        'is_admin': True,
+        'username': user_data.get('username', 'unknown'),
+        'scraper_available': CITYSCRAPER_AVAILABLE
+    })
+
+
+# ---------------------------------------------------------------------------
+# STANDALONE RESEARCH ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.route('/api/scraper/research', methods=['POST'])
+def start_scraper_research():
+    """
+    Start a standalone municipal research session.
+
+    Request body:
+    {
+        "municipality": "City of Example",
+        "table_mode": true/false  (optional, default false)
+    }
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    try:
+        data = request.get_json() or {}
+        municipality = data.get('municipality', '').strip()
+        table_mode = data.get('table_mode', False)
+
+        if not municipality:
+            return jsonify({'error': 'Municipality name is required'}), 400
+
+        # Generate session ID
+        session_id = f"scraper_{secrets.token_hex(8)}"
+
+        logger.info(f"Starting CityScraper research: {session_id} for '{municipality}'")
+
+        # Initialize session state
+        with session_lock:
+            cityscraper_sessions[session_id] = {
+                'orchestrator': None,
+                'status': 'initializing',
+                'municipality': municipality,
+                'table_mode': table_mode,
+                'started_at': datetime.now().isoformat(),
+                'user': user_data.get('username', 'unknown')
+            }
+            cityscraper_events[session_id] = []
+            cityscraper_results[session_id] = None
+
+        def run_research():
+            """Background thread for research execution."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                # Create orchestrator
+                orchestrator = StandaloneResearchOrchestrator(
+                    municipality=municipality,
+                    table_mode=table_mode
+                )
+
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['orchestrator'] = orchestrator
+                        cityscraper_sessions[session_id]['status'] = 'running'
+
+                # Event callback to capture agent activity
+                def on_event(event):
+                    with session_lock:
+                        if session_id in cityscraper_events:
+                            cityscraper_events[session_id].append({
+                                'agent': getattr(event, 'agent_name', 'unknown'),
+                                'action': getattr(event, 'action', 'unknown'),
+                                'message': getattr(event, 'message', ''),
+                                'timestamp': datetime.now().isoformat()
+                            })
+
+                # Run the research
+                result = loop.run_until_complete(orchestrator.run(on_event=on_event))
+
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['status'] = 'completed'
+                        cityscraper_results[session_id] = result
+
+                logger.info(f"CityScraper research completed: {session_id}")
+
+            except Exception as e:
+                logger.error(f"CityScraper research failed: {session_id} - {e}", exc_info=True)
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['status'] = 'failed'
+                        cityscraper_sessions[session_id]['error'] = str(e)
+            finally:
+                loop.close()
+
+        # Start background thread
+        thread = threading.Thread(target=run_research, daemon=True)
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'message': f'Research started for {municipality}'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to start CityScraper research: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/scraper/research/<session_id>', methods=['GET'])
+def get_scraper_research(session_id):
+    """Get status and results of a research session."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    with session_lock:
+        if session_id not in cityscraper_sessions:
+            return jsonify({'error': 'Session not found'}), 404
+
+        session_data = cityscraper_sessions[session_id].copy()
+        result = cityscraper_results.get(session_id)
+
+    # Don't include orchestrator object in response
+    session_data.pop('orchestrator', None)
+
+    return jsonify({
+        'success': True,
+        'session': session_data,
+        'result': result
+    })
+
+
+@app.route('/api/scraper/events/<session_id>', methods=['GET'])
+def get_scraper_events(session_id):
+    """Get agent activity events for a session (for UI display)."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    # Optional: get events since a specific index
+    since_index = request.args.get('since', 0, type=int)
+
+    with session_lock:
+        if session_id not in cityscraper_events:
+            return jsonify({'error': 'Session not found'}), 404
+
+        events = cityscraper_events[session_id][since_index:]
+        status = cityscraper_sessions.get(session_id, {}).get('status', 'unknown')
+
+    return jsonify({
+        'success': True,
+        'events': events,
+        'total_events': len(cityscraper_events.get(session_id, [])),
+        'status': status
+    })
+
+
+@app.route('/api/scraper/stop/<session_id>', methods=['POST'])
+def stop_scraper_research(session_id):
+    """Cancel an in-progress research session."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    with session_lock:
+        if session_id not in cityscraper_sessions:
+            return jsonify({'error': 'Session not found'}), 404
+
+        session_data = cityscraper_sessions[session_id]
+
+        if session_data['status'] not in ('initializing', 'running'):
+            return jsonify({
+                'success': False,
+                'message': f"Cannot stop session with status: {session_data['status']}"
+            })
+
+        orchestrator = session_data.get('orchestrator')
+        if orchestrator and hasattr(orchestrator, 'cancel'):
+            orchestrator.cancel()
+
+        session_data['status'] = 'cancelled'
+
+    logger.info(f"CityScraper research cancelled: {session_id}")
+
+    return jsonify({
+        'success': True,
+        'message': 'Research session cancelled'
+    })
+
+
+# ---------------------------------------------------------------------------
+# DOCUMENT ENRICHMENT ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.route('/api/scraper/enrich/<hotdog_session>', methods=['POST'])
+def enrich_hotdog_session(hotdog_session):
+    """
+    Enrich a completed HOTDOG analysis with municipal data.
+
+    Request body (optional):
+    {
+        "municipality": "City of Example"  (auto-detected if not provided)
+    }
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    try:
+        # Get the completed HOTDOG session
+        with session_lock:
+            if hotdog_session not in completed_analyses:
+                return jsonify({'error': 'HOTDOG session not found or not completed'}), 404
+
+            hotdog_data = completed_analyses[hotdog_session]
+
+        data = request.get_json() or {}
+        municipality = data.get('municipality', '').strip()
+
+        # Try to auto-detect municipality from HOTDOG results if not provided
+        if not municipality:
+            # Look for municipality in the analysis results
+            result = hotdog_data.get('result', {})
+            # This would need to be extracted from the document analysis
+            municipality = result.get('detected_municipality', 'Unknown Municipality')
+
+        # Generate enrichment session ID
+        session_id = f"enrich_{secrets.token_hex(8)}"
+
+        logger.info(f"Starting document enrichment: {session_id} for HOTDOG session {hotdog_session}")
+
+        # Initialize session state
+        with session_lock:
+            cityscraper_sessions[session_id] = {
+                'orchestrator': None,
+                'status': 'initializing',
+                'type': 'enrichment',
+                'hotdog_session': hotdog_session,
+                'municipality': municipality,
+                'started_at': datetime.now().isoformat(),
+                'user': user_data.get('username', 'unknown')
+            }
+            cityscraper_events[session_id] = []
+            cityscraper_results[session_id] = None
+
+        def run_enrichment():
+            """Background thread for enrichment execution."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                orchestrator = DocumentEnrichmentOrchestrator(
+                    hotdog_session_id=hotdog_session,
+                    hotdog_data=hotdog_data,
+                    municipality=municipality
+                )
+
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['orchestrator'] = orchestrator
+                        cityscraper_sessions[session_id]['status'] = 'running'
+
+                def on_event(event):
+                    with session_lock:
+                        if session_id in cityscraper_events:
+                            cityscraper_events[session_id].append({
+                                'agent': getattr(event, 'agent_name', 'unknown'),
+                                'action': getattr(event, 'action', 'unknown'),
+                                'message': getattr(event, 'message', ''),
+                                'timestamp': datetime.now().isoformat()
+                            })
+
+                result = loop.run_until_complete(orchestrator.run(on_event=on_event))
+
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['status'] = 'completed'
+                        cityscraper_results[session_id] = result
+
+                logger.info(f"Document enrichment completed: {session_id}")
+
+            except Exception as e:
+                logger.error(f"Document enrichment failed: {session_id} - {e}", exc_info=True)
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['status'] = 'failed'
+                        cityscraper_sessions[session_id]['error'] = str(e)
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=run_enrichment, daemon=True)
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'hotdog_session': hotdog_session,
+            'message': f'Enrichment started for {municipality}'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to start document enrichment: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# COMPARATIVE INTELLIGENCE ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.route('/api/scraper/compare', methods=['POST'])
+def compare_municipalities():
+    """
+    Start a comparative analysis of multiple municipalities.
+
+    Request body:
+    {
+        "municipalities": ["City A", "City B", "City C"],
+        "focus_areas": ["budgets", "contracts"]  (optional)
+    }
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    try:
+        data = request.get_json() or {}
+        municipalities = data.get('municipalities', [])
+        focus_areas = data.get('focus_areas', [])
+
+        if not municipalities or len(municipalities) < 2:
+            return jsonify({'error': 'At least 2 municipalities required for comparison'}), 400
+
+        session_id = f"compare_{secrets.token_hex(8)}"
+
+        logger.info(f"Starting comparative analysis: {session_id} for {len(municipalities)} municipalities")
+
+        with session_lock:
+            cityscraper_sessions[session_id] = {
+                'orchestrator': None,
+                'status': 'initializing',
+                'type': 'comparison',
+                'municipalities': municipalities,
+                'focus_areas': focus_areas,
+                'started_at': datetime.now().isoformat(),
+                'user': user_data.get('username', 'unknown')
+            }
+            cityscraper_events[session_id] = []
+            cityscraper_results[session_id] = None
+
+        def run_comparison():
+            """Background thread for comparison execution."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                orchestrator = ComparativeIntelligenceOrchestrator(
+                    municipalities=municipalities,
+                    focus_areas=focus_areas
+                )
+
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['orchestrator'] = orchestrator
+                        cityscraper_sessions[session_id]['status'] = 'running'
+
+                def on_event(event):
+                    with session_lock:
+                        if session_id in cityscraper_events:
+                            cityscraper_events[session_id].append({
+                                'agent': getattr(event, 'agent_name', 'unknown'),
+                                'action': getattr(event, 'action', 'unknown'),
+                                'message': getattr(event, 'message', ''),
+                                'timestamp': datetime.now().isoformat()
+                            })
+
+                result = loop.run_until_complete(orchestrator.run(on_event=on_event))
+
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['status'] = 'completed'
+                        cityscraper_results[session_id] = result
+
+                logger.info(f"Comparative analysis completed: {session_id}")
+
+            except Exception as e:
+                logger.error(f"Comparative analysis failed: {session_id} - {e}", exc_info=True)
+                with session_lock:
+                    if session_id in cityscraper_sessions:
+                        cityscraper_sessions[session_id]['status'] = 'failed'
+                        cityscraper_sessions[session_id]['error'] = str(e)
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=run_comparison, daemon=True)
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'municipalities': municipalities,
+            'message': f'Comparison started for {len(municipalities)} municipalities'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to start comparative analysis: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# ANALYSIS AGENT ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.route('/api/scraper/analyze/summary', methods=['POST'])
+def analyze_summary():
+    """
+    Generate a summary using the SummaryGeneratorAgent.
+
+    Request body:
+    {
+        "data": {...},  // Data to summarize
+        "context": "..."  // Optional context
+    }
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    try:
+        data = request.get_json() or {}
+        input_data = data.get('data', {})
+        context = data.get('context', '')
+
+        if not input_data:
+            return jsonify({'error': 'Data is required'}), 400
+
+        # Run synchronously (these are quick operations)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            agent = SummaryGeneratorAgent()
+            agent_request = AgentRequest(
+                data=input_data,
+                context=context
+            )
+            result = loop.run_until_complete(agent.run(agent_request))
+
+            return jsonify({
+                'success': True,
+                'summary': result
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Summary generation failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/scraper/analyze/brainstorm', methods=['POST'])
+def analyze_brainstorm():
+    """
+    Generate brainstorming ideas using the BrainstormerAgent.
+
+    Request body:
+    {
+        "topic": "...",
+        "data": {...},  // Optional supporting data
+        "context": "..."  // Optional context
+    }
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    try:
+        data = request.get_json() or {}
+        topic = data.get('topic', '').strip()
+        input_data = data.get('data', {})
+        context = data.get('context', '')
+
+        if not topic:
+            return jsonify({'error': 'Topic is required'}), 400
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            agent = BrainstormerAgent()
+            agent_request = AgentRequest(
+                topic=topic,
+                data=input_data,
+                context=context
+            )
+            result = loop.run_until_complete(agent.run(agent_request))
+
+            return jsonify({
+                'success': True,
+                'ideas': result
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Brainstorming failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/scraper/analyze/research', methods=['POST'])
+def analyze_research():
+    """
+    Perform deep research using the DeepResearcherAgent.
+
+    Request body:
+    {
+        "query": "...",
+        "data": {...},  // Optional supporting data
+        "context": "..."  // Optional context
+    }
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    try:
+        data = request.get_json() or {}
+        query = data.get('query', '').strip()
+        input_data = data.get('data', {})
+        context = data.get('context', '')
+
+        if not query:
+            return jsonify({'error': 'Query is required'}), 400
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            agent = DeepResearcherAgent()
+            agent_request = AgentRequest(
+                query=query,
+                data=input_data,
+                context=context
+            )
+            result = loop.run_until_complete(agent.run(agent_request))
+
+            return jsonify({
+                'success': True,
+                'research': result
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Deep research failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/scraper/analyze/bid', methods=['POST'])
+def analyze_bid():
+    """
+    Analyze bid data using the BidAnalyzerAgent.
+
+    Request body:
+    {
+        "bid_data": {...},  // Bid/RFP data to analyze
+        "context": "..."  // Optional context
+    }
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    try:
+        data = request.get_json() or {}
+        bid_data = data.get('bid_data', {})
+        context = data.get('context', '')
+
+        if not bid_data:
+            return jsonify({'error': 'Bid data is required'}), 400
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            agent = BidAnalyzerAgent()
+            agent_request = AgentRequest(
+                data=bid_data,
+                context=context
+            )
+            result = loop.run_until_complete(agent.run(agent_request))
+
+            return jsonify({
+                'success': True,
+                'analysis': result
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Bid analysis failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# CITYSCRAPER SESSION MANAGEMENT
+# ---------------------------------------------------------------------------
+
+@app.route('/api/scraper/sessions', methods=['GET'])
+def list_scraper_sessions():
+    """List all CityScraper sessions (admin only)."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    with session_lock:
+        sessions = []
+        for session_id, session_data in cityscraper_sessions.items():
+            session_info = {
+                'session_id': session_id,
+                'status': session_data.get('status'),
+                'type': session_data.get('type', 'research'),
+                'municipality': session_data.get('municipality'),
+                'municipalities': session_data.get('municipalities'),
+                'started_at': session_data.get('started_at'),
+                'user': session_data.get('user'),
+                'error': session_data.get('error')
+            }
+            sessions.append(session_info)
+
+    return jsonify({
+        'success': True,
+        'sessions': sessions,
+        'total': len(sessions)
+    })
+
+
+@app.route('/api/scraper/sessions/<session_id>', methods=['DELETE'])
+def delete_scraper_session(session_id):
+    """Delete a CityScraper session (admin only)."""
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+
+    with session_lock:
+        if session_id not in cityscraper_sessions:
+            return jsonify({'error': 'Session not found'}), 404
+
+        # Cancel if running
+        session_data = cityscraper_sessions[session_id]
+        if session_data['status'] in ('initializing', 'running'):
+            orchestrator = session_data.get('orchestrator')
+            if orchestrator and hasattr(orchestrator, 'cancel'):
+                orchestrator.cancel()
+
+        # Clean up
+        del cityscraper_sessions[session_id]
+        cityscraper_events.pop(session_id, None)
+        cityscraper_results.pop(session_id, None)
+
+    logger.info(f"CityScraper session deleted: {session_id}")
+
+    return jsonify({
+        'success': True,
+        'message': 'Session deleted'
+    })
 
 
 # ============================================================================
