@@ -472,12 +472,18 @@ def get_prompt(
     Returns:
         Complete system prompt with substitutions applied
     """
+    # Type safety: ensure all parameters are strings
+    safe_document_type = str(document_type) if document_type is not None else "unknown"
+    safe_municipality_info = str(municipality_info) if municipality_info is not None else "Not detected"
+    safe_hotdog_summary = str(hotdog_summary) if hotdog_summary is not None else "No summary available"
+    safe_unanswered_questions = str(unanswered_questions) if unanswered_questions is not None else "No questions provided"
+
     return SYSTEM_PROMPT.replace(
-        "{{document_type}}", document_type
+        "{{document_type}}", safe_document_type
     ).replace(
-        "{{municipality_info}}", municipality_info
+        "{{municipality_info}}", safe_municipality_info
     ).replace(
-        "{{hotdog_summary}}", hotdog_summary
+        "{{hotdog_summary}}", safe_hotdog_summary
     ).replace(
-        "{{unanswered_questions}}", unanswered_questions
+        "{{unanswered_questions}}", safe_unanswered_questions
     )

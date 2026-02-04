@@ -456,7 +456,21 @@ Return the complete JSON output as specified in your instructions."""
                 errors=[f"JSON parse error at position {e.pos}: {e.msg}"],
                 processing_time_seconds=time.time() - start_time
             )
+        except (TypeError, AttributeError, KeyError) as e:
+            # Handle data structure issues
+            logger.error(f"BR-2 data structure error: {e}")
+            return AgentResponse(
+                agent_id=self.AGENT_ID,
+                task=request.task,
+                success=False,
+                output_data={'raw_response': content[:500] if content else ''},
+                errors=[f"Data structure error: {type(e).__name__}: {str(e)[:100]}"],
+                processing_time_seconds=time.time() - start_time
+            )
         except Exception as e:
+            # Log but don't swallow critical exceptions like SystemExit, KeyboardInterrupt
+            if isinstance(e, (SystemExit, KeyboardInterrupt)):
+                raise
             logger.exception(f"BR-2 unexpected error: {e}")
             return AgentResponse(
                 agent_id=self.AGENT_ID,
