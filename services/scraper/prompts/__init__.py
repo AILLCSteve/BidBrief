@@ -8,6 +8,9 @@ Each prompt module contains:
 
 Note: EX-6 (Document Downloader) does not use LLM prompts.
 Its configuration file (ex6_download.py) provides download settings.
+
+Note: PR-1 (Table Formatter) does mostly mechanical formatting.
+Its configuration file (pr1_table_formatter.py) provides table schemas.
 """
 
 # Pre-flight prompts
@@ -27,8 +30,12 @@ from .ex5_bid import get_prompt as get_ex5_prompt
 # Extraction configuration (no LLM prompt)
 from .ex6_download import get_config as get_ex6_config
 
+# Presentation configuration
+from .pr1_table_formatter import get_config as get_pr1_config
+
 __all__ = [
     'get_pf1_prompt', 'get_pf2_prompt', 'get_pf3_prompt', 'get_pf4_prompt', 'get_pf5_prompt',
     'get_ex1_prompt', 'get_ex2_prompt', 'get_ex3_prompt', 'get_ex4_prompt', 'get_ex5_prompt',
-    'get_ex6_config'
+    'get_ex6_config',
+    'get_pr1_config',
 ]
