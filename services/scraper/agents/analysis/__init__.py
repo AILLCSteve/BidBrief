@@ -13,16 +13,18 @@ AN-2: Brainstormer - Generates 10 creative opportunities using 5 approaches
 AN-3: Deep Researcher - Generates Level 1-10 trail maps for deep exploration
       (surface analysis, intermediate analysis, strategic analysis, deep research)
 
-Future agents:
-AN-4: Bid Analyzer - Detailed bid/contract analysis
+AN-4: Bid Analyzer - Detailed bid/opportunity analysis with cost estimates
+      (3 cost scenarios, PM considerations, go/no-go recommendation)
 """
 
 from .summary_generator import SummaryGeneratorAgent
 from .brainstormer import BrainstormerAgent
 from .deep_researcher import DeepResearcherAgent
+from .bid_analyzer import BidAnalyzerAgent
 
 __all__ = [
     'SummaryGeneratorAgent',
     'BrainstormerAgent',
     'DeepResearcherAgent',
+    'BidAnalyzerAgent',
 ]
