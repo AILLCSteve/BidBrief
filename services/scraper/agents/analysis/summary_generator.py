@@ -310,9 +310,17 @@ class SummaryGeneratorAgent(BaseAgent):
                 errors=[f"municipality must be dict or None, got {type(municipality).__name__}"]
             )
 
-        # Type validation for focus_area
-        if not isinstance(focus_area, str):
-            focus_area = str(focus_area) if focus_area is not None else ''
+        # Type validation for focus_area (optional, must be string or None)
+        if focus_area is None:
+            focus_area = ''
+        elif not isinstance(focus_area, str):
+            return AgentResponse(
+                agent_id=self.AGENT_ID,
+                task=request.task,
+                success=False,
+                output_data={},
+                errors=[f"focus_area must be string or None, got {type(focus_area).__name__}"]
+            )
 
         # Handle empty extraction result
         if not extraction_result:
@@ -427,21 +435,8 @@ Return the complete JSON output as specified in your instructions."""
                 processing_time_seconds=elapsed
             )
 
-        except ValueError as e:
-            # JSON extraction failed
-            logger.error(f"AN-1 JSON extraction failed: {e}")
-            return AgentResponse(
-                agent_id=self.AGENT_ID,
-                task=request.task,
-                success=False,
-                output_data={
-                    'extraction_error': str(e),
-                    'raw_response': content[:1000] if content else ''
-                },
-                errors=[f"JSON extraction error: {str(e)[:100]}"],
-                processing_time_seconds=time.time() - start_time
-            )
         except json.JSONDecodeError as e:
+            # JSONDecodeError is a subclass of ValueError, so catch it first
             logger.error(f"AN-1 JSON parse failed: {e}")
             return AgentResponse(
                 agent_id=self.AGENT_ID,
@@ -452,6 +447,20 @@ Return the complete JSON output as specified in your instructions."""
                     'attempted_json': json_str[:500] if json_str else ''
                 },
                 errors=[f"JSON parse error at position {e.pos}: {e.msg}"],
+                processing_time_seconds=time.time() - start_time
+            )
+        except ValueError as e:
+            # JSON extraction failed (from _extract_json_from_response)
+            logger.error(f"AN-1 JSON extraction failed: {e}")
+            return AgentResponse(
+                agent_id=self.AGENT_ID,
+                task=request.task,
+                success=False,
+                output_data={
+                    'extraction_error': str(e),
+                    'raw_response': content[:1000] if content else ''
+                },
+                errors=[f"JSON extraction error: {str(e)[:100]}"],
                 processing_time_seconds=time.time() - start_time
             )
         except (TypeError, AttributeError, KeyError) as e:
