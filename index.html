@@ -3994,9 +3994,9 @@ async function startCityScraperResearch() {
         const response = await fetch('/api/scraper/research', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')
+                'Content-Type': 'application/json'
             },
+            credentials: 'same-origin',
             body: JSON.stringify({municipality, table_mode: tableMode})
         });
 
@@ -4020,7 +4020,7 @@ async function pollCityScraperEvents() {
 
     try {
         const response = await fetch(`/api/scraper/events/${csSessionId}?since=${csEventIndex}`, {
-            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+            credentials: 'same-origin'
         });
         const data = await response.json();
 
@@ -4096,7 +4096,7 @@ function addCSDebugLog(message) {
 async function loadCityScraperResults() {
     try {
         const response = await fetch(`/api/scraper/research/${csSessionId}`, {
-            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+            credentials: 'same-origin'
         });
         const data = await response.json();
 
@@ -4196,7 +4196,7 @@ async function stopCityScraperResearch() {
     try {
         await fetch(`/api/scraper/stop/${csSessionId}`, {
             method: 'POST',
-            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+            credentials: 'same-origin'
         });
         addCSDebugLog('Stop request sent');
     } catch (error) {
@@ -4232,8 +4232,8 @@ async function exportCityScraperResults(format) {
     }
 
     try {
-        const response = await fetch(`/api/scraper/export/${csSessionId}?format=${format}`, {
-            headers: {'Authorization': 'Bearer ' + sessionStorage.getItem('session_token')}
+        const response = await fetch(`/api/scraper/export/${format}/${csSessionId}`, {
+            credentials: 'same-origin'
         });
 
         if (!response.ok) {
