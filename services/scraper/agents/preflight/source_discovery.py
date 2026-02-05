@@ -105,37 +105,38 @@ class SourceDiscoveryAgent(BaseAgent):
 
         # Search queries organized by priority with (query, max_results)
         # Sewer/Wastewater is PRIMARY - 70% effort (more queries, more results)
+        # All limits increased for comprehensive source discovery
         search_configs = [
             # 1. Official Website (required baseline)
-            (f"{municipality_name} {state} official website city government", 3),
+            (f"{municipality_name} {state} official website city government", 10),
 
             # 2. Public Works Department
-            (f"{municipality_name} {state} public works utilities department", 3),
+            (f"{municipality_name} {state} public works utilities department", 10),
 
             # 3. Sewer/Wastewater (PRIMARY - 70% effort, more results)
-            (f"{municipality_name} {state} sewer utility wastewater", 5),
-            (f"{municipality_name} {state} sanitary sewer service department", 5),
-            (f"{municipality_name} {state} wastewater treatment utility", 4),
+            (f"{municipality_name} {state} sewer utility wastewater", 15),
+            (f"{municipality_name} {state} sanitary sewer service department", 15),
+            (f"{municipality_name} {state} wastewater treatment utility", 10),
 
             # 4. Stormwater (secondary)
-            (f"{municipality_name} {state} stormwater drainage MS4", 3),
-            (f"{municipality_name} {state} storm drain utility", 3),
+            (f"{municipality_name} {state} stormwater drainage MS4", 10),
+            (f"{municipality_name} {state} storm drain utility", 10),
 
             # 5. Procurement/Bid Portal
-            (f"{municipality_name} {state} bid portal procurement RFP", 4),
-            (f"{municipality_name} {state} public bids contracts purchasing", 3),
+            (f"{municipality_name} {state} bid portal procurement RFP", 15),
+            (f"{municipality_name} {state} public bids contracts purchasing", 10),
 
             # 6. GIS Portal
-            (f"{municipality_name} {state} GIS map interactive viewer", 3),
-            (f"{municipality_name} {state} ArcGIS infrastructure map", 3),
+            (f"{municipality_name} {state} GIS map interactive viewer", 10),
+            (f"{municipality_name} {state} ArcGIS infrastructure map", 10),
 
             # 7. CIP/Budget Documents
-            (f"{municipality_name} {state} capital improvement plan CIP budget", 4),
-            (f"{municipality_name} {state} infrastructure master plan", 3),
+            (f"{municipality_name} {state} capital improvement plan CIP budget", 15),
+            (f"{municipality_name} {state} infrastructure master plan", 10),
 
             # 8. Compliance Sources
-            (f"{municipality_name} {state} SSO CMOM EPA compliance sewer", 3),
-            (f"{municipality_name} {state} NPDES permit wastewater", 2),
+            (f"{municipality_name} {state} SSO CMOM EPA compliance sewer", 10),
+            (f"{municipality_name} {state} NPDES permit wastewater", 10),
         ]
 
         for query, max_results in search_configs:

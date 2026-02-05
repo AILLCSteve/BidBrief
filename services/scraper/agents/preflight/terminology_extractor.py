@@ -107,26 +107,27 @@ class TerminologyExtractorAgent(BaseAgent):
         all_results = []
 
         # Search queries organized by category with (query, max_results)
+        # Increased limits for comprehensive terminology discovery
         search_configs = [
             # 1. Sanitary sewer terminology
-            (f"{municipality_name} {state} sanitary sewer terminology wastewater collection", 4),
-            (f"{municipality_name} {state} wastewater collection system sewer", 4),
+            (f"{municipality_name} {state} sanitary sewer terminology wastewater collection", 10),
+            (f"{municipality_name} {state} wastewater collection system sewer", 10),
 
             # 2. Stormwater and drainage terminology
-            (f"{municipality_name} {state} storm drain catch basin inlet", 3),
-            (f"{municipality_name} {state} stormwater drainage MS4 system", 3),
+            (f"{municipality_name} {state} storm drain catch basin inlet", 10),
+            (f"{municipality_name} {state} stormwater drainage MS4 system", 10),
 
             # 3. Equipment and maintenance terminology
-            (f"{municipality_name} {state} CCTV sewer inspection equipment", 3),
-            (f"{municipality_name} {state} sewer cleaning jet vac maintenance", 3),
+            (f"{municipality_name} {state} CCTV sewer inspection equipment", 10),
+            (f"{municipality_name} {state} sewer cleaning jet vac maintenance", 10),
 
             # 4. Bid portal and procurement terminology
-            (f"{municipality_name} {state} bid RFP sewer wastewater", 3),
-            (f"{municipality_name} {state} procurement contract sewer rehabilitation", 2),
+            (f"{municipality_name} {state} bid RFP sewer wastewater", 10),
+            (f"{municipality_name} {state} procurement contract sewer rehabilitation", 10),
 
             # 5. Infrastructure assets terminology
-            (f"{municipality_name} {state} lift station pump station sewer", 3),
-            (f"{municipality_name} {state} force main interceptor trunk sewer", 2),
+            (f"{municipality_name} {state} lift station pump station sewer", 10),
+            (f"{municipality_name} {state} force main interceptor trunk sewer", 10),
         ]
 
         for query, max_results in search_configs:

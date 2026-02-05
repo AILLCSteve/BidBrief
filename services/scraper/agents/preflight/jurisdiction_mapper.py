@@ -124,13 +124,13 @@ class JurisdictionMapperAgent(BaseAgent):
         # Execute sanitary sewer searches
         for query in sanitary_queries:
             self.emit_event("searching", f"Searching: {query[:50]}...")
-            results = await self.search_tavily(query, max_results=5)
+            results = await self.search_tavily(query, max_results=15)
             all_results.extend(results)
 
         # Execute stormwater searches
         for query in stormwater_queries:
             self.emit_event("searching", f"Searching: {query[:50]}...")
-            results = await self.search_tavily(query, max_results=3)
+            results = await self.search_tavily(query, max_results=10)
             all_results.extend(results)
 
         logger.debug(f"PF-2 gathered {len(all_results)} total search results")
