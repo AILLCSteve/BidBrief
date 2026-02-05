@@ -417,7 +417,7 @@ def form_login():
 
     # Create session token
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=4)  # Extended session for long research operations
+    expires_at = datetime.now() + timedelta(hours=24)
     user_role = AUTHORIZED_USERS[username].get('role', 'user')
 
     active_sessions[token] = {
@@ -506,7 +506,7 @@ def authenticate():
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=4)  # Extended session for long research operations
+    expires_at = datetime.now() + timedelta(hours=24)
     user_role = AUTHORIZED_USERS[username].get('role', 'user')
 
     active_sessions[token] = {
