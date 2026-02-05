@@ -1444,20 +1444,15 @@ async function startAnalysis() {
         Logger.success(`✅ File uploaded: ${pdfFilename} (upload id: ${uploadId})`);
         ProgressTracker.update(20, 'Connecting to HOTDOG AI...');
 
-        // Generate session ID
-        currentSessionId = `session_${Date.now()}`;
-
-        // STEP 2: Start polling for progress events (replaces SSE)
-        startPolling(currentSessionId);
-
-        // STEP 3: Get enabled section IDs
+        // STEP 2: Get enabled section IDs
         const enabledSectionIds = questionConfig.sections
             .filter(s => s.enabled)
             .map(s => s.section_id);
 
         Logger.info(`📊 Analyzing ${enabledSectionIds.length} enabled sections`);
 
-        // STEP 4: Start analysis (returns immediately - runs in background)
+        // STEP 3: Start analysis (returns immediately - runs in background)
+        // NOTE: Server generates cryptographically secure session ID - we use the one returned
         const recheckEmpty = document.getElementById('recheckEmptyWindows').checked;
         const enableSecondPass = document.getElementById('enableSecondPass').checked;
         const enableDeepRAG = document.getElementById('enableDeepRAG').checked;
@@ -1470,7 +1465,6 @@ async function startAnalysis() {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                session_id: currentSessionId,
                 upload_id: uploadId,
                 pdf_filename: pdfFilename,  // Include original filename
                 context_guardrails: contextGuardrails || undefined,
@@ -1484,10 +1478,16 @@ async function startAnalysis() {
         });
 
         if (!analyzeResp.ok) {
-            throw new Error('Analysis failed to start');
+            const errData = await analyzeResp.json().catch(() => ({}));
+            throw new Error(errData.error || 'Analysis failed to start');
         }
 
         const analyzeData = await analyzeResp.json();
+
+        // STEP 4: Use server-generated session ID and start polling
+        currentSessionId = analyzeData.session_id;
+        startPolling(currentSessionId);
+
         Logger.success(`✅ Analysis started in background (Session: ${currentSessionId})`);
         Logger.info(`📊 HOTDOG AI is now processing your document...`);
 
