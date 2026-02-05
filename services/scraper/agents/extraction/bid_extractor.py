@@ -128,32 +128,32 @@ class BidExtractorAgent(BaseAgent):
         queries = []
 
         # ==============================================================
-        # PHASE 1: BID PORTAL SEARCHES - PRIMARY
+        # PHASE 1: BID PORTAL SEARCHES - PRIMARY (increased limits)
         # ==============================================================
 
         queries.extend([
-            (f"{municipality_name} {state} bid RFP sewer", 5),
-            (f"{municipality_name} {state} public bid sanitary sewer", 5),
-            (f"{municipality_name} {state} procurement storm drain", 5),
-            (f"{municipality_name} {state} contract award sewer", 4),
-            (f"{municipality_name} bid opportunities sewer storm", 4),
+            (f"{municipality_name} {state} bid RFP sewer", 15),
+            (f"{municipality_name} {state} public bid sanitary sewer", 15),
+            (f"{municipality_name} {state} procurement storm drain", 15),
+            (f"{municipality_name} {state} contract award sewer", 10),
+            (f"{municipality_name} bid opportunities sewer storm", 10),
         ])
 
         # ==============================================================
-        # PHASE 2: PORTAL-SPECIFIC SEARCHES
+        # PHASE 2: PORTAL-SPECIFIC SEARCHES (increased limits)
         # ==============================================================
 
         queries.extend([
-            (f"site:bidsync.com {municipality_name} sewer", 4),
-            (f"site:ionwave.net {municipality_name} sewer", 3),
-            (f"site:bidnet.com {municipality_name} sewer", 3),
-            (f"site:planetbids.com {municipality_name} sewer", 3),
-            (f"site:gobonfire.com {municipality_name} sewer storm", 3),
-            (f"site:publicpurchase.com {municipality_name} sewer", 2),
+            (f"site:bidsync.com {municipality_name} sewer", 10),
+            (f"site:ionwave.net {municipality_name} sewer", 10),
+            (f"site:bidnet.com {municipality_name} sewer", 10),
+            (f"site:planetbids.com {municipality_name} sewer", 10),
+            (f"site:gobonfire.com {municipality_name} sewer storm", 10),
+            (f"site:publicpurchase.com {municipality_name} sewer", 10),
         ])
 
         # ==============================================================
-        # PHASE 3: MUNICIPAL WEBSITE SEARCHES
+        # PHASE 3: MUNICIPAL WEBSITE SEARCHES (increased limits)
         # ==============================================================
 
         # Format municipality name for URL patterns
@@ -161,32 +161,32 @@ class BidExtractorAgent(BaseAgent):
         state_abbr = self._get_state_abbr(state)
 
         queries.extend([
-            (f"site:{muni_slug}.gov bid sewer", 3),
-            (f"{municipality_name} {state} purchasing sewer services", 4),
-            (f"{municipality_name} {state} RFQ sewer inspection", 4),
-            (f"{municipality_name} {state} ITB storm drain", 3),
+            (f"site:{muni_slug}.gov bid sewer", 10),
+            (f"{municipality_name} {state} purchasing sewer services", 10),
+            (f"{municipality_name} {state} RFQ sewer inspection", 10),
+            (f"{municipality_name} {state} ITB storm drain", 10),
         ])
 
         # ==============================================================
-        # PHASE 4: RECENT/ACTIVE SEARCHES
+        # PHASE 4: RECENT/ACTIVE SEARCHES (increased limits)
         # ==============================================================
 
         queries.extend([
-            (f"{municipality_name} {state} current bids sewer 2024 2025 2026", 5),
-            (f"{municipality_name} {state} upcoming projects sewer storm", 4),
-            (f"{municipality_name} {state} awarded contract sewer 2024", 4),
-            (f"{municipality_name} {state} awarded contract sewer 2025", 4),
+            (f"{municipality_name} {state} current bids sewer 2024 2025 2026", 15),
+            (f"{municipality_name} {state} upcoming projects sewer storm", 10),
+            (f"{municipality_name} {state} awarded contract sewer 2024", 10),
+            (f"{municipality_name} {state} awarded contract sewer 2025", 10),
         ])
 
         # ==============================================================
-        # PHASE 5: SPECIFIC WORK TYPE SEARCHES
+        # PHASE 5: SPECIFIC WORK TYPE SEARCHES (increased limits)
         # ==============================================================
 
         queries.extend([
-            (f"{municipality_name} {state} CCTV sewer inspection bid", 4),
-            (f"{municipality_name} {state} sewer lining rehabilitation bid", 4),
-            (f"{municipality_name} {state} storm drain cleaning bid", 3),
-            (f"{municipality_name} {state} sewer cleaning jetting bid", 3),
+            (f"{municipality_name} {state} CCTV sewer inspection bid", 10),
+            (f"{municipality_name} {state} sewer lining rehabilitation bid", 10),
+            (f"{municipality_name} {state} storm drain cleaning bid", 10),
+            (f"{municipality_name} {state} sewer cleaning jetting bid", 10),
             (f"{municipality_name} {state} manhole rehabilitation bid", 3),
         ])
 

@@ -433,7 +433,7 @@ require LLM assistance. If invoked, help with formatting decisions."""
             return "NOT FOUND"
 
         urls = []
-        for source in sources[:3]:  # Limit to 3 for display
+        for source in sources[:10]:  # Increased from 3 for more comprehensive display
             if isinstance(source, SourceURL):
                 urls.append(source.url)
             elif isinstance(source, dict):
@@ -453,7 +453,7 @@ require LLM assistance. If invoked, help with formatting decisions."""
             return "NOT FOUND"
 
         texts = []
-        for citation in citations[:2]:  # Limit to 2 for display
+        for citation in citations[:10]:  # Increased from 2 for more comprehensive display
             if isinstance(citation, VerbatimCitation):
                 texts.append(self._truncate_for_display(citation.text))
             elif isinstance(citation, dict):

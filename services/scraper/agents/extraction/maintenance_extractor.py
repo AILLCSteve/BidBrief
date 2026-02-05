@@ -111,44 +111,44 @@ class MaintenanceExtractorAgent(BaseAgent):
         """
         queries = []
 
-        # Core maintenance practice searches
+        # Core maintenance practice searches - increased limits
         queries.extend([
             # Cleaning program focused (PRIMARY)
-            (f"{municipality_name} {state} sewer cleaning program frequency", 5),
-            (f"{municipality_name} {state} sewer cleaning schedule annual", 5),
-            (f"{municipality_name} {state} preventive maintenance sewer", 4),
+            (f"{municipality_name} {state} sewer cleaning program frequency", 15),
+            (f"{municipality_name} {state} sewer cleaning schedule annual", 15),
+            (f"{municipality_name} {state} preventive maintenance sewer", 10),
 
             # CCTV/Televising focused
-            (f"{municipality_name} {state} CCTV inspection sewer televising", 5),
-            (f"{municipality_name} {state} sewer video inspection program", 4),
-            (f"{municipality_name} {state} NASSCO PACP sewer inspection", 3),
+            (f"{municipality_name} {state} CCTV inspection sewer televising", 15),
+            (f"{municipality_name} {state} sewer video inspection program", 10),
+            (f"{municipality_name} {state} NASSCO PACP sewer inspection", 10),
 
             # CMOM/FOG program focused
-            (f"{municipality_name} {state} CMOM program maintenance", 5),
-            (f"{municipality_name} {state} FOG program grease", 4),
-            (f"{municipality_name} {state} SSO reduction program sewer", 4),
+            (f"{municipality_name} {state} CMOM program maintenance", 15),
+            (f"{municipality_name} {state} FOG program grease", 10),
+            (f"{municipality_name} {state} SSO reduction program sewer", 10),
 
             # I&I program focused
-            (f"{municipality_name} {state} inflow infiltration I&I program", 4),
-            (f"{municipality_name} {state} I&I reduction sewer", 3),
+            (f"{municipality_name} {state} inflow infiltration I&I program", 10),
+            (f"{municipality_name} {state} I&I reduction sewer", 10),
 
             # Service model focused
-            (f"{municipality_name} {state} sewer maintenance contract", 5),
-            (f"{municipality_name} {state} sewer cleaning contractor", 4),
-            (f"{municipality_name} {state} wastewater collection maintenance", 4),
+            (f"{municipality_name} {state} sewer maintenance contract", 15),
+            (f"{municipality_name} {state} sewer cleaning contractor", 10),
+            (f"{municipality_name} {state} wastewater collection maintenance", 10),
 
             # Master plan / engineering focused
-            (f"{municipality_name} {state} collection system master plan maintenance", 4),
-            (f"{municipality_name} {state} sewer system evaluation study", 3),
+            (f"{municipality_name} {state} collection system master plan maintenance", 10),
+            (f"{municipality_name} {state} sewer system evaluation study", 10),
         ])
 
-        # Add terminology-based searches if provided
+        # Add terminology-based searches if provided - use more terms
         if terminology:
             sanitary_terms = terminology.get('sanitary_terms', [])
 
-            for term in sanitary_terms[:2]:  # Limit to top 2 terms
+            for term in sanitary_terms[:5]:  # Increased from 2 to 5 terms
                 queries.append(
-                    (f"{municipality_name} {state} {term} cleaning maintenance", 3)
+                    (f"{municipality_name} {state} {term} cleaning maintenance", 10)
                 )
 
         return queries
