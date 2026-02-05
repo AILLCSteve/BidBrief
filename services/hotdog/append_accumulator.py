@@ -199,13 +199,15 @@ class AppendOnlyAccumulator:
         window_index: int
     ) -> None:
         """Extract individual footnotes from answer text."""
-        # Find all <PDF pg X> citations with surrounding context
-        pattern = r'([^.]*?<PDF pg (\d+)>[^.]*\.)'
-        matches = re.findall(pattern, answer_text, re.IGNORECASE)
+        # Find all occurrences of <PDF pg X> and create one footnote per citation.
+        pattern = r'<PDF pg (\d+)>'
+        for match in re.finditer(pattern, answer_text, re.IGNORECASE):
+            page_num = int(match.group(1))
 
-        for match in matches:
-            quote_with_citation = match[0].strip()
-            page_num = int(match[1])
+            # Build a quote context around the match (up to 40 chars before/after)
+            start = max(0, match.start() - 40)
+            end = min(len(answer_text), match.end() + 40)
+            quote_with_citation = answer_text[start:end].strip()
 
             self.footnote_counter += 1
             footnote_id = f"FN-{self.footnote_counter:05d}"

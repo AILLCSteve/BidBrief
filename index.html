@@ -704,6 +704,7 @@
 
                     <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
                         <input type="checkbox" id="enableDeepRAG" style="margin-top: 3px; width: 18px; height: 18px;">
+
                         <div>
                             <strong style="color: #1E3A8A;">Enable Deep RAG (External Search)</strong>
                             <p style="color: #666; font-size: 12px; margin: 5px 0 0 0;">
@@ -1437,10 +1438,10 @@ async function startAnalysis() {
         }
 
         const uploadData = await uploadResp.json();
-        const pdfPath = uploadData.filepath;
+        const uploadId = uploadData.upload_id;
         const pdfFilename = uploadData.filename || currentFile.name;
 
-        Logger.success(`✅ File uploaded: ${pdfFilename}`);
+        Logger.success(`✅ File uploaded: ${pdfFilename} (upload id: ${uploadId})`);
         ProgressTracker.update(20, 'Connecting to HOTDOG AI...');
 
         // Generate session ID
@@ -1470,7 +1471,7 @@ async function startAnalysis() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 session_id: currentSessionId,
-                pdf_path: pdfPath,
+                upload_id: uploadId,
                 pdf_filename: pdfFilename,  // Include original filename
                 context_guardrails: contextGuardrails || undefined,
                 enabled_sections: enabledSectionIds,  // Only analyze enabled sections

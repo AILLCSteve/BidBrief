@@ -166,6 +166,10 @@ class OutputCompiler:
         """
         Format analysis result for browser display.
 
+        Args:
+            result: Analysis result
+            config: ParsedConfig
+
         Returns JSON structure with:
         - Answers grouped by section
         - Confidence badges
@@ -209,6 +213,9 @@ class OutputCompiler:
 
             sections.append(section_data)
 
+        # Footnotes are included as provided
+        footnotes = [f for f in result.footnotes]
+
         return {
             'document_name': result.document_name,
             'total_pages': result.total_pages,
@@ -217,7 +224,7 @@ class OutputCompiler:
             'average_confidence': result.average_confidence,
             'processing_time': result.processing_time_seconds,
             'sections': sections,
-            'footnotes': result.footnotes,
+            'footnotes': footnotes,
             'metadata': {
                 'started_at': result.started_at.isoformat(),
                 'completed_at': result.completed_at.isoformat(),
@@ -242,8 +249,11 @@ class OutputCompiler:
             ConfidenceLevel.LOW: '#ef4444'      # Red
         }
 
+        text = answer.text
+        footnote = answer.footnote or ''
+
         return {
-            'text': answer.text,
+            'text': text,
             'pages': answer.pages,
             'confidence': answer.confidence,
             'confidence_level': confidence_level.value,
@@ -255,8 +265,10 @@ class OutputCompiler:
             'expert': answer.expert,
             'windows': answer.windows,
             'merge_count': answer.merge_count,
-            'footnote': answer.footnote  # Include footnote for browser display
+            'footnote': footnote  # Include footnote for browser display
         }
+
+
 
     def format_for_excel(self, result: AnalysisResult, config: ParsedConfig) -> Dict:
         """

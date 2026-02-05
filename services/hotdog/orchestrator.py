@@ -1147,15 +1147,18 @@ class HotdogOrchestrator:
                 # Get primary answer if exists
                 if answers_list:
                     primary = answers_list[0]
+                    primary_text = primary.text
+                    primary_footnote = primary.footnote
+
                     question_data = {
                         'question_id': question.id,
                         'question_text': question.text,
                         'has_answer': True,
                         'primary_answer': {
-                            'text': primary.text,
+                            'text': primary_text,
                             'pages': primary.pages,
                             'confidence': primary.confidence,
-                            'footnote': primary.footnote  # Include footnote for partial results
+                            'footnote': primary_footnote  # Include footnote for partial results
                         }
                     }
                 else:

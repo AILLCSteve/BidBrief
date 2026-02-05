@@ -110,10 +110,139 @@ completed_analyses = {}  # session_id -> {'orchestrator': ..., 'result': ..., 'c
 partial_analyses = {}  # session_id -> {'orchestrator': ..., 'config_path': ..., 'stopped_at': datetime, 'status': 'stopped'}
 session_timestamps = {}  # session_id -> last_access_time (for cleanup)
 
+# Upload store: mapping upload_id -> {'path','filename','uploaded_at','expires_at','owner','encrypted'}
+UPLOAD_STORE: dict = {}
+UPLOAD_RETENTION_SECONDS = int(os.getenv('UPLOAD_RETENTION_SECONDS', '3600'))  # default 1 hour
+
+# ============================================================================
+# AUDIT LOGGING
+# ============================================================================
+# Dedicated audit logger for security-relevant events (who did what, when)
+audit_logger = logging.getLogger('bidbrief.audit')
+audit_logger.setLevel(logging.INFO)
+
+# Create audit log handler (separate file for security audits)
+_audit_log_path = os.getenv('AUDIT_LOG_PATH', 'logs/audit.log')
+os.makedirs(os.path.dirname(_audit_log_path) if os.path.dirname(_audit_log_path) else '.', exist_ok=True)
+_audit_handler = logging.FileHandler(_audit_log_path)
+_audit_handler.setFormatter(logging.Formatter('%(asctime)s - AUDIT - %(message)s'))
+audit_logger.addHandler(_audit_handler)
+
+def audit_log(action: str, user: str = None, details: dict = None):
+    """Log security-relevant events for audit trail.
+
+    Args:
+        action: Action being performed (e.g., 'upload', 'analyze', 'export', 'login')
+        user: Username performing the action (None for anonymous)
+        details: Additional context (session_id, filename, etc.)
+    """
+    details = details or {}
+    # Sanitize details - never log full file paths or sensitive content
+    safe_details = {k: v for k, v in details.items() if k not in ('path', 'content', 'pdf_path')}
+    # Add request metadata
+    safe_details['ip'] = request.remote_addr if request else 'unknown'
+    safe_details['user_agent'] = request.headers.get('User-Agent', 'unknown')[:100] if request else 'unknown'
+
+    audit_logger.info(f"action={action} user={user or 'anonymous'} {' '.join(f'{k}={v}' for k, v in safe_details.items())}")
+
+# ============================================================================
+# ENCRYPTED EPHEMERAL STORAGE
+# ============================================================================
+# Uses Fernet symmetric encryption for uploads at rest
+from cryptography.fernet import Fernet
+
+# Generate or load encryption key (persistent across restarts via env var)
+_UPLOAD_ENCRYPTION_KEY = os.getenv('UPLOAD_ENCRYPTION_KEY')
+if not _UPLOAD_ENCRYPTION_KEY:
+    # Generate new key if not provided (will be different each restart - that's OK for ephemeral data)
+    _UPLOAD_ENCRYPTION_KEY = Fernet.generate_key().decode()
+    logger.warning("⚠️  UPLOAD_ENCRYPTION_KEY not set - generated ephemeral key (uploads won't survive restart)")
+
+_fernet = Fernet(_UPLOAD_ENCRYPTION_KEY.encode() if isinstance(_UPLOAD_ENCRYPTION_KEY, str) else _UPLOAD_ENCRYPTION_KEY)
+
+def _encrypt_file(plaintext_path: str) -> str:
+    """Encrypt a file and return path to encrypted version. Deletes original."""
+    with open(plaintext_path, 'rb') as f:
+        plaintext = f.read()
+
+    encrypted = _fernet.encrypt(plaintext)
+    encrypted_path = plaintext_path + '.enc'
+
+    with open(encrypted_path, 'wb') as f:
+        f.write(encrypted)
+
+    # Securely delete original plaintext file
+    os.unlink(plaintext_path)
+
+    return encrypted_path
+
+def _decrypt_file(encrypted_path: str) -> str:
+    """Decrypt a file and return path to decrypted temp file."""
+    with open(encrypted_path, 'rb') as f:
+        encrypted = f.read()
+
+    plaintext = _fernet.decrypt(encrypted)
+
+    # Create temp file for decrypted content
+    fd, decrypted_path = tempfile.mkstemp(suffix='.pdf')
+    with os.fdopen(fd, 'wb') as f:
+        f.write(plaintext)
+
+    return decrypted_path
+
+def _secure_delete_upload(upload_id: str):
+    """Securely delete an upload and its files."""
+    if upload_id not in UPLOAD_STORE:
+        return
+
+    info = UPLOAD_STORE[upload_id]
+    path = info.get('path')
+
+    try:
+        if path and os.path.exists(path):
+            os.unlink(path)
+            logger.info(f"🔐 Securely deleted upload file: upload_id={upload_id}")
+    except Exception as e:
+        logger.warning(f"Failed to delete upload file {upload_id}: {e}")
+
+    UPLOAD_STORE.pop(upload_id, None)
+
 # CityScraper session management
 cityscraper_sessions = {}  # session_id -> {'orchestrator': ..., 'status': 'running'|'completed'|'cancelled'}
 cityscraper_events = {}  # session_id -> [AgentActivityEvent list]
 cityscraper_results = {}  # session_id -> result dict
+
+
+# Background cleanup thread for expired uploads
+def _upload_cleanup_loop():
+    """Background loop that deletes expired uploaded files and removes them from UPLOAD_STORE."""
+    while True:
+        try:
+            now = datetime.now()
+            expired = []
+            for uid, info in list(UPLOAD_STORE.items()):
+                if info.get('expires_at') and info['expires_at'] < now:
+                    expired.append((uid, info))
+
+            for uid, info in expired:
+                path = info.get('path')
+                try:
+                    if path and os.path.exists(path):
+                        os.unlink(path)
+                        logger.info(f"🧹 Cleanup: deleted expired upload file: {path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete upload file {path}: {e}")
+                UPLOAD_STORE.pop(uid, None)
+
+            time.sleep(60)
+        except Exception:
+            # Ensure the loop continues on unexpected errors
+            logger.exception("Upload cleanup loop encountered an error")
+            time.sleep(60)
+
+# Start cleanup thread as daemon
+_cleanup_thread = threading.Thread(target=_upload_cleanup_loop, name='upload-cleanup', daemon=True)
+_cleanup_thread.start()
 
 logger.info(f"📊 Session dicts initialized: module_id={MODULE_LOAD_ID}, pid={os.getpid()}")
 
@@ -377,6 +506,44 @@ def require_admin(f):
     return decorated_function
 
 
+def _current_user_info():
+    """Return (username, role) or (None, None) if unauthenticated."""
+    s = check_auth_cookie()
+    if not s:
+        return None, None
+    return s.get('username'), s.get('role')
+
+
+def _is_authorized_for_session(session_id: str) -> bool:
+    """Return True if current request is authorized to access results/exports for session_id.
+
+    Policy: If session has an owner, only that owner or an admin can access. If session has no owner (anonymous), access is allowed.
+    """
+    with session_lock:
+        session_data = None
+        if session_id in completed_analyses:
+            session_data = completed_analyses[session_id]
+        elif session_id in partial_analyses:
+            session_data = partial_analyses[session_id]
+        elif session_id in active_analyses:
+            session_data = active_analyses[session_id]
+        elif session_id in analysis_results:
+            session_data = analysis_results[session_id]
+        else:
+            return False
+
+    owner = session_data.get('owner') if session_data else None
+    if not owner:
+        return True
+
+    username, role = _current_user_info()
+    if role == 'admin':
+        return True
+    if username and username == owner:
+        return True
+    return False
+
+
 # ============================================================================
 # BASIC ROUTES
 # ============================================================================
@@ -406,6 +573,7 @@ def form_login():
 
     if username not in AUTHORIZED_USERS:
         logger.warning(f"Form login failed - user not found: {username}")
+        audit_log('login_failed', username, {'reason': 'user_not_found'})
         return redirect('/login?error=invalid')
 
     password_hash = hashlib.sha256(password.encode()).hexdigest()
@@ -413,6 +581,7 @@ def form_login():
 
     if password_hash != expected_hash:
         logger.warning(f"Form login failed - password mismatch for: {username}")
+        audit_log('login_failed', username, {'reason': 'invalid_password'})
         return redirect('/login?error=invalid')
 
     # Create session token
@@ -428,6 +597,9 @@ def form_login():
     }
 
     logger.info(f"Form login successful for: {username} (role: {user_role})")
+
+    # Audit log successful login
+    audit_log('login', username, {'role': user_role})
 
     # Create response with auth cookie
     response = make_response(redirect('/'))
@@ -446,9 +618,13 @@ def form_login():
 def logout():
     """Log out user and clear session."""
     token = request.cookies.get('bidbrief_auth')
+    username = None
     if token:
-        active_sessions.pop(token, None)
-        logger.info("User logged out")
+        session = active_sessions.pop(token, None)
+        if session:
+            username = session.get('username')
+        logger.info(f"User logged out: {username}")
+        audit_log('logout', username)
 
     response = make_response(redirect('/login'))
     response.delete_cookie('bidbrief_auth')
@@ -562,6 +738,7 @@ def get_user_info():
 # ============================================================================
 
 @app.route('/api/config/apikey', methods=['GET'])
+@require_admin
 def get_api_key():
     api_key = os.getenv('OPENAI_API_KEY', '')
     if not api_key:
@@ -569,7 +746,6 @@ def get_api_key():
 
     return jsonify({
         'success': True,
-        'key': api_key,
         'masked': api_key[:10] + '...' + api_key[-4:]
     })
 
@@ -613,8 +789,9 @@ def sse_health():
 # ============================================================================
 
 @app.route('/api/upload', methods=['POST'])
+@require_auth
 def upload_file():
-    """Upload PDF file, save to temp, return filepath"""
+    """Upload PDF file, encrypt at rest, return an opaque upload_id. Requires authentication."""
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file provided'}), 400
 
@@ -625,17 +802,52 @@ def upload_file():
     if not file.filename.lower().endswith('.pdf'):
         return jsonify({'success': False, 'error': 'Only PDF files supported'}), 400
 
-    # Save to temp file
+    # Determine owner from auth cookie (required by @require_auth)
+    owner, role = _current_user_info()
+
+    # Save to temp file first
     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf', mode='wb') as temp_file:
         temp_path = temp_file.name
         file.save(temp_path)
 
-    logger.info(f"File uploaded: {file.filename} -> {temp_path}")
+    # Encrypt the file at rest and delete plaintext
+    try:
+        encrypted_path = _encrypt_file(temp_path)
+    except Exception as e:
+        # Clean up on encryption failure
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        logger.error(f"File encryption failed: {e}")
+        return jsonify({'success': False, 'error': 'File processing failed'}), 500
+
+    # Create opaque upload ID (cryptographically random)
+    upload_id = secrets.token_hex(16)  # 32 hex chars, 128 bits of entropy
+    uploaded_at = datetime.now()
+    expires_at = uploaded_at + timedelta(seconds=UPLOAD_RETENTION_SECONDS)
+
+    UPLOAD_STORE[upload_id] = {
+        'path': encrypted_path,
+        'filename': file.filename,
+        'uploaded_at': uploaded_at,
+        'expires_at': expires_at,
+        'owner': owner,
+        'encrypted': True
+    }
+
+    # Audit log the upload
+    audit_log('upload', owner, {
+        'upload_id': upload_id,
+        'filename': file.filename,
+        'size_bytes': os.path.getsize(encrypted_path)
+    })
+
+    logger.info(f"🔐 File uploaded and encrypted: {file.filename} -> upload_id={upload_id} (owner={owner})")
 
     return jsonify({
         'success': True,
-        'filepath': temp_path,
-        'filename': file.filename
+        'upload_id': upload_id,
+        'filename': file.filename,
+        'expires_at': expires_at.isoformat()
     })
 
 
@@ -645,7 +857,12 @@ def upload_file():
 
 @app.route('/api/progress/<session_id>')
 def progress_stream(session_id):
-    """SSE endpoint for real-time progress updates"""
+    """SSE endpoint for real-time progress updates. Requires session ownership."""
+
+    # Validate session ownership before allowing progress streaming
+    if not _is_authorized_for_session(session_id):
+        # For SSE, return a JSON error since we can't redirect
+        return jsonify({'success': False, 'error': 'Unauthorized access to session'}), 403
 
     def generate():
         import time
@@ -714,7 +931,12 @@ def progress_stream(session_id):
 
 @app.route('/api/events/<session_id>')
 def get_events(session_id):
-    """Get new events since last poll (replaces SSE streaming)"""
+    """Get new events since last poll (replaces SSE streaming). Requires session ownership."""
+
+    # Validate session ownership before returning events
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized access to session'}), 403
+
     last_index = int(request.args.get('last_index', 0))
 
     # Get events for this session
@@ -723,7 +945,7 @@ def get_events(session_id):
     # Return only new events since last_index
     new_events = events[last_index:]
 
-    logger.info(f"📡 Polling: session={session_id}, last_index={last_index}, new_events={len(new_events)}, total={len(events)}")
+    logger.info(f"📡 Polling: session={session_id[:8]}..., last_index={last_index}, new_events={len(new_events)}")
 
     return jsonify({
         'success': True,
@@ -739,12 +961,12 @@ def get_events(session_id):
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_document():
-    """Start HOTDOG AI analysis in background thread"""
+    """Start HOTDOG AI analysis in background thread. Uses cryptographically secure session IDs."""
 
     # Get request data
     data = request.json
-    pdf_path = data.get('pdf_path')
-    pdf_filename = data.get('pdf_filename', 'Unknown.pdf')  # Get original filename
+    upload_id = data.get('upload_id')
+    pdf_filename = data.get('pdf_filename', 'Unknown.pdf')  # Original filename for display
     context_guardrails = data.get('context_guardrails', '')
     enabled_sections = data.get('enabled_sections', None)  # NEW: Optional list of enabled section IDs
     analysis_mode = data.get('mode', 'bid_spec')  # Analysis mode (bid_spec or bestprep)
@@ -752,7 +974,9 @@ def analyze_document():
     enable_second_pass = data.get('enable_second_pass', False)  # Retry unanswered questions
     enable_deep_rag = data.get('enable_deep_rag', False)  # External search for remaining
     pipeline_mode = data.get('pipeline_mode', 'classic')  # 'classic' or 'v2_pipeline'
-    session_id = data.get('session_id', f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+    # SECURITY: Generate cryptographically secure session ID (ignore client-provided for security)
+    session_id = f"sess_{secrets.token_hex(16)}"  # 32 hex chars + prefix = unguessable
 
     # Validate analysis mode
     if analysis_mode not in ['bid_spec', 'bestprep']:
@@ -761,14 +985,54 @@ def analyze_document():
     # Track session timestamp for cleanup
     session_timestamps[session_id] = datetime.now()
 
-    # Validate
-    if not pdf_path or not os.path.exists(pdf_path):
+    # Validate upload_id
+    if not upload_id or upload_id not in UPLOAD_STORE:
+        return jsonify({'success': False, 'error': 'Upload not found or expired'}), 404
+
+    upload_info = UPLOAD_STORE.get(upload_id)
+    encrypted_path = upload_info.get('path')
+    is_encrypted = upload_info.get('encrypted', False)
+
+    # Ownership enforcement for uploads: if upload has owner, only that owner or admin may start analysis
+    upload_owner = upload_info.get('owner')
+    username, role = _current_user_info()
+    if upload_owner and not (role == 'admin' or username == upload_owner):
+        logger.warning(f"Unauthorized analysis start attempt by {username} for upload {upload_id[:8]}... owned by {upload_owner}")
+        return jsonify({'success': False, 'error': 'Unauthorized: upload ownership mismatch'}), 403
+
+    # Validate file exists
+    if not encrypted_path or not os.path.exists(encrypted_path):
         return jsonify({'success': False, 'error': 'PDF file not found'}), 404
+
+    # Decrypt the file for processing (creates temp decrypted copy)
+    if is_encrypted:
+        try:
+            pdf_path = _decrypt_file(encrypted_path)
+            logger.info(f"🔓 Decrypted upload for analysis: upload_id={upload_id[:8]}...")
+        except Exception as e:
+            logger.error(f"Failed to decrypt upload {upload_id[:8]}...: {e}")
+            return jsonify({'success': False, 'error': 'Failed to process uploaded file'}), 500
+    else:
+        pdf_path = encrypted_path  # Legacy unencrypted upload
 
     # Get API key
     openai_key = os.getenv('OPENAI_API_KEY')
     if not openai_key:
+        # Clean up decrypted file if we created one
+        if is_encrypted and pdf_path != encrypted_path:
+            try:
+                os.unlink(pdf_path)
+            except:
+                pass
         return jsonify({'success': False, 'error': 'API key not configured'}), 500
+
+    # Audit log the analysis start
+    audit_log('analyze_start', username, {
+        'session_id': session_id,
+        'upload_id': upload_id[:8] + '...',
+        'filename': pdf_filename,
+        'mode': analysis_mode
+    })
 
     # Create progress queue for this session (atomic to prevent race condition)
     progress_queues.setdefault(session_id, queue.Queue(maxsize=1000))
@@ -790,10 +1054,28 @@ def analyze_document():
         except queue.Full:
             logger.warning(f"Progress queue full, dropping SSE event: {event_type}")
 
+    # Track paths for cleanup (captured in closure)
+    decrypted_pdf_path = pdf_path  # Path to decrypted temp file (if encrypted)
+    source_upload_id = upload_id   # Upload ID for cleanup after completion
+    source_encrypted = is_encrypted
+
+    def _cleanup_temp_files():
+        """Clean up decrypted temp file and optionally the encrypted upload."""
+        # Always delete the decrypted temp file
+        if source_encrypted and decrypted_pdf_path and os.path.exists(decrypted_pdf_path):
+            try:
+                os.unlink(decrypted_pdf_path)
+                logger.info(f"🧹 Deleted decrypted temp file for session: {session_id[:12]}...")
+            except Exception as e:
+                logger.warning(f"Failed to delete decrypted temp file: {e}")
+
+        # Delete the encrypted upload (analysis complete, no longer needed)
+        _secure_delete_upload(source_upload_id)
+
     # Define analysis function to run in thread
     def run_analysis():
         try:
-            logger.info(f"Starting analysis in thread: {session_id}")
+            logger.info(f"Starting analysis in thread: {session_id[:12]}...")
             if enabled_sections:
                 logger.info(f"Enabled sections: {enabled_sections}")
 
@@ -814,14 +1096,18 @@ def analyze_document():
             )
 
             # Store in active_analyses IMMEDIATELY (for partial results)
+            # Determine owner (if any) and store for ownership checks
+            owner = username if username else None
+
             active_analyses[session_id] = {
                 'orchestrator': orchestrator,
                 'config_path': config_path,
                 'pdf_path': pdf_path,
                 'pdf_filename': pdf_filename,
-                'mode': analysis_mode
+                'mode': analysis_mode,
+                'owner': owner
             }
-            logger.info(f"Orchestrator stored in active_analyses: {session_id} (mode: {analysis_mode})")
+            logger.info(f"Orchestrator stored in active_analyses: {session_id} (mode: {analysis_mode}, owner={owner})")
 
             # Run analysis (blocking in THIS thread, not main Flask thread)
             loop = asyncio.new_event_loop()
@@ -867,24 +1153,34 @@ def analyze_document():
                             'result': result,
                             'orchestrator': orchestrator,
                             'config_path': config_path,
-                            'pdf_path': pdf_path,
+                            'pdf_path': '[CLEANED]',  # File is deleted after analysis - don't store actual path
                             'pdf_filename': pdf_filename,
                             'mode': analysis_mode,
+                            'owner': owner,
                             'completed_at': datetime.now(),
                             'status': 'completed'
                         }
                         del active_analyses[session_id]
                         # Update timestamp so cleanup doesn't delete recently completed analyses
                         session_timestamps[session_id] = datetime.now()
-                        logger.info(f"✅ Session moved to completed_analyses: {session_id} (mode: {analysis_mode})")
+                        logger.info(f"✅ Session moved to completed_analyses: {session_id[:12]}... (mode: {analysis_mode})")
 
                 # Signal done
                 progress_q.put(('done', {}))
 
-                logger.info(f"Analysis complete: {session_id}")
+                logger.info(f"Analysis complete: {session_id[:12]}...")
+
+                # Audit log successful completion
+                audit_log('analyze_complete', owner, {
+                    'session_id': session_id,
+                    'questions_answered': result.questions_answered,
+                    'processing_time': f"{result.processing_time_seconds:.1f}s"
+                })
 
             finally:
                 loop.close()
+                # Clean up temp files after analysis completes
+                _cleanup_temp_files()
 
         except Exception as e:
             logger.error(f"Analysis failed: {e}", exc_info=True)
@@ -901,22 +1197,37 @@ def analyze_document():
                         partial_analyses[session_id] = {
                             'orchestrator': active_analyses[session_id]['orchestrator'],
                             'config_path': active_analyses[session_id]['config_path'],
-                            'pdf_path': active_analyses[session_id].get('pdf_path', ''),
+                            'pdf_path': '[CLEANED]',  # Don't store actual path
                             'pdf_filename': active_analyses[session_id].get('pdf_filename', 'Unknown.pdf'),
                             'mode': active_analyses[session_id].get('mode', 'bid_spec'),
                             'stopped_at': datetime.now(),
                             'status': 'stopped',
-                            'error': error_msg
+                            'error': error_msg,
+                            'owner': active_analyses[session_id].get('owner')
                         }
                         del active_analyses[session_id]
                         # Update timestamp so cleanup doesn't delete stopped analyses
                         session_timestamps[session_id] = datetime.now()
-                        logger.info(f"✅ Session moved to partial_analyses: {session_id}")
+                        logger.info(f"✅ Session moved to partial_analyses: {session_id[:12]}...")
+
+                # Audit log user stop
+                audit_log('analyze_stopped', username, {
+                    'session_id': session_id
+                })
             else:
                 # Clean up failed analysis on actual errors
                 if session_id in active_analyses:
                     del active_analyses[session_id]
-                    logger.info(f"Session cleaned up due to error: {session_id}")
+                    logger.info(f"Session cleaned up due to error: {session_id[:12]}...")
+
+                # Audit log failure (don't include full error message - may contain sensitive info)
+                audit_log('analyze_failed', username, {
+                    'session_id': session_id,
+                    'error_type': type(e).__name__
+                })
+
+            # Always clean up temp files on failure
+            _cleanup_temp_files()
 
     # Start analysis thread
     thread = threading.Thread(target=run_analysis, daemon=True)
@@ -1024,6 +1335,17 @@ def get_results(session_id):
                 'error': 'Session not found',
                 'message': 'Analysis session does not exist or has been cleaned up'
             }), 404
+
+    # Enforce ownership / admin access for session results
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized access to session results'}), 403
+
+    # Audit log results access
+    username, _ = _current_user_info()
+    audit_log('get_results', username, {
+        'session_id': session_id,
+        'session_type': session_type
+    })
 
     # Process results based on session type (outside lock to avoid long hold)
     from services.hotdog.layers import ConfigurationLoader
@@ -1310,6 +1632,10 @@ def export_excel_dashboard(session_id):
     browser_output = None
     is_partial = False
 
+    # Authorization check
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized access to export'}), 403
+
     # Check completed_analyses first (NEW - primary storage)
     if session_id in completed_analyses:
         logger.info(f"Exporting completed analysis: {session_id}")
@@ -1454,6 +1780,14 @@ def export_excel_dashboard(session_id):
         mode_suffix = '_bidspec'  # This endpoint is for bid/spec mode
         filename = f'{project_name}_{date_str}{mode_suffix}{partial_suffix}.xlsx'
 
+        # Audit log export
+        username, _ = _current_user_info()
+        audit_log('export_excel_dashboard', username, {
+            'session_id': session_id,
+            'filename': filename,
+            'is_partial': is_partial
+        })
+
         return send_file(
             excel_file,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1476,6 +1810,10 @@ def export_bestprep_excel(session_id):
     from services.hotdog.mode_config import AnalysisMode
 
     logger.info(f"BestPrep Excel export requested for session: {session_id}")
+
+    # Authorization check
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized access to export'}), 403
 
     # Find session in completed, partial, active, or legacy analyses
     session_data = None
@@ -1532,6 +1870,7 @@ def export_bestprep_excel(session_id):
         accumulator_data = orchestrator.bestprep_accumulator.to_dict()
         logger.info(f"Accumulator data retrieved: {len(accumulator_data.get('cumulative_answers', {}))} questions")
 
+
         # Build result dict for generator
         result_dict = {
             'document_name': session_data.get('pdf_filename', 'Unknown'),
@@ -1569,6 +1908,14 @@ def export_bestprep_excel(session_id):
 
         logger.info(f"BestPrep Excel export successful: {filename}")
 
+        # Audit log export
+        username, _ = _current_user_info()
+        audit_log('export_bestprep_excel', username, {
+            'session_id': session_id,
+            'filename': filename,
+            'is_partial': is_partial
+        })
+
         return send_file(
             excel_file,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1589,6 +1936,7 @@ def export_bestprep_excel(session_id):
 def stop_analysis(session_id):
     """
     Stop ongoing analysis and wait for session to move to partial_analyses.
+    Requires session ownership.
 
     CRITICAL FIX: This endpoint now WAITS for the analysis thread to move
     the session from active_analyses to partial_analyses before returning.
@@ -1597,7 +1945,11 @@ def stop_analysis(session_id):
 
     See: STOP_ANALYSIS_RACE_CONDITION.md
     """
-    logger.info(f"⏹️  Stop requested for: {session_id}")
+    # Validate session ownership before allowing stop
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized access to session'}), 403
+
+    logger.info(f"⏹️  Stop requested for: {session_id[:12]}...")
 
     # Check if session exists (with lock for thread safety)
     with session_lock:
@@ -1897,6 +2249,7 @@ def run_deep_rag_on_selected(session_id):
 # ============================================================================
 
 @app.route('/api/admin/sessions', methods=['GET'])
+@require_admin
 def get_all_sessions():
     """Admin endpoint: Get all active, completed, and partial analyses"""
     from datetime import datetime
@@ -1917,8 +2270,10 @@ def get_all_sessions():
             info = {
                 'session_id': session_id,
                 'status': status,
-                'pdf_path': session_data.get('pdf_path', 'N/A'),
+                # Do not expose internal file paths; show filename and owner only
+                'pdf_path': '[REDACTED]',
                 'pdf_filename': session_data.get('pdf_filename', 'Unknown.pdf'),
+                'owner': session_data.get('owner', None),
                 'config_path': session_data.get('config_path', 'N/A'),
                 'mode': session_data.get('mode', 'bid_spec'),  # Include analysis mode for export routing
             }

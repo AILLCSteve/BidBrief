@@ -190,15 +190,19 @@ class MultiExpertProcessor:
         # Build the expert prompt
         prompt = self._build_expert_prompt(window, expert, questions)
 
-        # Log API call details for debugging
+        # Log API call details for debugging (suppress sensitive content when requested)
         logger.info(f"\n{'='*80}")
         logger.info(f"🔵 API CALL: Expert '{expert.name}' - Window {window.window_num}")
         logger.info(f"{'='*80}")
         logger.info(f"MODEL: {self.model}")
+        logger.info("SYSTEM PROMPT:")
         logger.info(f"SYSTEM PROMPT ({len(expert.system_prompt)} chars):")
         logger.info(f"{expert.system_prompt[:500]}..." if len(expert.system_prompt) > 500 else expert.system_prompt)
-        logger.info(f"\nUSER PROMPT ({len(prompt)} chars):")
+
+        logger.info("USER PROMPT:")
+        logger.info(f"USER PROMPT ({len(prompt)} chars):")
         logger.info(f"{prompt[:500]}..." if len(prompt) > 500 else prompt)
+
         logger.info(f"{'='*80}\n")
 
         # Build system prompt with context guardrails (if any)
@@ -232,7 +236,7 @@ class MultiExpertProcessor:
 
             tokens_used = response.usage.total_tokens
 
-            # Log API response details
+            # Log API response details (suppress sensitive content when requested)
             logger.info(f"\n{'='*80}")
             logger.info(f"🟢 API RESPONSE: Expert '{expert.name}'")
             logger.info(f"{'='*80}")
