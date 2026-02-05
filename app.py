@@ -2730,12 +2730,13 @@ def start_scraper_research():
 
 @app.route('/api/scraper/research/<session_id>', methods=['GET'])
 def get_scraper_research(session_id):
-    """Get status and results of a research session."""
-    user_data, error = _check_scraper_admin()
-    if error:
-        return error
+    """Get status and results of a research session.
 
+    Auth: Uses session_id as authentication - the session_id is a cryptographically
+    random string only returned to the authenticated user who started the research.
+    """
     with session_lock:
+        # Session ID itself serves as auth - it's secret and only known to the user who started research
         if session_id not in cityscraper_sessions:
             return jsonify({'error': 'Session not found'}), 404
 
@@ -2754,15 +2755,17 @@ def get_scraper_research(session_id):
 
 @app.route('/api/scraper/events/<session_id>', methods=['GET'])
 def get_scraper_events(session_id):
-    """Get agent activity events for a session (for UI display)."""
-    user_data, error = _check_scraper_admin()
-    if error:
-        return error
+    """Get agent activity events for a session (for UI display).
 
+    Auth: Uses session_id as authentication - the session_id is a cryptographically
+    random string only returned to the authenticated user who started the research.
+    This avoids cookie-based auth issues with multi-worker deployments.
+    """
     # Optional: get events since a specific index
     since_index = request.args.get('since', 0, type=int)
 
     with session_lock:
+        # Session ID itself serves as auth - it's secret and only known to the user who started research
         if session_id not in cityscraper_events:
             return jsonify({'error': 'Session not found'}), 404
 
@@ -2780,12 +2783,12 @@ def get_scraper_events(session_id):
 
 @app.route('/api/scraper/stop/<session_id>', methods=['POST'])
 def stop_scraper_research(session_id):
-    """Cancel an in-progress research session."""
-    user_data, error = _check_scraper_admin()
-    if error:
-        return error
+    """Cancel an in-progress research session.
 
+    Auth: Uses session_id as authentication - only the user who started the research knows it.
+    """
     with session_lock:
+        # Session ID itself serves as auth
         if session_id not in cityscraper_sessions:
             return jsonify({'error': 'Session not found'}), 404
 
@@ -3314,16 +3317,16 @@ def delete_scraper_session(session_id):
 
 @app.route('/api/scraper/export/excel/<session_id>', methods=['GET'])
 def export_scraper_excel(session_id):
-    """Export CityScraper results as Excel workbook (admin only)."""
-    user_data, error = _check_scraper_admin()
-    if error:
-        return error
+    """Export CityScraper results as Excel workbook.
 
+    Auth: Uses session_id as authentication.
+    """
     available, error_response = _check_scraper_available()
     if not available:
         return error_response
 
     with session_lock:
+        # Session ID itself serves as auth
         if session_id not in cityscraper_results:
             return jsonify({'error': 'Session not found or not completed'}), 404
 
@@ -3391,16 +3394,16 @@ def export_scraper_excel(session_id):
 
 @app.route('/api/scraper/export/markdown/<session_id>', methods=['GET'])
 def export_scraper_markdown(session_id):
-    """Export CityScraper results as Markdown tables (admin only)."""
-    user_data, error = _check_scraper_admin()
-    if error:
-        return error
+    """Export CityScraper results as Markdown tables.
 
+    Auth: Uses session_id as authentication.
+    """
     available, error_response = _check_scraper_available()
     if not available:
         return error_response
 
     with session_lock:
+        # Session ID itself serves as auth
         if session_id not in cityscraper_results:
             return jsonify({'error': 'Session not found or not completed'}), 404
 
