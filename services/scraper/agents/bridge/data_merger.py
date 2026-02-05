@@ -146,7 +146,7 @@ class DataMergerAgent(BaseAgent):
         answerable = gap_analysis.get('answerable_gaps', [])
         if answerable:
             parts.append(f"\nAnswerable Gaps ({len(answerable)} questions):")
-            for i, gap in enumerate(answerable[:10], 1):  # Limit to 10 for prompt
+            for i, gap in enumerate(answerable[:25], 1):  # Increased from 10 for comprehensive gap analysis
                 question = gap.get('question', 'Unknown question')
                 priority = gap.get('priority', 'UNKNOWN')
                 source = gap.get('data_source', 'unknown')
@@ -160,7 +160,7 @@ class DataMergerAgent(BaseAgent):
         unanswerable = gap_analysis.get('unanswerable_gaps', [])
         if unanswerable:
             parts.append(f"\nUnanswerable Gaps ({len(unanswerable)} questions):")
-            for i, gap in enumerate(unanswerable[:5], 1):  # Limit to 5
+            for i, gap in enumerate(unanswerable[:15], 1):  # Increased from 5
                 question = gap.get('question', 'Unknown question')
                 reason = gap.get('reason', 'No reason given')
                 parts.append(f"  {i}. {question}")

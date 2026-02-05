@@ -676,7 +676,7 @@ require LLM assistance. If invoked, help with dispatch decisions."""
                 'total_data_points_extracted': extraction_result.total_data_points_extracted,
                 'systems_info_rows_count': len(extraction_result.systems_info_rows or []),
                 'public_bid_rows_count': len(extraction_result.public_bid_rows or []),
-                'data_gaps': (extraction_result.data_gaps or [])[:10],  # Limit for output
+                'data_gaps': (extraction_result.data_gaps or [])[:50],  # Increased from 10 for comprehensive reporting
                 'downloaded_documents_count': len(extraction_result.downloaded_documents or []),
             }
         except (AttributeError, TypeError) as e:

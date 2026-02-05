@@ -177,7 +177,7 @@ class GapAnalyzerAgent(BaseAgent):
             findings = hotdog_analysis['key_findings']
             if isinstance(findings, list):
                 parts.append("Key Findings:")
-                for finding in findings[:5]:  # Limit to 5
+                for finding in findings[:15]:  # Increased from 5
                     parts.append(f"  - {finding}")
 
         # Include extracted data points if available
