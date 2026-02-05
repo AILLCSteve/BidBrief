@@ -476,13 +476,16 @@ def check_auth_cookie():
 def require_auth(f):
     """
     Decorator to require authentication for a route.
-    Redirects to /login if not authenticated.
+    For API routes (/api/*): returns JSON 401 error.
+    For page routes: redirects to /login.
     """
     from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
         session = check_auth_cookie()
         if not session:
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
             return redirect('/login')
         return f(*args, **kwargs)
     return decorated_function
@@ -491,17 +494,26 @@ def require_auth(f):
 def require_admin(f):
     """
     Decorator to require admin role for a route.
-    Redirects to /login if not authenticated, or / if not admin.
+    For API routes (/api/*): returns JSON 401/403 errors.
+    For page routes: redirects to /login or /.
     """
     from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
         session = check_auth_cookie()
+        is_api = request.path.startswith('/api/')
+
         if not session:
+            if is_api:
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
             return redirect('/login')
+
         if session.get('role') != 'admin':
             logger.warning(f"Non-admin user '{session.get('username')}' attempted to access admin route")
+            if is_api:
+                return jsonify({'success': False, 'error': 'Admin access required'}), 403
             return redirect('/')  # Redirect non-admins to home
+
         return f(*args, **kwargs)
     return decorated_function
 

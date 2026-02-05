@@ -47,13 +47,17 @@ def test_config_apikey_admin_protected(client, monkeypatch):
     assert 'masked' in data
 
 
-def test_config_apikey_non_admin_redirects(client):
+def test_config_apikey_non_admin_returns_403(client):
+    """Test that non-admin users get 403 JSON error for admin API routes."""
     token = 'user-token'
     headers = _create_auth_cookie(client, token, 'bob', role='user')
 
-    resp = client.get('/api/config/apikey', headers=headers, follow_redirects=False)
-    # Non-admins are redirected to home
-    assert resp.status_code in (302, 303)
+    resp = client.get('/api/config/apikey', headers=headers)
+    # API routes return JSON 403, not redirect
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data['success'] is False
+    assert 'Admin access required' in data['error']
 
 
 def test_upload_requires_auth(client):
@@ -61,9 +65,12 @@ def test_upload_requires_auth(client):
     data = {
         'file': (io.BytesIO(b'%PDF-1.4\n%EOF\n'), 'test_upload.pdf')
     }
-    # Without auth cookie, should redirect to login
-    resp = client.post('/api/upload', data=data, content_type='multipart/form-data', follow_redirects=False)
-    assert resp.status_code in (302, 303)  # Redirect to login
+    # API routes return JSON 401, not redirect
+    resp = client.post('/api/upload', data=data, content_type='multipart/form-data')
+    assert resp.status_code == 401
+    body = resp.get_json()
+    assert body['success'] is False
+    assert 'Authentication required' in body['error']
 
 
 def test_upload_returns_upload_id_and_no_path(client):
