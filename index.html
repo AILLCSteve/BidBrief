@@ -3968,13 +3968,22 @@ function switchMainTab(tabName) {
 let csSessionId = null;
 let csPollingInterval = null;
 let csEventIndex = 0;
+let csResearchInProgress = false;  // Debounce flag to prevent double-clicks
 
 async function startCityScraperResearch() {
+    // Debounce: prevent double-clicks from starting multiple research sessions
+    if (csResearchInProgress) {
+        console.log('[CityScraper] Research already in progress, ignoring duplicate click');
+        return;
+    }
+    csResearchInProgress = true;
+
     const municipality = document.getElementById('cs-municipality').value;
     const tableMode = document.getElementById('cs-table-mode').value;
 
     if (!municipality) {
         alert('Please enter a municipality');
+        csResearchInProgress = false;
         return;
     }
 
@@ -4012,6 +4021,7 @@ async function startCityScraperResearch() {
         alert('Error starting research: ' + error.message);
         document.getElementById('cs-start-research').disabled = false;
         document.getElementById('cs-stop-research').disabled = true;
+        csResearchInProgress = false;  // Reset debounce flag on error
     }
 }
 
@@ -4022,6 +4032,25 @@ async function pollCityScraperEvents() {
         const response = await fetch(`/api/scraper/events/${csSessionId}?since=${csEventIndex}`, {
             credentials: 'same-origin'
         });
+
+        // Handle auth errors - session may have expired
+        if (response.status === 401) {
+            addCSDebugLog('Authentication expired - trying to load results directly');
+            clearInterval(csPollingInterval);
+            csResearchInProgress = false;
+            // Try to load results anyway (research may have completed)
+            loadCityScraperResults();
+            return;
+        }
+
+        if (response.status === 404) {
+            addCSDebugLog('Session not found - research may have completed');
+            clearInterval(csPollingInterval);
+            csResearchInProgress = false;
+            loadCityScraperResults();
+            return;
+        }
+
         const data = await response.json();
 
         // Update event index
@@ -4038,6 +4067,7 @@ async function pollCityScraperEvents() {
         // Check if complete
         if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
             clearInterval(csPollingInterval);
+            csResearchInProgress = false;  // Reset debounce flag when research ends
             document.getElementById('cs-start-research').disabled = false;
             document.getElementById('cs-stop-research').disabled = true;
             if (data.status === 'completed') {
@@ -4465,9 +4495,11 @@ async function stopCityScraperResearch() {
             credentials: 'same-origin'
         });
         addCSDebugLog('Stop request sent');
+        csResearchInProgress = false;  // Reset debounce flag when stopped
     } catch (error) {
         console.error('Stop error:', error);
         addCSDebugLog('Stop error: ' + error.message);
+        csResearchInProgress = false;  // Reset debounce flag even on error
     }
 }
 
