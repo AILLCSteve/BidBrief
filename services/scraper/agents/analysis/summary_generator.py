@@ -174,7 +174,7 @@ class SummaryGeneratorAgent(BaseAgent):
         systems_info = extraction_result.get('systems_info_rows', [])
         if systems_info:
             parts.append(f"\n## Systems Information ({len(systems_info)} records):\n")
-            for i, row in enumerate(systems_info[:5], 1):
+            for i, row in enumerate(systems_info[:20], 1):  # Increased from 5
                 if isinstance(row, dict):
                     parts.append(f"### Record {i}:")
                     for key, val in row.items():
@@ -189,7 +189,7 @@ class SummaryGeneratorAgent(BaseAgent):
         public_bids = extraction_result.get('public_bid_rows', [])
         if public_bids:
             parts.append(f"\n## Public Bids ({len(public_bids)} bids):\n")
-            for i, bid in enumerate(public_bids[:5], 1):
+            for i, bid in enumerate(public_bids[:20], 1):
                 if isinstance(bid, dict):
                     parts.append(f"### Bid {i}:")
                     title = bid.get('bid_contract_title', 'Unknown')
@@ -205,16 +205,16 @@ class SummaryGeneratorAgent(BaseAgent):
         data_gaps = extraction_result.get('data_gaps', [])
         if data_gaps:
             parts.append(f"\n## Data Gaps ({len(data_gaps)} items):")
-            for gap in data_gaps[:10]:
+            for gap in data_gaps[:30]:
                 parts.append(f"  - {gap}")
-            if len(data_gaps) > 10:
-                parts.append(f"  ... and {len(data_gaps) - 10} more")
+            if len(data_gaps) > 30:
+                parts.append(f"  ... and {len(data_gaps) - 30} more")
 
         # Include conflicts if present
         conflicts = extraction_result.get('conflicts_detected', [])
         if conflicts:
             parts.append(f"\n## Data Conflicts ({len(conflicts)} items):")
-            for conflict in conflicts[:5]:
+            for conflict in conflicts[:15]:
                 if isinstance(conflict, dict):
                     parts.append(f"  - {conflict.get('description', str(conflict)[:200])}")
                 else:
