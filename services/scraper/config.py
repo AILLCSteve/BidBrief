@@ -24,12 +24,12 @@ class TavilyConfig:
     """Tavily API configuration."""
     api_key: str
     search_depth: str = "advanced"
-    max_results_per_query: int = 10
+    max_results_per_query: int = 20  # Increased from 10 for more comprehensive results
     include_raw_content: bool = True
     include_answer: bool = True
-    timeout_seconds: int = 30
+    timeout_seconds: int = 60  # Increased from 30 for larger result sets
     preferred_domains: List[str] = field(default_factory=lambda: [".gov", ".us", ".org"])
-    requests_per_minute: int = 20
+    requests_per_minute: int = 30  # Increased from 20
 
     @classmethod
     def from_env(cls) -> Optional['TavilyConfig']:
@@ -50,7 +50,7 @@ class OpenAIConfig:
     api_key: str
     model: str = "gpt-4o"
     temperature: float = 0.1  # Low for accuracy
-    max_tokens: int = 4096
+    max_tokens: int = 16384  # Increased from 4096 for complete responses
 
     @classmethod
     def from_env(cls) -> Optional['OpenAIConfig']:
@@ -67,7 +67,7 @@ class OpenAIConfig:
 @dataclass
 class AgentConfig:
     """Configuration for individual agents."""
-    max_context_tokens: int = 4000
+    max_context_tokens: int = 32000  # Increased from 4000 for gpt-4o's full context
     max_retries: int = 3
     retry_delay_seconds: float = 2.0
     require_citations: bool = True

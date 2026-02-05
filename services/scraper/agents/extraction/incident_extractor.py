@@ -122,72 +122,74 @@ class IncidentExtractorAgent(BaseAgent):
 
         # ==============================================================
         # SEWAGE INCIDENT SEARCHES (Schema Column 8) - PRIMARY PRIORITY
+        # Increased max_results for comprehensive data collection
         # ==============================================================
 
         # SSO/Overflow focused (HIGHEST PRIORITY)
         queries.extend([
-            (f"{municipality_name} {state} SSO sanitary sewer overflow report", 5),
-            (f"{municipality_name} {state} sewer overflow incident spill", 5),
-            (f"{municipality_name} {state} sewage spill discharge release", 5),
-            (f"{municipality_name} {state} sewer overflow EPA violation", 4),
-            (f"{municipality_name} {state} SSO annual report count", 4),
+            (f"{municipality_name} {state} SSO sanitary sewer overflow report", 15),
+            (f"{municipality_name} {state} sewer overflow incident spill", 15),
+            (f"{municipality_name} {state} sewage spill discharge release", 15),
+            (f"{municipality_name} {state} sewer overflow EPA violation", 10),
+            (f"{municipality_name} {state} SSO annual report count", 10),
         ])
 
         # Regulatory and compliance focused
         queries.extend([
-            (f"{municipality_name} {state} EPA ECHO enforcement wastewater", 5),
-            (f"{municipality_name} {state} NPDES violation sewer wastewater", 5),
-            (f"{municipality_name} {state} consent decree sewer EPA", 5),
-            (f"{municipality_name} {state} consent order wastewater violation", 4),
-            (f"{state} environmental agency {municipality_name} sewer violation", 4),
+            (f"{municipality_name} {state} EPA ECHO enforcement wastewater", 15),
+            (f"{municipality_name} {state} NPDES violation sewer wastewater", 15),
+            (f"{municipality_name} {state} consent decree sewer EPA", 15),
+            (f"{municipality_name} {state} consent order wastewater violation", 10),
+            (f"{state} environmental agency {municipality_name} sewer violation", 10),
         ])
 
         # CMOM/Compliance reporting focused
         queries.extend([
-            (f"{municipality_name} {state} CMOM SSO report overflow", 5),
-            (f"{municipality_name} {state} sewer overflow compliance report", 4),
-            (f"{municipality_name} {state} wastewater compliance annual report", 4),
+            (f"{municipality_name} {state} CMOM SSO report overflow", 15),
+            (f"{municipality_name} {state} sewer overflow compliance report", 10),
+            (f"{municipality_name} {state} wastewater compliance annual report", 10),
         ])
 
         # Stoppage and pipe break focused
         queries.extend([
-            (f"{municipality_name} {state} sewer stoppage blockage backup", 5),
-            (f"{municipality_name} {state} sewer main break emergency", 4),
-            (f"{municipality_name} {state} pipe break sewer collapse", 4),
-            (f"{municipality_name} {state} sewer backup flooding basement", 4),
+            (f"{municipality_name} {state} sewer stoppage blockage backup", 15),
+            (f"{municipality_name} {state} sewer main break emergency", 10),
+            (f"{municipality_name} {state} pipe break sewer collapse", 10),
+            (f"{municipality_name} {state} sewer backup flooding basement", 10),
         ])
 
         # Costs and fines focused
         queries.extend([
-            (f"{municipality_name} {state} sewer fine penalty EPA", 5),
-            (f"{municipality_name} {state} environmental fine sewer violation", 4),
-            (f"{municipality_name} {state} consent decree penalty wastewater", 4),
+            (f"{municipality_name} {state} sewer fine penalty EPA", 15),
+            (f"{municipality_name} {state} environmental fine sewer violation", 10),
+            (f"{municipality_name} {state} consent decree penalty wastewater", 10),
         ])
 
         # Environmental impact focused
         queries.extend([
-            (f"{municipality_name} {state} sewage release waterway river creek", 4),
-            (f"{municipality_name} {state} sewer overflow environmental impact", 4),
-            (f"{municipality_name} {state} raw sewage discharge gallons", 4),
+            (f"{municipality_name} {state} sewage release waterway river creek", 10),
+            (f"{municipality_name} {state} sewer overflow environmental impact", 10),
+            (f"{municipality_name} {state} raw sewage discharge gallons", 10),
         ])
 
         # ==============================================================
         # STORM DRAIN INCIDENT SEARCHES (Schema Column 9) - PRIORITY
+        # Increased max_results for comprehensive data collection
         # ==============================================================
 
         # Flooding events focused
         queries.extend([
-            (f"{municipality_name} {state} street flooding storm drain", 5),
-            (f"{municipality_name} {state} storm drain overflow flooding", 5),
-            (f"{municipality_name} {state} flash flood drainage problem", 4),
-            (f"{municipality_name} {state} flooding complaint storm sewer", 4),
+            (f"{municipality_name} {state} street flooding storm drain", 15),
+            (f"{municipality_name} {state} storm drain overflow flooding", 15),
+            (f"{municipality_name} {state} flash flood drainage problem", 10),
+            (f"{municipality_name} {state} flooding complaint storm sewer", 10),
         ])
 
         # Clogged drains focused
         queries.extend([
-            (f"{municipality_name} {state} clogged storm drain debris", 4),
-            (f"{municipality_name} {state} storm drain blockage maintenance", 4),
-            (f"{municipality_name} {state} drainage infrastructure problem", 4),
+            (f"{municipality_name} {state} clogged storm drain debris", 10),
+            (f"{municipality_name} {state} storm drain blockage maintenance", 10),
+            (f"{municipality_name} {state} drainage infrastructure problem", 10),
         ])
 
         # Storm system costs/fines

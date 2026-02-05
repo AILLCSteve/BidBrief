@@ -1,0 +1,200 @@
+================================================================================
+PF-2 JURISDICTION MAPPER AGENT - CODE QUALITY RE-REVIEW
+================================================================================
+File: services/scraper/agents/preflight/jurisdiction_mapper.py
+Commit: 0ea1334
+Review Date: 2026-02-03
+
+VERDICT: ✅ APPROVED - PRODUCTION READY
+================================================================================
+
+CRITICAL ISSUES RESOLUTION:
+
+1. ✅ UNSAFE JSON EXTRACTION → FIXED
+   - Added validation loop: for candidate in candidates: json.loads(candidate)
+   - Each extracted JSON is tested before returning
+   - Returns first valid JSON found
+   - Raises ValueError with clear diagnostics if none valid
+   Evidence: Lines 82-89
+
+2. ✅ INCOMPLETE OUTPUT VALIDATION → FIXED
+   - Created dedicated helper: _validate_entity_info(entity, path)
+   - Eliminates duplicated validation logic for owner/operator
+   - Validates entity structure (type checking, enum validation)
+   - Called from validate_output() for both sanitary_sewer and stormwater
+   Evidence: Lines 410-434 + usage at 378-379, 386-387
+
+3. ✅ MISSING SEARCH RESULTS VALIDATION → FIXED
+   - Added isinstance(result, dict) type checking
+   - Logs and skips non-dict results
+   - Validates content: strip(), minimum 20 chars
+   - Checks empty results list after filtering
+   - Proper fallback message when no valid results found
+   Evidence: Lines 150-152, 157-159, 165-166
+
+4. ✅ INITIALIZE JSON_STR → FIXED
+   - Both `content` and `json_str` initialized to empty strings
+   - Placed BEFORE try block (lines 262-263)
+   - Prevents UnboundLocalError in exception handlers
+   - Safe to reference in except blocks
+   Evidence: Lines 262-263
+
+5. ✅ IMPROVED ERROR HANDLING → FIXED
+   - NEW ValueError handler for extraction failures (lines 337-347)
+   - Enhanced JSONDecodeError handler:
+     * Includes error position (e.pos)
+     * Includes error message (e.msg)
+     * Provides attempted_json for debugging
+   - Enhanced Exception handler:
+     * Uses logger.exception() for stacktrace
+     * Includes error type name
+     * Truncates output to prevent log spam
+   - All handlers include processing_time_seconds
+   Evidence: Lines 337-367
+
+================================================================================
+
+CODE QUALITY METRICS:
+
+Input Validation:
+  ✅ Type checking (str)
+  ✅ Length checking (200 chars municipality, 50 chars state)
+  ✅ Empty string checking
+  Result: PASS (6 validation points)
+
+JSON Handling:
+  ✅ Multi-strategy extraction
+  ✅ Validation loop with json.loads()
+  ✅ Clear error messages on failure
+  Result: PASS (Excellent safety)
+
+Search Results Processing:
+  ✅ Type validation (isinstance check)
+  ✅ Content filtering (min 20 chars)
+  ✅ Deduplication (URL tracking)
+  ✅ Empty results handling
+  Result: PASS (Robust and defensive)
+
+Output Validation:
+  ✅ Helper method approach (DRY principle)
+  ✅ Comprehensive entity checks
+  ✅ Enum validation (confidence, complexity, entity_type)
+  ✅ List type checking (regional_authorities)
+  Result: PASS (Well-structured)
+
+Error Handling:
+  ✅ Three specific exception handlers
+  ✅ Rich diagnostic information
+  ✅ Proper fallbacks
+  ✅ Logging at appropriate levels
+  Result: PASS (Professional error handling)
+
+Variable Initialization:
+  ✅ Pre-initialized before try block
+  ✅ Safe in all exception paths
+  ✅ Clear intent from init values
+  Result: PASS (No undefined variable risks)
+
+================================================================================
+
+SECURITY ASSESSMENT:
+
+Input Validation:     ✅ Type & length checks on all inputs
+Output Validation:    ✅ Whitelist-based enum validation
+Data Handling:        ✅ Truncation prevents log injection (100 char max)
+External APIs:        ✅ Tavily results validated before use
+Exception Handling:   ✅ Never re-raises, always returns response
+Overall Score:       9/10 (Excellent)
+
+================================================================================
+
+PERFORMANCE ASSESSMENT:
+
+Optimization Patterns:
+  ✅ Early exits on validation failure
+  ✅ Bounded loops (max 15 results)
+  ✅ Deduplication with O(1) set lookup
+  ✅ Controlled output truncation
+  ✅ Proper async/await for long operations
+
+Performance Score: 8/10 (Good, optimized for normal use cases)
+
+================================================================================
+
+ISSUE COMPARISON:
+
+Before Fixes:
+  - JSON extraction had no validation
+  - Search results not type-checked
+  - Entity validation duplicated
+  - Variables uninitialized in try block
+  - Generic error handling
+  Code Quality: 5/10
+
+After Fixes:
+  - All JSON validated before use
+  - Search results fully validated
+  - Dedicated validation helper (DRY)
+  - Variables safely initialized
+  - Specific, detailed error handling
+  Code Quality: 9/10
+
+Improvement: +4 points (+80%)
+
+================================================================================
+
+PRODUCTION READINESS:
+
+✅ Input Validation: Comprehensive (6 check points)
+✅ JSON Safety: Excellent (validation loop)
+✅ Search Processing: Robust (type + content checking)
+✅ Error Handling: Professional (3 specific handlers + fallback)
+✅ Diagnostics: Rich (error type, position, attempt data)
+✅ Variable Safety: Complete (pre-initialized)
+✅ Logging: Appropriate (error, warning, debug levels)
+✅ Recovery: Graceful (never crashes, always responds)
+
+FINAL VERDICT: ✅ APPROVED - PRODUCTION READY
+
+================================================================================
+
+RECOMMENDED NEXT STEPS:
+
+1. Merge to main branch
+2. Deploy to staging for integration testing
+3. Add unit tests for edge cases:
+   - Malformed JSON scenarios
+   - Empty search results
+   - Invalid entity types
+   - Missing required fields
+4. Monitor error logs in production
+5. Schedule performance testing with large datasets
+
+================================================================================
+
+Testing Commands to Consider:
+
+# Unit test extraction with various formats
+test_extract_json_markdown_format()
+test_extract_json_invalid_json_skipped()
+test_extract_json_no_valid_json_raises()
+
+# Unit test validation
+test_validate_entity_info_missing()
+test_validate_entity_info_invalid_type()
+test_validate_entity_info_invalid_entity_type()
+
+# Integration test with real search results
+test_build_context_filters_non_dict()
+
+================================================================================
+
+Review Summary:
+File:        services/scraper/agents/preflight/jurisdiction_mapper.py
+Lines:       490 total, ~80 modified
+Commit:      0ea1334
+Issues:      5 Critical/High (ALL FIXED)
+Score:       9/10 (Production Ready)
+Status:      ✅ APPROVED
+
+================================================================================

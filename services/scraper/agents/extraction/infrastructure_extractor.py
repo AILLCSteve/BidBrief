@@ -106,40 +106,40 @@ class InfrastructureExtractorAgent(BaseAgent):
         """
         queries = []
 
-        # Core infrastructure searches
+        # Core infrastructure searches - increased limits for comprehensive data
         queries.extend([
             # Sanitary sewer focused (PRIMARY)
-            (f"{municipality_name} {state} sanitary sewer system miles feet total", 5),
-            (f"{municipality_name} {state} sewer infrastructure asset inventory", 5),
-            (f"{municipality_name} {state} GIS sewer pipe data", 4),
-            (f"{municipality_name} {state} wastewater master plan infrastructure", 4),
-            (f"{municipality_name} {state} sewer collection system miles", 4),
+            (f"{municipality_name} {state} sanitary sewer system miles feet total", 15),
+            (f"{municipality_name} {state} sewer infrastructure asset inventory", 15),
+            (f"{municipality_name} {state} GIS sewer pipe data", 10),
+            (f"{municipality_name} {state} wastewater master plan infrastructure", 10),
+            (f"{municipality_name} {state} sewer collection system miles", 10),
 
             # Storm drain focused
-            (f"{municipality_name} {state} stormwater system miles feet total", 4),
-            (f"{municipality_name} {state} storm drain infrastructure inventory", 4),
-            (f"{municipality_name} {state} MS4 stormwater pipe system", 3),
-            (f"{municipality_name} {state} drainage master plan", 3),
+            (f"{municipality_name} {state} stormwater system miles feet total", 10),
+            (f"{municipality_name} {state} storm drain infrastructure inventory", 10),
+            (f"{municipality_name} {state} MS4 stormwater pipe system", 10),
+            (f"{municipality_name} {state} drainage master plan", 10),
 
             # Combined infrastructure searches
-            (f"{municipality_name} {state} utility infrastructure report", 3),
-            (f"{municipality_name} {state} capital improvement plan sewer storm", 3),
-            (f"{municipality_name} {state} public works infrastructure assets", 3),
+            (f"{municipality_name} {state} utility infrastructure report", 10),
+            (f"{municipality_name} {state} capital improvement plan sewer storm", 10),
+            (f"{municipality_name} {state} public works infrastructure assets", 10),
         ])
 
-        # Add terminology-based searches if provided
+        # Add terminology-based searches if provided - use all terms
         if terminology:
             sanitary_terms = terminology.get('sanitary_terms', [])
             storm_terms = terminology.get('storm_terms', [])
 
-            for term in sanitary_terms[:3]:  # Limit to top 3 terms
+            for term in sanitary_terms[:10]:  # Increased from 3 to use more terms
                 queries.append(
-                    (f"{municipality_name} {state} {term} system miles feet", 3)
+                    (f"{municipality_name} {state} {term} system miles feet", 10)
                 )
 
-            for term in storm_terms[:3]:
+            for term in storm_terms[:10]:  # Increased from 3 to use more terms
                 queries.append(
-                    (f"{municipality_name} {state} {term} miles feet", 3)
+                    (f"{municipality_name} {state} {term} miles feet", 10)
                 )
 
         return queries

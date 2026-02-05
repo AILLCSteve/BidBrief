@@ -112,39 +112,39 @@ class EquipmentExtractorAgent(BaseAgent):
         """
         queries = []
 
-        # Core equipment searches
+        # Core equipment searches - increased limits for comprehensive data
         queries.extend([
             # CCTV/Camera equipment focused (PRIMARY)
-            (f"{municipality_name} {state} sewer equipment fleet CCTV", 5),
-            (f"{municipality_name} {state} CCTV inspection truck camera", 5),
-            (f"{municipality_name} {state} sewer camera inspection equipment", 4),
+            (f"{municipality_name} {state} sewer equipment fleet CCTV", 15),
+            (f"{municipality_name} {state} CCTV inspection truck camera", 15),
+            (f"{municipality_name} {state} sewer camera inspection equipment", 10),
 
             # Cleaning equipment focused
-            (f"{municipality_name} {state} vactor truck jetter combination", 5),
-            (f"{municipality_name} {state} combination sewer cleaner", 4),
-            (f"{municipality_name} {state} sewer cleaning equipment fleet", 4),
+            (f"{municipality_name} {state} vactor truck jetter combination", 15),
+            (f"{municipality_name} {state} combination sewer cleaner", 10),
+            (f"{municipality_name} {state} sewer cleaning equipment fleet", 10),
 
             # Fleet/inventory focused
-            (f"{municipality_name} {state} public works equipment inventory", 5),
-            (f"{municipality_name} {state} fleet services sewer storm", 4),
-            (f"{municipality_name} {state} wastewater maintenance vehicles", 4),
+            (f"{municipality_name} {state} public works equipment inventory", 15),
+            (f"{municipality_name} {state} fleet services sewer storm", 10),
+            (f"{municipality_name} {state} wastewater maintenance vehicles", 10),
 
             # CIP/budget focused
-            (f"{municipality_name} {state} equipment replacement CIP", 4),
-            (f"{municipality_name} {state} fleet replacement sewer equipment", 3),
-            (f"{municipality_name} {state} capital equipment public works", 3),
+            (f"{municipality_name} {state} equipment replacement CIP", 10),
+            (f"{municipality_name} {state} fleet replacement sewer equipment", 10),
+            (f"{municipality_name} {state} capital equipment public works", 10),
 
             # Hydro-vac specific
-            (f"{municipality_name} {state} hydrovac hydro excavator truck", 3),
+            (f"{municipality_name} {state} hydrovac hydro excavator truck", 10),
         ])
 
-        # Add terminology-based searches if provided
+        # Add terminology-based searches if provided - use more terms
         if terminology:
             sanitary_terms = terminology.get('sanitary_terms', [])
 
-            for term in sanitary_terms[:2]:  # Limit to top 2 terms
+            for term in sanitary_terms[:5]:  # Increased from 2 to 5 terms
                 queries.append(
-                    (f"{municipality_name} {state} {term} equipment fleet", 3)
+                    (f"{municipality_name} {state} {term} equipment fleet", 10)
                 )
 
         return queries
