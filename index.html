@@ -4120,18 +4120,28 @@ async function loadCityScraperResults() {
 let currentCSResult = null;
 
 function displayCityScraperResults(result) {
-    console.log('displayCityScraperResults called with:', result);
-    addCSDebugLog('Displaying results...');
+    try {
+        console.log('displayCityScraperResults called with:', result);
+        addCSDebugLog('Displaying results...');
 
-    // Store for exports
-    currentCSResult = result;
+        // Store for exports
+        currentCSResult = result;
 
-    // Hide progress, show results
-    document.getElementById('cs-progress-section').classList.add('hidden');
-    document.getElementById('cs-results-section').classList.remove('hidden');
+        // Hide progress, show results
+        const progressSection = document.getElementById('cs-progress-section');
+        const resultsSection = document.getElementById('cs-results-section');
 
-    // Get data from result - check multiple paths
-    const presentation = result.presentation_result || {};
+        if (!progressSection || !resultsSection) {
+            console.error('CityScraper sections not found!');
+            addCSDebugLog('ERROR: CityScraper sections not found in DOM');
+            return;
+        }
+
+        progressSection.classList.add('hidden');
+        resultsSection.classList.remove('hidden');
+
+        // Get data from result - check multiple paths
+        const presentation = result.presentation_result || {};
     const extraction = result.extraction_result || {};
     const municipality = result.municipality || {};
     const statistics = result.statistics || {};
@@ -4305,7 +4315,26 @@ function displayCityScraperResults(result) {
     `;
     downloadsDiv.innerHTML = downloadsHtml;
 
-    addCSDebugLog('Results displayed successfully');
+        addCSDebugLog('Results displayed successfully');
+    } catch (error) {
+        console.error('Error displaying results:', error);
+        addCSDebugLog('ERROR displaying results: ' + error.message);
+
+        // Show error in results section
+        const tableDiv = document.getElementById('cs-results-table');
+        if (tableDiv) {
+            tableDiv.innerHTML = `
+                <div style="padding: 20px; background: #ffebee; border-radius: 8px; margin: 10px;">
+                    <h3 style="color: #c62828; margin-bottom: 10px;">Error Displaying Results</h3>
+                    <p style="color: #666;">${escapeHtml(error.message)}</p>
+                    <details style="margin-top: 15px;">
+                        <summary style="cursor: pointer; color: #1E3A8A;">View Raw Data</summary>
+                        <pre style="background: #f5f5f5; padding: 10px; margin-top: 10px; overflow-x: auto; font-size: 11px; max-height: 400px;">${escapeHtml(JSON.stringify(currentCSResult, null, 2))}</pre>
+                    </details>
+                </div>
+            `;
+        }
+    }
 }
 
 function getConfidenceColor(confidence) {
