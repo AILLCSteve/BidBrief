@@ -3039,13 +3039,17 @@ def start_scraper_research():
                 def on_event(event):
                     with session_lock:
                         if session_id in cityscraper_events:
-                            cityscraper_events[session_id].append({
+                            event_data = {
                                 'agent_id': getattr(event, 'agent_id', 'SYS'),
                                 'agent_name': getattr(event, 'agent_name', 'System'),
                                 'status': getattr(event, 'status', 'processing'),
                                 'message': getattr(event, 'message', ''),
                                 'timestamp': datetime.now().isoformat()
-                            })
+                            }
+                            # Pass through data_update for live table
+                            if hasattr(event, 'data_update') and event.data_update is not None:
+                                event_data['data_update'] = event.data_update
+                            cityscraper_events[session_id].append(event_data)
 
                 # Create orchestrator with event callback
                 orchestrator = StandaloneResearchOrchestrator(
@@ -3066,10 +3070,14 @@ def start_scraper_research():
 
                 with session_lock:
                     if session_id in cityscraper_sessions:
-                        cityscraper_sessions[session_id]['status'] = 'completed'
+                        if isinstance(result, dict) and result.get('success') is False:
+                            cityscraper_sessions[session_id]['status'] = 'failed'
+                            cityscraper_sessions[session_id]['error'] = result.get('error', 'Research returned unsuccessful result')
+                            logger.warning(f"CityScraper research failed (result.success=False): {session_id} - {result.get('error', 'unknown')}")
+                        else:
+                            cityscraper_sessions[session_id]['status'] = 'completed'
+                            logger.info(f"CityScraper research completed: {session_id}")
                         cityscraper_results[session_id] = result
-
-                logger.info(f"CityScraper research completed: {session_id}")
 
             except Exception as e:
                 logger.error(f"CityScraper research failed: {session_id} - {e}", exc_info=True)

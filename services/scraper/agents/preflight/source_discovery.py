@@ -412,12 +412,14 @@ Return the JSON source map as specified in your instructions."""
         # Validate official_website has URL if not null
         official = source_map.get('official_website')
         if official is not None and not official.get('url'):
-            errors.append("official_website present but missing 'url' field")
+            logger.warning("PF-3: official_website present but missing 'url' field — continuing with degraded data")
+            source_map['official_website'] = None
 
         # Validate sewer_utility_page (PRIMARY focus)
         sewer = source_map.get('sewer_utility_page')
         if sewer is not None and not isinstance(sewer, dict):
-            errors.append("sewer_utility_page must be a dictionary or null")
+            logger.warning("PF-3: sewer_utility_page is not a dict — setting to None")
+            source_map['sewer_utility_page'] = None
 
         # Validate confidence
         confidence = output.get('confidence')

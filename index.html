@@ -502,6 +502,17 @@
             padding: 0.5rem;
             border-radius: 0 0 4px 4px;
         }
+        /* Live table styles */
+        .pf-value { color: #333; }
+        .pf-value.pending { color: #999; font-style: italic; }
+        .pf-value.resolved { color: #1E3A8A; font-weight: 500; font-style: normal; }
+        .live-row-pending td { color: #bbb; font-style: italic; }
+        .live-row-found td { color: #333; font-style: normal; }
+        .confidence-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+        .confidence-high { background: #e8f5e9; color: #2e7d32; }
+        .confidence-medium { background: #fff3e0; color: #ed6c02; }
+        .confidence-low { background: #ffebee; color: #d32f2f; }
+        .confidence-unknown { background: #f5f5f5; color: #999; }
         .progress-section {
             background: rgba(255,255,255,0.95);
             padding: 20px;
@@ -818,6 +829,49 @@
                     <summary>Debug Log</summary>
                     <div id="cs-debug-log" class="debug-content"></div>
                 </details>
+
+                <!-- Live Data Table -->
+                <div id="cs-live-table-section" class="hidden" style="margin-top: 20px;">
+                    <!-- Preflight Info Panel -->
+                    <div id="cs-preflight-panel" style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e0e0e0;">
+                        <h4 style="color: #1E3A8A; margin: 0 0 12px 0; border-bottom: 2px solid #5B7FCC; padding-bottom: 8px;">
+                            Pre-Flight Validation
+                            <span id="cs-preflight-status" style="float: right; font-size: 13px; padding: 2px 10px; border-radius: 12px; background: #e0e0e0; color: #666;">Pending</span>
+                        </h4>
+                        <div id="cs-preflight-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
+                            <div class="pf-field"><strong>Municipality:</strong> <span id="pf-municipality" class="pf-value pending">Resolving...</span></div>
+                            <div class="pf-field"><strong>County:</strong> <span id="pf-county" class="pf-value pending">&mdash;</span></div>
+                            <div class="pf-field"><strong>Region:</strong> <span id="pf-region" class="pf-value pending">&mdash;</span></div>
+                            <div class="pf-field"><strong>Sanitary Sewer Owner:</strong> <span id="pf-sanitary-owner" class="pf-value pending">&mdash;</span></div>
+                            <div class="pf-field"><strong>Storm Sewer Owner:</strong> <span id="pf-storm-owner" class="pf-value pending">&mdash;</span></div>
+                            <div class="pf-field"><strong>Official Website:</strong> <span id="pf-official-url" class="pf-value pending">&mdash;</span></div>
+                            <div class="pf-field"><strong>Sources Found:</strong> <span id="pf-sources-count" class="pf-value pending">&mdash;</span></div>
+                            <div class="pf-field"><strong>Readiness:</strong> <span id="pf-readiness" class="pf-value pending">&mdash;</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Live System Info Table -->
+                    <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
+                        <h4 style="color: #1E3A8A; margin: 0 0 12px 0; border-bottom: 2px solid #5B7FCC; padding-bottom: 8px;">
+                            Extracted Data
+                            <span id="cs-live-field-count" style="float: right; font-size: 13px; color: #666;">0 / 9 fields</span>
+                        </h4>
+                        <div style="overflow-x: auto;">
+                            <table id="cs-live-data-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                <thead>
+                                    <tr style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white;">
+                                        <th style="padding: 10px; text-align: left; border: 1px solid #ddd; width: 180px;">Field</th>
+                                        <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Value</th>
+                                        <th style="padding: 10px; text-align: center; border: 1px solid #ddd; width: 90px;">Confidence</th>
+                                        <th style="padding: 10px; text-align: left; border: 1px solid #ddd; width: 120px;">Source</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cs-live-data-body">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Results Section -->
@@ -4000,6 +4054,9 @@ async function startCityScraperResearch() {
     document.getElementById('cs-progress-percent').textContent = '0%';
     document.getElementById('cs-progress-fill').style.width = '0%';
 
+    // Initialize live data table
+    initCSLiveTable();
+
     try {
         const response = await fetch('/api/scraper/research', {
             method: 'POST',
@@ -4060,6 +4117,18 @@ async function pollCityScraperEvents() {
         // Update agent feed
         updateCSAgentFeed(data.events || []);
 
+        // Process data_update events for live table
+        (data.events || []).forEach(function(event) {
+            if (event.data_update) {
+                var du = event.data_update;
+                if (du.type === 'preflight') {
+                    updateCSPreflightPanel(du.preflight_data);
+                } else if (du.type === 'field_extracted') {
+                    updateCSLiveField(du.field_id, du.value, du.confidence, du.source_url);
+                }
+            }
+        });
+
         // Update progress if available
         if (data.progress) {
             updateCSProgress(data.progress);
@@ -4077,8 +4146,29 @@ async function pollCityScraperEvents() {
                 document.getElementById('cs-progress-fill').style.width = '100%';
                 loadCityScraperResults();
             } else if (data.status === 'failed') {
-                document.getElementById('cs-progress-phase').textContent = 'Failed';
+                document.getElementById('cs-progress-phase').textContent = 'Research Failed';
+                document.getElementById('cs-progress-percent').textContent = '';
+                document.getElementById('cs-progress-fill').style.width = '0%';
                 addCSDebugLog('Research failed: ' + (data.error || 'Unknown error'));
+
+                // Show error UI in the agent feed
+                const feed = document.getElementById('cs-agent-feed');
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'agent-activity failed';
+                errorDiv.innerHTML = `
+                    <div style="padding: 15px; background: #ffebee; border-left: 4px solid #d32f2f; border-radius: 4px; margin-top: 10px;">
+                        <strong style="color: #d32f2f;">Research Failed</strong>
+                        <p style="color: #666; margin: 8px 0 0 0;">${escapeHtml(data.error || 'An error occurred during research. Please try again.')}</p>
+                        <button onclick="document.getElementById('cs-start-research').click()"
+                                style="margin-top: 10px; padding: 8px 16px; background: #1E3A8A; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            Retry Research
+                        </button>
+                    </div>
+                `;
+                feed.appendChild(errorDiv);
+
+                // Try to load partial results if available
+                loadCityScraperResults();
             } else if (data.status === 'cancelled') {
                 document.getElementById('cs-progress-phase').textContent = 'Cancelled';
             }
@@ -4117,6 +4207,134 @@ function updateCSProgress(progress) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// LIVE DATA TABLE - Preflight Info + System Info (updates in real-time)
+// ═══════════════════════════════════════════════════════════════════
+
+const CS_SYSTEM_INFO_FIELDS = [
+    { id: 'agency_scope', label: 'Agency Scope', agent: 'EX-1' },
+    { id: 'sanitary_sewer_pipe', label: 'Sanitary Sewer Pipe', agent: 'EX-1' },
+    { id: 'storm_drain_pipe', label: 'Storm Drain Pipe', agent: 'EX-1' },
+    { id: 'storm_drain_assets', label: 'Storm Drain Assets', agent: 'EX-1' },
+    { id: 'system_age_history', label: 'System Age & History', agent: 'EX-2' },
+    { id: 'equipment_owned', label: 'Equipment Owned', agent: 'EX-2' },
+    { id: 'maintenance_practices', label: 'Maintenance Practices', agent: 'EX-3' },
+    { id: 'sewage_incidents', label: 'Sewage Incidents', agent: 'EX-4' },
+    { id: 'storm_incidents', label: 'Storm Incidents', agent: 'EX-4' }
+];
+
+let csLiveData = {};
+
+function initCSLiveTable() {
+    csLiveData = {};
+    const tbody = document.getElementById('cs-live-data-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    CS_SYSTEM_INFO_FIELDS.forEach(field => {
+        csLiveData[field.id] = { status: 'pending', value: null, confidence: null, source: null };
+        const tr = document.createElement('tr');
+        tr.id = 'cs-live-row-' + field.id;
+        tr.className = 'live-row-pending';
+        tr.innerHTML =
+            '<td style="padding: 10px; border: 1px solid #eee; font-weight: 500;">' + escapeHtml(field.label) + ' <span style="font-size:10px;color:#999;">(' + field.agent + ')</span></td>' +
+            '<td style="padding: 10px; border: 1px solid #eee;" class="live-cell-value">Analyzing...</td>' +
+            '<td style="padding: 10px; border: 1px solid #eee; text-align: center;" class="live-cell-confidence">&mdash;</td>' +
+            '<td style="padding: 10px; border: 1px solid #eee;" class="live-cell-source">&mdash;</td>';
+        tbody.appendChild(tr);
+    });
+
+    document.getElementById('cs-live-field-count').textContent = '0 / ' + CS_SYSTEM_INFO_FIELDS.length + ' fields';
+    document.getElementById('cs-live-table-section').classList.remove('hidden');
+
+    // Reset preflight panel
+    ['pf-municipality','pf-county','pf-region','pf-sanitary-owner','pf-storm-owner','pf-official-url','pf-sources-count','pf-readiness'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = id === 'pf-municipality' ? 'Resolving...' : '\u2014'; el.className = 'pf-value pending'; }
+    });
+    const statusEl = document.getElementById('cs-preflight-status');
+    if (statusEl) { statusEl.textContent = 'Pending'; statusEl.style.background = '#e0e0e0'; statusEl.style.color = '#666'; }
+}
+
+function updateCSLiveField(fieldId, value, confidence, sourceUrl) {
+    const state = csLiveData[fieldId];
+    if (!state) return;
+
+    state.status = 'found';
+    state.value = value;
+    state.confidence = confidence;
+    state.source = sourceUrl;
+
+    const row = document.getElementById('cs-live-row-' + fieldId);
+    if (!row) return;
+
+    row.className = 'live-row-found';
+    const cells = row.querySelectorAll('td');
+
+    // Value cell
+    cells[1].textContent = value || 'NOT FOUND';
+    cells[1].style.color = (value && value !== 'NOT FOUND') ? '#333' : '#999';
+
+    // Confidence badge
+    const conf = (confidence || 'unknown').toLowerCase();
+    cells[2].innerHTML = '<span class="confidence-badge confidence-' + conf + '">' + conf + '</span>';
+
+    // Source link
+    if (sourceUrl && sourceUrl !== 'NOT FOUND' && sourceUrl.startsWith('http')) {
+        const domain = sourceUrl.replace(/^https?:\/\//, '').split('/')[0];
+        cells[3].innerHTML = '<a href="' + escapeHtml(sourceUrl) + '" target="_blank" style="color:#1E3A8A;font-size:12px;">' + escapeHtml(domain) + '</a>';
+    }
+
+    // Update field count
+    const foundCount = Object.values(csLiveData).filter(d => d.status === 'found').length;
+    document.getElementById('cs-live-field-count').textContent = foundCount + ' / ' + CS_SYSTEM_INFO_FIELDS.length + ' fields';
+}
+
+function updateCSPreflightPanel(preflightData) {
+    if (!preflightData) return;
+
+    const setField = function(id, value) {
+        const el = document.getElementById(id);
+        if (el && value) {
+            el.textContent = value;
+            el.className = 'pf-value resolved';
+        }
+    };
+
+    const muni = preflightData.municipality || {};
+    setField('pf-municipality', muni.full_name || muni.city);
+    setField('pf-county', muni.county);
+    setField('pf-region', muni.region);
+
+    const jurisdiction = preflightData.jurisdiction || {};
+    setField('pf-sanitary-owner', jurisdiction.sanitary_sewer_owner);
+    setField('pf-storm-owner', jurisdiction.storm_sewer_owner);
+
+    const sourceMap = preflightData.source_map || {};
+    const official = sourceMap.official_website;
+    if (official && official.url) {
+        const el = document.getElementById('pf-official-url');
+        if (el) {
+            el.innerHTML = '<a href="' + escapeHtml(official.url) + '" target="_blank" style="color:#1E3A8A;">' + escapeHtml(official.url) + '</a>';
+            el.className = 'pf-value resolved';
+        }
+    }
+
+    setField('pf-sources-count', String(preflightData.sources_discovered_count || 0));
+    setField('pf-readiness', preflightData.status);
+
+    // Update status badge
+    const statusEl = document.getElementById('cs-preflight-status');
+    if (statusEl && preflightData.status) {
+        const status = preflightData.status;
+        const colors = { 'GO': '#e8f5e9', 'CONDITIONAL': '#fff3e0', 'FAIL': '#ffebee' };
+        const textColors = { 'GO': '#2e7d32', 'CONDITIONAL': '#ed6c02', 'FAIL': '#d32f2f' };
+        statusEl.textContent = status;
+        statusEl.style.background = colors[status] || '#e0e0e0';
+        statusEl.style.color = textColors[status] || '#666';
+    }
+}
+
 function addCSDebugLog(message) {
     const log = document.getElementById('cs-debug-log');
     const timestamp = new Date().toLocaleTimeString();
@@ -4138,6 +4356,13 @@ async function loadCityScraperResults() {
         if (data.success && data.result) {
             addCSDebugLog('Calling displayCityScraperResults');
             displayCityScraperResults(data.result);
+        } else if (data.result && data.result.success === false) {
+            // Research returned but with errors — show partial results if any
+            addCSDebugLog('Research failed: ' + (data.result.error || 'Unknown error'));
+            if (data.result.preflight_result || data.result.extraction_result) {
+                addCSDebugLog('Displaying partial results...');
+                displayCityScraperResults(data.result);
+            }
         } else {
             addCSDebugLog('No result in response');
         }

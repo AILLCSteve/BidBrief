@@ -130,6 +130,25 @@ class StandaloneResearchOrchestrator:
             self.event_callback(event)
         logger.info(f"UC-2: [{status}] {message}")
 
+    def emit_data_event(self, data_type: str, data: Dict[str, Any]):
+        """Emit a data update event for live table updates."""
+        event = AgentActivityEvent(
+            agent_id=self.ORCHESTRATOR_ID,
+            agent_name=self.ORCHESTRATOR_NAME,
+            status="data_update",
+            message=f"Data update: {data_type}",
+            is_active=True,
+            is_completed=False,
+            timestamp=datetime.now(),
+            data_update={
+                'type': data_type,
+                data_type + '_data': data
+            }
+        )
+        self.agent_events.append(event)
+        if self.event_callback:
+            self.event_callback(event)
+
     def _create_event_collector(self) -> Callable[[AgentActivityEvent], None]:
         """
         Create an event collector that stores events and forwards to callback.
@@ -250,6 +269,42 @@ class StandaloneResearchOrchestrator:
                 f"Stage 1/3: Pre-flight complete for {municipality.full_name} "
                 f"({preflight_result.status.value})"
             )
+
+            # Emit preflight data for live table
+            try:
+                pf_data = {
+                    'municipality': {
+                        'city': municipality.city,
+                        'state': municipality.state,
+                        'county': getattr(municipality, 'county', None),
+                        'region': getattr(municipality, 'region', None),
+                        'full_name': municipality.full_name,
+                    },
+                    'jurisdiction': {},
+                    'source_map': {},
+                    'sources_discovered_count': 0,
+                    'status': preflight_result.status.value if preflight_result.status else 'UNKNOWN'
+                }
+                if preflight_result.jurisdiction:
+                    j = preflight_result.jurisdiction
+                    pf_data['jurisdiction'] = {
+                        'sanitary_sewer_owner': getattr(j, 'sanitary_sewer_owner', None),
+                        'storm_sewer_owner': getattr(j, 'storm_drain_owner', None),
+                    }
+                if preflight_result.source_map:
+                    sm = preflight_result.source_map
+                    pf_data['source_map'] = {
+                        'official_website': {'url': sm.official_website.url, 'title': sm.official_website.title} if sm.official_website else None,
+                    }
+                    count = sum(1 for attr in ['official_website', 'public_works_page', 'sewer_utility_page',
+                                               'stormwater_page', 'procurement_page', 'gis_portal']
+                                if getattr(sm, attr, None) is not None)
+                    count += len(getattr(sm, 'cip_documents', []))
+                    count += len(getattr(sm, 'compliance_sources', []))
+                    pf_data['sources_discovered_count'] = count
+                self.emit_data_event("preflight", pf_data)
+            except Exception as e:
+                logger.warning(f"UC-2: Failed to emit preflight data event: {e}")
 
             # =================================================================
             # STAGE 2: Extraction Orchestrator (EX-O)

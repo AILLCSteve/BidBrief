@@ -398,6 +398,7 @@ class AgentActivityEvent:
     is_active: bool = True
     is_completed: bool = False
     timestamp: datetime = field(default_factory=datetime.now)
+    data_update: Optional[Dict[str, Any]] = None  # For live table updates
 
 
 @dataclass

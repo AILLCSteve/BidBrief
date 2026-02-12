@@ -597,6 +597,9 @@ class ExtractionOrchestrator:
             f"{len(public_bid_rows)} bid rows, {total_data_points_extracted} data points"
         )
 
+        # Emit per-field events for live table updates
+        self._emit_field_events(systems_info_rows)
+
         return ExtractionResult(
             municipality=municipality,
             table_mode=table_mode,
@@ -611,6 +614,34 @@ class ExtractionOrchestrator:
             completed_at=self.completed_at or datetime.now(),
             downloaded_documents=downloaded_documents
         )
+
+    def _emit_field_events(self, systems_info_rows: list):
+        """Emit data_update events for each extracted field (for live table)."""
+        field_attrs = [
+            'agency_scope', 'sanitary_sewer_pipe', 'storm_drain_pipe',
+            'storm_drain_assets', 'system_age_history', 'equipment_owned',
+            'maintenance_practices', 'sewage_incidents', 'storm_incidents'
+        ]
+        for row in systems_info_rows:
+            for field_id in field_attrs:
+                dp = getattr(row, field_id, None)
+                if dp and hasattr(dp, 'value'):
+                    event = AgentActivityEvent(
+                        agent_id=self.ORCHESTRATOR_ID,
+                        agent_name=self.ORCHESTRATOR_NAME,
+                        status="data_update",
+                        message=f"Extracted: {field_id}",
+                        timestamp=datetime.now(),
+                        data_update={
+                            'type': 'field_extracted',
+                            'field_id': field_id,
+                            'value': (dp.value or 'NOT FOUND')[:200],
+                            'confidence': dp.confidence.value if hasattr(dp.confidence, 'value') else str(dp.confidence),
+                            'source_url': dp.source_url or ''
+                        }
+                    )
+                    if self.event_callback:
+                        self.event_callback(event)
 
     def _aggregate_systems_info(
         self,

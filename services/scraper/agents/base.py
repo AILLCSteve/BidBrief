@@ -71,6 +71,12 @@ class BaseAgent(ABC):
     PROMPT_VERSION: str = "1.0.0"
     PROMPT_LAST_REFINED: str = "2026-02-03"
 
+    # Shared Tavily rate-limiting state (class-level, shared across all agent instances)
+    _tavily_last_call_time: float = 0.0
+    _tavily_consecutive_failures: int = 0
+    _tavily_circuit_open_until: float = 0.0
+    _tavily_min_interval: float = 2.0  # Enforces ~30 calls/min across all agents
+
     def __init__(
         self,
         config: Optional[ScraperConfig] = None,
@@ -253,7 +259,8 @@ class BaseAgent(ABC):
         max_results: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Execute a Tavily search query.
+        Execute a Tavily search query with rate limiting, exponential backoff,
+        and circuit breaker protection.
 
         Args:
             query: Search query string
@@ -268,20 +275,42 @@ class BaseAgent(ABC):
             logger.warning(f"Agent {self.AGENT_ID} attempted search without Tavily config")
             return []
 
+        tavily_cfg = self.config.tavily
+        max_retries = tavily_cfg.max_retries_per_query
+        initial_backoff = tavily_cfg.initial_backoff_seconds
+        max_backoff = tavily_cfg.max_backoff_seconds
+        cb_threshold = tavily_cfg.circuit_breaker_threshold
+        cb_cooldown = tavily_cfg.circuit_breaker_cooldown
+
+        # ── CIRCUIT BREAKER CHECK ──────────────────────────────────────
+        now = time.monotonic()
+        if BaseAgent._tavily_circuit_open_until > now:
+            wait_remaining = BaseAgent._tavily_circuit_open_until - now
+            logger.warning(
+                f"Agent {self.AGENT_ID} Tavily circuit breaker OPEN. "
+                f"Waiting {wait_remaining:.1f}s before retrying query: {query[:60]}"
+            )
+            self.emit_event("rate_limited", f"Circuit breaker open, waiting {wait_remaining:.0f}s...")
+            await asyncio.sleep(wait_remaining)
+            # After waiting, reset the circuit breaker so we can try again
+            BaseAgent._tavily_circuit_open_until = 0.0
+            BaseAgent._tavily_consecutive_failures = 0
+            logger.info(f"Agent {self.AGENT_ID} Tavily circuit breaker CLOSED after cooldown")
+
         if self._http_client is None:
-            self._http_client = httpx.AsyncClient(timeout=self.config.tavily.timeout_seconds)
+            self._http_client = httpx.AsyncClient(timeout=tavily_cfg.timeout_seconds)
 
         # Use preferred domains if none specified
         if include_domains is None:
-            include_domains = self.config.tavily.preferred_domains
+            include_domains = tavily_cfg.preferred_domains
 
         request_data = {
-            "api_key": self.config.tavily.api_key,
+            "api_key": tavily_cfg.api_key,
             "query": query,
-            "search_depth": self.config.tavily.search_depth,
-            "max_results": max_results or self.config.tavily.max_results_per_query,
-            "include_answer": self.config.tavily.include_answer,
-            "include_raw_content": self.config.tavily.include_raw_content
+            "search_depth": tavily_cfg.search_depth,
+            "max_results": max_results or tavily_cfg.max_results_per_query,
+            "include_answer": tavily_cfg.include_answer,
+            "include_raw_content": tavily_cfg.include_raw_content
         }
 
         if include_domains:
@@ -289,49 +318,144 @@ class BaseAgent(ABC):
         if exclude_domains:
             request_data["exclude_domains"] = exclude_domains
 
-        try:
-            self.emit_event("searching", f"Searching: {query[:50]}...")
-            logger.debug(f"Agent {self.AGENT_ID} searching: {query}")
+        # ── RETRY LOOP WITH EXPONENTIAL BACKOFF ────────────────────────
+        for attempt in range(max_retries + 1):
+            try:
+                # ── RATE LIMITER: enforce min interval between calls ───
+                now = time.monotonic()
+                elapsed_since_last = now - BaseAgent._tavily_last_call_time
+                if elapsed_since_last < BaseAgent._tavily_min_interval:
+                    sleep_time = BaseAgent._tavily_min_interval - elapsed_since_last
+                    logger.debug(
+                        f"Agent {self.AGENT_ID} rate limiter: sleeping {sleep_time:.2f}s"
+                    )
+                    await asyncio.sleep(sleep_time)
+                BaseAgent._tavily_last_call_time = time.monotonic()
 
-            response = await self._http_client.post(
-                "https://api.tavily.com/search",
-                json=request_data
-            )
+                self.emit_event("searching", f"Searching: {query[:50]}...")
+                logger.debug(
+                    f"Agent {self.AGENT_ID} searching (attempt {attempt + 1}/{max_retries + 1}): {query}"
+                )
 
-            if response.status_code != 200:
-                logger.error(f"Tavily API error: {response.status_code} - {response.text}")
+                response = await self._http_client.post(
+                    "https://api.tavily.com/search",
+                    json=request_data
+                )
+
+                # ── SUCCESS ────────────────────────────────────────────
+                if response.status_code == 200:
+                    BaseAgent._tavily_consecutive_failures = 0
+
+                    data = response.json()
+                    results = []
+                    for item in data.get('results', []):
+                        results.append({
+                            'title': item.get('title', ''),
+                            'url': item.get('url', ''),
+                            'content': item.get('content', ''),
+                            'raw_content': item.get('raw_content', ''),
+                            'score': item.get('score', 0),
+                            'query': query
+                        })
+
+                    # Include AI summary if available
+                    if data.get('answer'):
+                        results.append({
+                            'title': 'Tavily AI Summary',
+                            'url': 'tavily:ai-summary',
+                            'content': data['answer'],
+                            'score': 1.0,
+                            'query': query,
+                            'is_ai_summary': True
+                        })
+
+                    logger.debug(f"Agent {self.AGENT_ID} found {len(results)} results")
+                    return results
+
+                # ── RATE LIMITED (429 / 432) ───────────────────────────
+                if response.status_code in (429, 432):
+                    BaseAgent._tavily_consecutive_failures += 1
+                    failures = BaseAgent._tavily_consecutive_failures
+                    logger.warning(
+                        f"Agent {self.AGENT_ID} Tavily rate limited "
+                        f"(HTTP {response.status_code}), "
+                        f"consecutive failures: {failures}/{cb_threshold}, "
+                        f"attempt {attempt + 1}/{max_retries + 1}"
+                    )
+
+                    # Check circuit breaker threshold
+                    if failures >= cb_threshold:
+                        BaseAgent._tavily_circuit_open_until = (
+                            time.monotonic() + cb_cooldown
+                        )
+                        logger.error(
+                            f"Agent {self.AGENT_ID} Tavily circuit breaker OPENED "
+                            f"after {failures} consecutive failures. "
+                            f"Cooldown: {cb_cooldown}s"
+                        )
+                        self.emit_event(
+                            "circuit_breaker",
+                            f"Circuit breaker opened after {failures} failures"
+                        )
+                        return []
+
+                    # Exponential backoff with jitter-free cap
+                    if attempt < max_retries:
+                        backoff = min(
+                            initial_backoff * (2 ** attempt),
+                            max_backoff
+                        )
+                        logger.info(
+                            f"Agent {self.AGENT_ID} backing off {backoff:.1f}s "
+                            f"before retry"
+                        )
+                        self.emit_event(
+                            "rate_limited",
+                            f"Rate limited, retrying in {backoff:.0f}s..."
+                        )
+                        await asyncio.sleep(backoff)
+                        continue
+
+                    # Exhausted retries
+                    logger.error(
+                        f"Agent {self.AGENT_ID} Tavily rate limited, "
+                        f"exhausted {max_retries + 1} attempts for: {query[:60]}"
+                    )
+                    return []
+
+                # ── OTHER HTTP ERRORS (don't retry) ────────────────────
+                logger.error(
+                    f"Agent {self.AGENT_ID} Tavily API error: "
+                    f"{response.status_code} - {response.text[:200]}"
+                )
                 return []
 
-            data = response.json()
+            except Exception as e:
+                logger.error(
+                    f"Agent {self.AGENT_ID} Tavily search exception "
+                    f"(attempt {attempt + 1}/{max_retries + 1}): {e}"
+                )
+                if attempt < max_retries:
+                    backoff = min(
+                        initial_backoff * (2 ** attempt),
+                        max_backoff
+                    )
+                    logger.info(
+                        f"Agent {self.AGENT_ID} retrying after exception, "
+                        f"backoff {backoff:.1f}s"
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
 
-            results = []
-            for item in data.get('results', []):
-                results.append({
-                    'title': item.get('title', ''),
-                    'url': item.get('url', ''),
-                    'content': item.get('content', ''),
-                    'raw_content': item.get('raw_content', ''),
-                    'score': item.get('score', 0),
-                    'query': query
-                })
+                # Exhausted retries on exceptions
+                logger.error(
+                    f"Agent {self.AGENT_ID} Tavily search failed after "
+                    f"{max_retries + 1} attempts: {e}"
+                )
+                return []
 
-            # Include AI summary if available
-            if data.get('answer'):
-                results.append({
-                    'title': 'Tavily AI Summary',
-                    'url': 'tavily:ai-summary',
-                    'content': data['answer'],
-                    'score': 1.0,
-                    'query': query,
-                    'is_ai_summary': True
-                })
-
-            logger.debug(f"Agent {self.AGENT_ID} found {len(results)} results")
-            return results
-
-        except Exception as e:
-            logger.error(f"Agent {self.AGENT_ID} Tavily search failed: {e}")
-            return []
+        # Should not reach here, but safety net
+        return []
 
     # ═══════════════════════════════════════════════════════════════════════
     # UTILITY METHODS

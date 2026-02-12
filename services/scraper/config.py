@@ -30,6 +30,11 @@ class TavilyConfig:
     timeout_seconds: int = 60  # Increased from 30 for larger result sets
     preferred_domains: List[str] = field(default_factory=lambda: [".gov", ".us", ".org"])
     requests_per_minute: int = 30  # Increased from 20
+    max_retries_per_query: int = 3
+    initial_backoff_seconds: float = 2.0
+    max_backoff_seconds: float = 30.0
+    circuit_breaker_threshold: int = 5
+    circuit_breaker_cooldown: float = 60.0
 
     @classmethod
     def from_env(cls) -> Optional['TavilyConfig']:
