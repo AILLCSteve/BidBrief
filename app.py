@@ -3138,14 +3138,21 @@ def get_scraper_events(session_id):
 
         events = cityscraper_events[session_id][since_index:]
         total_events = len(cityscraper_events[session_id])
-        status = cityscraper_sessions.get(session_id, {}).get('status', 'unknown')
+        session_data = cityscraper_sessions.get(session_id, {})
+        status = session_data.get('status', 'unknown')
+        error = session_data.get('error')
 
-    return jsonify({
+    response = {
         'success': True,
         'events': events,
         'total_events': total_events,
         'status': status
-    })
+    }
+    # Include error message when research has failed so frontend can display it
+    if error:
+        response['error'] = error
+
+    return jsonify(response)
 
 
 @app.route('/api/scraper/stop/<session_id>', methods=['POST'])
@@ -3688,9 +3695,9 @@ def export_scraper_excel(session_id):
 
     Auth: Uses session_id as authentication.
     """
-    available, error_response = _check_scraper_available()
-    if not available:
-        return error_response
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
 
     with session_lock:
         # Session ID itself serves as auth
@@ -3765,9 +3772,9 @@ def export_scraper_markdown(session_id):
 
     Auth: Uses session_id as authentication.
     """
-    available, error_response = _check_scraper_available()
-    if not available:
-        return error_response
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
 
     with session_lock:
         # Session ID itself serves as auth
