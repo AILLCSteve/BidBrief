@@ -106,34 +106,38 @@ class TerminologyExtractorAgent(BaseAgent):
         """
         all_results = []
 
-        # Search queries organized by category with (query, max_results)
-        # Increased limits for comprehensive terminology discovery
+        # Check if Tavily is available
+        if not self.config.tavily or not self.config.tavily.api_key:
+            logger.warning("PF-4: Tavily not configured — will use AI knowledge only")
+            return all_results
+
+        # Try one search first to check availability
+        test_query = f"{municipality_name} {state} sanitary sewer terminology wastewater collection"
+        self.emit_event("searching", f"Searching: {test_query[:50]}...")
+        test_results = await self.search_tavily(test_query, max_results=10)
+
+        if not test_results:
+            logger.warning("PF-4: Tavily unavailable — using AI knowledge for terminology")
+            self.emit_event("processing", "Web search unavailable — using AI knowledge base")
+            return all_results
+
+        for r in test_results:
+            r['query'] = test_query
+        all_results.extend(test_results)
+
+        # Remaining searches
         search_configs = [
-            # 1. Sanitary sewer terminology
-            (f"{municipality_name} {state} sanitary sewer terminology wastewater collection", 10),
-            (f"{municipality_name} {state} wastewater collection system sewer", 10),
-
-            # 2. Stormwater and drainage terminology
-            (f"{municipality_name} {state} storm drain catch basin inlet", 10),
             (f"{municipality_name} {state} stormwater drainage MS4 system", 10),
-
-            # 3. Equipment and maintenance terminology
             (f"{municipality_name} {state} CCTV sewer inspection equipment", 10),
-            (f"{municipality_name} {state} sewer cleaning jet vac maintenance", 10),
-
-            # 4. Bid portal and procurement terminology
             (f"{municipality_name} {state} bid RFP sewer wastewater", 10),
-            (f"{municipality_name} {state} procurement contract sewer rehabilitation", 10),
-
-            # 5. Infrastructure assets terminology
             (f"{municipality_name} {state} lift station pump station sewer", 10),
-            (f"{municipality_name} {state} force main interceptor trunk sewer", 10),
         ]
 
         for query, max_results in search_configs:
             self.emit_event("searching", f"Searching: {query[:50]}...")
             results = await self.search_tavily(query, max_results=max_results)
-            # Tag results with their query for context
+            if not results:
+                continue
             for r in results:
                 r['query'] = query
             all_results.extend(results)
@@ -144,7 +148,10 @@ class TerminologyExtractorAgent(BaseAgent):
     def _build_context(self, search_results: List[Dict[str, Any]]) -> str:
         """Build context string from search results with validation and deduplication."""
         if not search_results:
-            return "No search results available."
+            return ("No search results available. Web search is currently unavailable.\n"
+                    "IMPORTANT: You MUST still generate terminology using your training knowledge.\n"
+                    "Use standard industry terminology for sewer/stormwater systems.\n"
+                    "Set confidence to LOW since results are not verified by live search.")
 
         context_parts = ["## SEARCH RESULTS\n"]
         seen_urls = set()

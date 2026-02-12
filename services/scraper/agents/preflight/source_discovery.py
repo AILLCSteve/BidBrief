@@ -103,46 +103,61 @@ class SourceDiscoveryAgent(BaseAgent):
         """
         all_results = []
 
-        # Search queries organized by priority with (query, max_results)
-        # Sewer/Wastewater is PRIMARY - 70% effort (more queries, more results)
-        # All limits increased for comprehensive source discovery
-        search_configs = [
-            # 1. Official Website (required baseline)
-            (f"{municipality_name} {state} official website city government", 10),
+        # Check if Tavily is available before firing 14+ queries
+        if not self.config.tavily or not self.config.tavily.api_key:
+            logger.warning("PF-3: Tavily not configured — will use AI knowledge only")
+            return all_results
 
+        # Quick availability check: try ONE search first
+        # If Tavily is down/rate-limited, skip all remaining queries
+        test_query = f"{municipality_name} {state} official website city government"
+        self.emit_event("searching", f"Searching: {test_query[:50]}...")
+        test_results = await self.search_tavily(test_query, max_results=10)
+
+        if not test_results:
+            # Tavily unavailable (rate limited, plan exceeded, etc.)
+            # Skip remaining searches — OpenAI will generate from knowledge
+            logger.warning("PF-3: Tavily returned no results on test query — skipping remaining searches, using AI knowledge")
+            self.emit_event("processing", "Web search unavailable — using AI knowledge base")
+            return all_results
+
+        # Tavily is working — tag and collect test results
+        for r in test_results:
+            r['query'] = test_query
+        all_results.extend(test_results)
+
+        # Search queries organized by priority with (query, max_results)
+        search_configs = [
             # 2. Public Works Department
             (f"{municipality_name} {state} public works utilities department", 10),
 
-            # 3. Sewer/Wastewater (PRIMARY - 70% effort, more results)
+            # 3. Sewer/Wastewater (PRIMARY - 70% effort)
             (f"{municipality_name} {state} sewer utility wastewater", 15),
             (f"{municipality_name} {state} sanitary sewer service department", 15),
-            (f"{municipality_name} {state} wastewater treatment utility", 10),
 
-            # 4. Stormwater (secondary)
+            # 4. Stormwater
             (f"{municipality_name} {state} stormwater drainage MS4", 10),
-            (f"{municipality_name} {state} storm drain utility", 10),
 
             # 5. Procurement/Bid Portal
             (f"{municipality_name} {state} bid portal procurement RFP", 15),
-            (f"{municipality_name} {state} public bids contracts purchasing", 10),
 
             # 6. GIS Portal
             (f"{municipality_name} {state} GIS map interactive viewer", 10),
-            (f"{municipality_name} {state} ArcGIS infrastructure map", 10),
 
             # 7. CIP/Budget Documents
             (f"{municipality_name} {state} capital improvement plan CIP budget", 15),
-            (f"{municipality_name} {state} infrastructure master plan", 10),
 
             # 8. Compliance Sources
             (f"{municipality_name} {state} SSO CMOM EPA compliance sewer", 10),
-            (f"{municipality_name} {state} NPDES permit wastewater", 10),
         ]
 
         for query, max_results in search_configs:
             self.emit_event("searching", f"Searching: {query[:50]}...")
             results = await self.search_tavily(query, max_results=max_results)
-            # Tag results with their query for context
+            if not results:
+                # If a query fails mid-run, log and continue with what we have
+                logger.warning(f"PF-3: Search returned empty for: {query[:60]}")
+                continue
             for r in results:
                 r['query'] = query
             all_results.extend(results)
@@ -153,7 +168,11 @@ class SourceDiscoveryAgent(BaseAgent):
     def _build_context(self, search_results: List[Dict[str, Any]]) -> str:
         """Build context string from search results with validation and deduplication."""
         if not search_results:
-            return "No search results available."
+            return ("No search results available. Web search is currently unavailable.\n"
+                    "IMPORTANT: You MUST still generate a complete source_map using your training knowledge.\n"
+                    "For the official_website, use the most likely URL (e.g., cityname + state abbreviation + .gov or .org).\n"
+                    "Set confidence to LOW for all entries since they are not verified by live search.\n"
+                    "Do NOT leave url fields empty — provide your best estimate.")
 
         context_parts = ["## SEARCH RESULTS\n"]
         seen_urls = set()
@@ -403,34 +422,37 @@ Return the JSON source map as specified in your instructions."""
 
         source_map = output['source_map']
 
-        # Check key source categories exist (can be null if not found)
-        required_categories = ['official_website', 'sewer_utility_page']
-        for cat in required_categories:
+        # Check key source categories — add if missing rather than failing
+        for cat in ['official_website', 'sewer_utility_page']:
             if cat not in source_map:
-                errors.append(f"Missing required source category: {cat}")
+                logger.warning(f"PF-3: Missing source category '{cat}' — setting to None")
+                source_map[cat] = None
 
-        # Validate official_website has URL if not null
+        # Fix official_website if present but missing URL
         official = source_map.get('official_website')
         if official is not None and not official.get('url'):
-            logger.warning("PF-3: official_website present but missing 'url' field — continuing with degraded data")
+            logger.warning("PF-3: official_website present but missing 'url' field — setting to None")
             source_map['official_website'] = None
 
-        # Validate sewer_utility_page (PRIMARY focus)
+        # Fix sewer_utility_page if wrong type
         sewer = source_map.get('sewer_utility_page')
         if sewer is not None and not isinstance(sewer, dict):
             logger.warning("PF-3: sewer_utility_page is not a dict — setting to None")
             source_map['sewer_utility_page'] = None
 
-        # Validate confidence
+        # Default confidence if missing (don't fail)
         confidence = output.get('confidence')
         if not confidence:
-            errors.append("Missing required 'confidence' field")
+            logger.warning("PF-3: Missing confidence field — defaulting to LOW")
+            output['confidence'] = 'LOW'
         elif confidence not in ['HIGH', 'MEDIUM', 'LOW']:
-            errors.append(f"Invalid confidence: {confidence}")
+            logger.warning(f"PF-3: Invalid confidence '{confidence}' — defaulting to LOW")
+            output['confidence'] = 'LOW'
 
-        # Validate sources_discovered_count is present
+        # Default sources_discovered_count if missing (don't fail)
         if 'sources_discovered_count' not in output:
-            errors.append("Missing 'sources_discovered_count' field")
+            logger.warning("PF-3: Missing sources_discovered_count — defaulting to 0")
+            output['sources_discovered_count'] = 0
 
         # Validate gaps and recommendations are lists
         gaps = output.get('gaps')

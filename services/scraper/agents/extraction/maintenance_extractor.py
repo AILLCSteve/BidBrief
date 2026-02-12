@@ -176,6 +176,11 @@ class MaintenanceExtractorAgent(BaseAgent):
         """
         all_results = []
 
+        # Check if Tavily is configured
+        if not self.config.tavily or not self.config.tavily.api_key:
+            logger.warning(f"{self.AGENT_ID}: Tavily not configured — will use AI knowledge only")
+            return all_results
+
         # Extract priority domains from source map
         priority_domains = []
         if source_map:
@@ -218,18 +223,38 @@ class MaintenanceExtractorAgent(BaseAgent):
             municipality_name, state, terminology
         )
 
-        # Execute searches
-        for query, max_results in search_queries:
-            self.emit_event("searching", f"Searching: {query[:50]}...")
+        # If we have priority domains, include them in search
+        include_domains = priority_domains[:5] if priority_domains else None
 
-            # If we have priority domains, include them in search
-            include_domains = priority_domains[:5] if priority_domains else None
+        # Try first query as availability test
+        if search_queries:
+            first_query, first_max = search_queries[0]
+            self.emit_event("searching", f"Searching: {first_query[:50]}...")
+            test_results = await self.search_tavily(
+                first_query,
+                include_domains=include_domains,
+                max_results=first_max
+            )
+            if not test_results:
+                logger.warning(f"{self.AGENT_ID}: Tavily unavailable — using AI knowledge")
+                self.emit_event("processing", "Web search unavailable — using AI knowledge base")
+                return all_results
+            for r in test_results:
+                r['query'] = first_query
+            all_results.extend(test_results)
+
+        # Execute remaining searches
+        for query, max_results in search_queries[1:]:
+            self.emit_event("searching", f"Searching: {query[:50]}...")
 
             results = await self.search_tavily(
                 query,
                 include_domains=include_domains,
                 max_results=max_results
             )
+
+            if not results:
+                continue
 
             # Tag results with their query for context
             for r in results:
@@ -245,6 +270,8 @@ class MaintenanceExtractorAgent(BaseAgent):
         for query, max_results in broader_queries:
             self.emit_event("searching", f"Broad search: {query[:50]}...")
             results = await self.search_tavily(query, max_results=max_results)
+            if not results:
+                continue
             for r in results:
                 r['query'] = query
             all_results.extend(results)
@@ -259,7 +286,10 @@ class MaintenanceExtractorAgent(BaseAgent):
     ) -> str:
         """Build context string from search results with validation and deduplication."""
         if not search_results:
-            return "No search results available."
+            return ("No search results available. Web search is currently unavailable.\n"
+                    "IMPORTANT: You MUST still extract data using your training knowledge.\n"
+                    "Set confidence to LOW for all data points since they are not verified by live search.\n"
+                    "Use 'NOT FOUND' if you genuinely cannot estimate the value.")
 
         context_parts = ["## SEARCH RESULTS FOR MAINTENANCE PRACTICE DATA\n"]
         seen_urls = set()

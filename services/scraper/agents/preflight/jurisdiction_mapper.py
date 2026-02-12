@@ -107,30 +107,34 @@ class JurisdictionMapperAgent(BaseAgent):
         """
         all_results = []
 
-        # Primary searches - Sanitary Sewer (70% effort)
-        sanitary_queries = [
-            f"{municipality_name} {state} sanitary sewer district owner",
-            f"{municipality_name} {state} wastewater utility operator",
-            f"{municipality_name} {state} sewer system regional authority",
-            f"{municipality_name} wastewater treatment plant operator",
+        # Check if Tavily is available
+        if not self.config.tavily or not self.config.tavily.api_key:
+            logger.warning("PF-2: Tavily not configured — will use AI knowledge only")
+            return all_results
+
+        # Try one search first to check availability
+        test_query = f"{municipality_name} {state} sanitary sewer district owner"
+        self.emit_event("searching", f"Searching: {test_query[:50]}...")
+        test_results = await self.search_tavily(test_query, max_results=15)
+
+        if not test_results:
+            # Tavily unavailable — OpenAI can handle jurisdiction from knowledge
+            logger.warning("PF-2: Tavily unavailable — using AI knowledge for jurisdiction mapping")
+            self.emit_event("processing", "Web search unavailable — using AI knowledge base")
+            return all_results
+
+        all_results.extend(test_results)
+
+        # Remaining searches (only if Tavily is working)
+        remaining_queries = [
+            (f"{municipality_name} {state} wastewater utility operator", 15),
+            (f"{municipality_name} {state} stormwater management", 10),
+            (f"{municipality_name} {state} storm drain owner MS4", 10),
         ]
 
-        # Secondary searches - Stormwater (30% effort)
-        stormwater_queries = [
-            f"{municipality_name} {state} stormwater management",
-            f"{municipality_name} {state} storm drain owner MS4",
-        ]
-
-        # Execute sanitary sewer searches
-        for query in sanitary_queries:
+        for query, max_results in remaining_queries:
             self.emit_event("searching", f"Searching: {query[:50]}...")
-            results = await self.search_tavily(query, max_results=15)
-            all_results.extend(results)
-
-        # Execute stormwater searches
-        for query in stormwater_queries:
-            self.emit_event("searching", f"Searching: {query[:50]}...")
-            results = await self.search_tavily(query, max_results=10)
+            results = await self.search_tavily(query, max_results=max_results)
             all_results.extend(results)
 
         logger.debug(f"PF-2 gathered {len(all_results)} total search results")
@@ -139,7 +143,10 @@ class JurisdictionMapperAgent(BaseAgent):
     def _build_context(self, search_results: List[Dict[str, Any]]) -> str:
         """Build context string from search results with validation."""
         if not search_results:
-            return "No search results available. Use general knowledge with LOW confidence."
+            return ("No search results available. Web search is currently unavailable.\n"
+                    "IMPORTANT: You MUST still determine jurisdiction using your training knowledge.\n"
+                    "Most US municipalities own their own sanitary sewer and stormwater systems.\n"
+                    "Set confidence to LOW since results are not verified by live search.")
 
         context_parts = ["## SEARCH RESULTS\n"]
         seen_urls = set()
