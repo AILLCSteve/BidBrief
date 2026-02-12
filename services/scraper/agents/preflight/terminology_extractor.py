@@ -178,8 +178,8 @@ class TerminologyExtractorAgent(BaseAgent):
         if not unique_results:
             return "Search returned no useful results."
 
-        # Limit to top 20 unique results to avoid context overflow
-        for i, result in enumerate(unique_results[:20], 1):
+        # Limit to top 40 unique results to avoid context overflow
+        for i, result in enumerate(unique_results[:40], 1):
             title = result.get('title', 'Untitled').strip()
             url = result.get('url', '')
             content = result.get('content', '')
@@ -190,7 +190,7 @@ class TerminologyExtractorAgent(BaseAgent):
             if query:
                 context_parts.append(f"**Query:** {query}")
             # Truncate content to avoid excessive context
-            context_parts.append(f"**Content:**\n{content[:600]}\n")
+            context_parts.append(f"**Content:**\n{content[:2500]}\n")
 
         return "\n".join(context_parts)
 

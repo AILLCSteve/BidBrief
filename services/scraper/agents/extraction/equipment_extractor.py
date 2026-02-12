@@ -324,8 +324,8 @@ class EquipmentExtractorAgent(BaseAgent):
 
             context_parts.append("\n")
 
-        # Limit to top 25 unique results to avoid context overflow
-        for i, result in enumerate(unique_results[:25], 1):
+        # Limit to top 40 unique results to avoid context overflow
+        for i, result in enumerate(unique_results[:40], 1):
             title = result.get('title', 'Untitled').strip()
             url = result.get('url', '')
             content = result.get('content', '')
@@ -336,7 +336,7 @@ class EquipmentExtractorAgent(BaseAgent):
             if query:
                 context_parts.append(f"**Query:** {query}")
             # Truncate content to avoid excessive context
-            context_parts.append(f"**Content:**\n{content[:800]}\n")
+            context_parts.append(f"**Content:**\n{content[:2500]}\n")
 
         return "\n".join(context_parts)
 

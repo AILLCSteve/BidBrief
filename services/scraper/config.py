@@ -28,7 +28,7 @@ class TavilyConfig:
     include_raw_content: bool = True
     include_answer: bool = True
     timeout_seconds: int = 60  # Increased from 30 for larger result sets
-    preferred_domains: List[str] = field(default_factory=lambda: [".gov", ".us", ".org"])
+    preferred_domains: List[str] = field(default_factory=list)  # No domain restriction — municipal data lives everywhere
     requests_per_minute: int = 30  # Increased from 20
     max_retries_per_query: int = 3
     initial_backoff_seconds: float = 2.0

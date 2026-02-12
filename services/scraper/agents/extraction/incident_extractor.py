@@ -412,8 +412,8 @@ class IncidentExtractorAgent(BaseAgent):
 
             context_parts.append("\n")
 
-        # Limit to top 30 unique results (more than other agents due to PRIORITY)
-        for i, result in enumerate(unique_results[:30], 1):
+        # Limit to top 40 unique results (more than other agents due to PRIORITY)
+        for i, result in enumerate(unique_results[:40], 1):
             title = result.get('title', 'Untitled').strip()
             url = result.get('url', '')
             content = result.get('content', '')
@@ -424,7 +424,7 @@ class IncidentExtractorAgent(BaseAgent):
             if query:
                 context_parts.append(f"**Query:** {query}")
             # Truncate content to avoid excessive context
-            context_parts.append(f"**Content:**\n{content[:900]}\n")
+            context_parts.append(f"**Content:**\n{content[:2500]}\n")
 
         return "\n".join(context_parts)
 

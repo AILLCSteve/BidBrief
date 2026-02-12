@@ -172,8 +172,8 @@ class JurisdictionMapperAgent(BaseAgent):
         if not unique_results:
             return "Search returned no useful results. Use general knowledge with LOW confidence."
 
-        # Limit to top 15 unique results
-        for i, result in enumerate(unique_results[:15], 1):
+        # Limit to top 40 unique results
+        for i, result in enumerate(unique_results[:40], 1):
             title = result.get('title', 'Untitled').strip()
             url = result.get('url', '')
             content = result.get('content', '')
@@ -183,7 +183,8 @@ class JurisdictionMapperAgent(BaseAgent):
             context_parts.append(f"**URL:** {url}")
             if query:
                 context_parts.append(f"**Query:** {query}")
-            context_parts.append(f"**Content:**\n{content}\n")
+            # Truncate content to avoid excessive context
+            context_parts.append(f"**Content:**\n{content[:2500]}\n")
 
         return "\n".join(context_parts)
 
