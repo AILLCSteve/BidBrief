@@ -233,9 +233,10 @@ All production changes follow the Change Management Policy
 
 | Monitoring Type | Tool | Coverage |
 |----------------|------|---------|
-| Uptime monitoring | [UptimeRobot — to be configured] | `/health` endpoint, 5-min intervals |
-| Log aggregation | [Log drain service — to be configured] | All application logs |
-| Dependency scanning | GitHub Dependabot + pip-audit in CI | Weekly + per-PR |
+| Uptime monitoring | UptimeRobot (to be configured — see `docs/soc2/setup_checklist.md`) | `/health` endpoint, 5-min intervals, alerts to stephen@additionalintel.com |
+| Log aggregation | Render log drain (to be configured — see `docs/soc2/setup_checklist.md`) | All application logs, 90-day retention minimum |
+| Dependency scanning | GitHub Dependabot (`.github/dependabot.yml`) | Weekly automated scans, labels: security/dependencies |
+| SAST scanning | Bandit (annual assessment) | Python source — see `docs/soc2/annual_assessments/` |
 | Incident response | Incident Response Plan | `docs/policies/incident_response_plan.md` |
 
 ---
