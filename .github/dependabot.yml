@@ -1,0 +1,41 @@
+# Dependabot configuration for BidBrief
+# SOC 2 CC7.1 — automated vulnerability scanning of dependencies
+# Weekly scans ensure timely detection of CVEs per Vulnerability Management Policy
+
+version: 2
+
+updates:
+  # Python pip dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 10
+    labels:
+      - "security"
+      - "dependencies"
+    commit-message:
+      prefix: "fix"
+      include: "scope"
+    # Group minor/patch updates together to reduce PR noise
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions dependencies (for future CI/CD workflows)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    labels:
+      - "dependencies"
+      - "ci"
