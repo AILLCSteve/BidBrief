@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Effective Date:** 2026-03-03
-**Owner:** [YOUR NAME], Security Officer
+**Owner:** Stephen Bartlett, C.E.O., Security Officer
 **Company:** Additional Intelligence LLC
 **Review Cycle:** Annual
 **Next Review:** 2027-03-03
@@ -37,11 +37,9 @@ information it processes or stores:
 
 | Role | Person | Responsibilities |
 |------|--------|-----------------|
-| Security Officer | [YOUR NAME] | Owns this policy; conducts quarterly security reviews; approves exceptions; leads incident response |
-| Developer / Engineer | [YOUR NAME] | Follows secure development standards; reports vulnerabilities immediately; maintains system security controls |
+| Security Officer | Stephen Bartlett, C.E.O. | Owns this policy; conducts quarterly security reviews; approves exceptions; leads incident response |
+| Developer / Engineer | Stephen Bartlett, C.E.O. | Follows secure development standards; reports vulnerabilities immediately; maintains system security controls |
 | All Personnel | Everyone with system access | Completes annual security awareness review; reports suspected incidents within 1 hour; follows all policies in this directory |
-
-> **TODO:** Fill in actual names above before audit.
 
 ## 4. Asset Classification
 
@@ -76,7 +74,7 @@ Security incidents are handled per the Incident Response Plan
 (`incident_response_plan.md`). All personnel must:
 
 - Report suspected incidents within **1 hour** of discovery
-- Contact: [security@yourdomain.com] or [Security Officer direct contact]
+- Contact: stephen@additionalintel.com
 - Do NOT attempt to investigate or remediate independently
 - Do NOT discuss the incident publicly or on unsecured channels
 
@@ -128,6 +126,6 @@ personnel within 5 business days of the updated version being published.
 
 ---
 
-*Approved by: [YOUR NAME], Security Officer*
+*Approved by: Stephen Bartlett, C.E.O., Security Officer*
 *Approval date: 2026-03-03*
 *Document location: `docs/policies/information_security_policy.md`*
