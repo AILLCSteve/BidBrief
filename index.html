@@ -159,6 +159,35 @@
             background: #6c757d;
         }
 
+        .hub-option-btn {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            width: 100%;
+            background: rgba(255,255,255,0.95);
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 18px 20px;
+            cursor: pointer;
+            text-align: left;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .hub-option-btn:hover {
+            border-color: #5B7FCC;
+            box-shadow: 0 2px 8px rgba(91,127,204,0.2);
+        }
+        .hub-option-btn strong {
+            display: block;
+            font-size: 16px;
+            color: #1E3A8A;
+            margin-bottom: 4px;
+        }
+        .hub-option-btn p {
+            margin: 0;
+            font-size: 13px;
+            color: #666;
+        }
+
         .btn-danger {
             background: #dc3545;
         }
@@ -614,8 +643,8 @@
                 <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #28a745; flex: 1; min-width: 280px;" id="modeLabel_bid_spec">
                     <input type="radio" name="analysisMode" value="bid_spec" checked onchange="setAnalysisMode('bid_spec')" style="margin-top: 3px;">
                     <div>
-                        <strong style="color: #1E3A8A;">Bid/Spec/RFP Mode</strong>
-                        <p style="color: #666; font-size: 12px; margin-top: 5px;">Smart deduplication, merge similar answers. Best for construction bid specs and RFPs.</p>
+                        <strong style="color: #1E3A8A;" id="bidSpecModeLabel">Contracts/RFPs/Spec Mode</strong>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;" id="bidSpecModeDesc">For Contracts, bids, RFP's and other large PDF documents.</p>
                     </div>
                 </label>
                 <label style="cursor: pointer; display: flex; align-items: flex-start; gap: 10px; padding: 15px; background: rgba(255,255,255,0.95); border-radius: 8px; border: 2px solid #ddd; flex: 1; min-width: 280px; display: none;" id="modeLabel_bestprep">
@@ -626,7 +655,7 @@
                     </div>
                 </label>
             </div>
-            <p id="modeHint" style="margin-top: 10px; color: #28a745; font-size: 13px;">Bid/Spec: Smart deduplication, optimized for specs</p>
+            <p id="modeHint" style="margin-top: 10px; color: #28a745; font-size: 13px;">Contracts/RFPs/Spec: Optimized for contracts, bids, and large PDFs</p>
         </div>
 
         <!-- Question Configuration -->
@@ -638,7 +667,7 @@
             </div>
             <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
                 <label>Active Questions: <span id="activeQuestionCount">0</span> questions selected</label>
-                <button class="btn btn-secondary" onclick="openQuestionManager()" style="margin: 0;">⚙️ Manage Questions</button>
+                <button class="btn btn-secondary" id="questionSetBtn" onclick="openQuestionSetHub()" style="margin: 0;">⚙️ Load Question Set / Manage Questions</button>
             </div>
 
             <!-- Context Guardrails Input -->
@@ -949,7 +978,7 @@ function setAnalysisMode(mode) {
     } else {
         bidSpecLabel.style.borderColor = '#28a745';
         bestprepLabel.style.borderColor = '#ddd';
-        modeHint.textContent = 'Bid/Spec: Smart deduplication, optimized for specs';
+        modeHint.textContent = isUserAdmin ? 'Bid/Spec: Smart deduplication, optimized for specs' : 'Contracts/RFPs/Spec: Optimized for contracts, bids, and large PDFs';
         modeHint.style.color = '#28a745';
     }
 }
@@ -1417,6 +1446,10 @@ async function loadQuestionConfig() {
 
 function displayQuestionSections() {
     const container = document.getElementById('questionSections');
+    if (!questionConfig.sections || questionConfig.sections.length === 0) {
+        container.innerHTML = '<p style="color: #888; font-size: 13px; margin: 8px 0;">No questions loaded. Click the button below to load or generate a question set.</p>';
+        return;
+    }
     container.innerHTML = questionConfig.sections.map(section => `
         <div class="question-section ${section.enabled ? 'enabled' : 'disabled'}"
              onclick="toggleSection('${section.section_id}')">
@@ -2014,6 +2047,13 @@ async function checkAdminStatus() {
             if (cityscraperTabBtn) {
                 cityscraperTabBtn.style.display = 'inline-block';
             }
+            // Restore admin-facing labels
+            document.getElementById('bidSpecModeLabel').textContent = 'Bid/Spec/RFP Mode';
+            document.getElementById('bidSpecModeDesc').textContent = 'Smart deduplication, merge similar answers. Best for construction bid specs and RFPs.';
+            document.getElementById('modeHint').textContent = 'Bid/Spec: Smart deduplication, optimized for specs';
+            document.getElementById('questionSetBtn').textContent = '⚙️ Manage Questions';
+            // Pre-load CIPP questions for admins
+            loadQuestionConfig();
             Logger.info('🔐 Admin access granted - Advanced Options, BestPrep & CityScraper available');
         } else {
             isUserAdmin = false;
@@ -2059,8 +2099,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Check admin status to show/hide Advanced Options
     checkAdminStatus();
 
-    // Load question configuration
-    loadQuestionConfig();
+    // Show empty state for question sections on load
+    displayQuestionSections();
+    updateActiveQuestionCount();
 
     // Setup file input
     document.getElementById('fileInput').addEventListener('change', handleFileSelect);
@@ -3099,6 +3140,284 @@ materials,Materials & Standards,Q12,What ASTM standards apply?,false,technical_s
     a.click();
     URL.revokeObjectURL(url);
     Logger.info('Template downloaded');
+}
+
+// ============================================================================
+// QUESTION SET HUB - Load / Generate / Manage
+// ============================================================================
+
+let pendingAdditionalSections = [];
+let pendingAIInput = '';
+
+function openQuestionSetHub() {
+    if (isUserAdmin) {
+        // Admins go directly to the question manager
+        openQuestionManager();
+        return;
+    }
+    document.getElementById('questionSetHubModal').style.display = 'flex';
+    showHubHome();
+}
+
+function closeQuestionSetHub() {
+    document.getElementById('questionSetHubModal').style.display = 'none';
+    displayQuestionSections();
+    updateActiveQuestionCount();
+}
+
+function showHubHome() {
+    document.getElementById('hubContent').innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            <button class="hub-option-btn" onclick="showAIGenerateView()">
+                <span style="font-size: 2em;">🤖</span>
+                <div>
+                    <strong>Generate AI Question Set</strong>
+                    <p>Type or paste your questions and context — AI converts them into a structured question set instantly.</p>
+                </div>
+            </button>
+            <button class="hub-option-btn" onclick="loadCIPPQuestionSet()">
+                <span style="font-size: 2em;">📋</span>
+                <div>
+                    <strong>Load CIPP Question Set</strong>
+                    <p>Load the built-in 100-question CIPP lining / municipal infrastructure question set.</p>
+                </div>
+            </button>
+            <button class="hub-option-btn" onclick="closeQuestionSetHub(); openQuestionManager();">
+                <span style="font-size: 2em;">✏️</span>
+                <div>
+                    <strong>Manage / Edit Questions</strong>
+                    <p>Add, edit, delete, or upload sections and questions manually.</p>
+                </div>
+            </button>
+        </div>
+    `;
+}
+
+function showAIGenerateView() {
+    document.getElementById('hubContent').innerHTML = `
+        <div style="margin-bottom: 15px;">
+            <button onclick="showHubHome()" style="background: none; border: none; color: #5B7FCC; cursor: pointer; font-size: 14px;">← Back</button>
+        </div>
+        <h3 style="margin: 0 0 10px; color: #1E3A8A;">🤖 Generate AI Question Set</h3>
+        <p style="color: #555; margin-bottom: 15px; font-size: 14px;">
+            Paste your questions, describe what you're looking for, or provide a mix of both. The AI will preserve every specific question you provide and organize everything into a structured set ready to use immediately.
+        </p>
+        <textarea id="aiQuestionInput"
+            placeholder="Examples:&#10;- What is the pipe diameter and material?&#10;- Describe the bypass pumping requirements&#10;- I need questions about CIPP lining for a sewer rehabilitation project, focusing on materials, installation, and testing&#10;&#10;Paste any combination of specific questions and/or descriptive context."
+            style="width: 100%; min-height: 160px; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; resize: vertical; box-sizing: border-box; font-family: inherit;"
+        ></textarea>
+        <div style="margin-top: 12px; display: flex; gap: 10px; align-items: center;">
+            <button class="btn" id="generateAIBtn" onclick="generateAIQuestions()" style="min-width: 160px;">
+                🤖 Generate Question Set
+            </button>
+            <span id="aiGenerateStatus" style="font-size: 13px; color: #666;"></span>
+        </div>
+        <div id="aiGenerateResult" style="margin-top: 15px;"></div>
+    `;
+}
+
+async function loadCIPPQuestionSet() {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    try {
+        const resp = await fetch('/api/config/questions');
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Failed to load');
+        questionConfig = data.config;
+        questionConfig.sections.forEach(s => { if (s.enabled === undefined) s.enabled = true; });
+        displayQuestionSections();
+        updateActiveQuestionCount();
+        Logger.success(`✅ Loaded CIPP question set: ${questionConfig.totalQuestions} questions in ${questionConfig.sections.length} sections`);
+        closeQuestionSetHub();
+    } catch (e) {
+        Logger.error('Failed to load CIPP question set: ' + e.message);
+        btn.disabled = false;
+        btn.style.opacity = '1';
+    }
+}
+
+async function generateAIQuestions() {
+    const input = document.getElementById('aiQuestionInput').value.trim();
+    if (!input) {
+        document.getElementById('aiGenerateStatus').textContent = 'Please enter your questions or context first.';
+        return;
+    }
+
+    const btn = document.getElementById('generateAIBtn');
+    const status = document.getElementById('aiGenerateStatus');
+    const resultDiv = document.getElementById('aiGenerateResult');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating...';
+    status.textContent = 'AI is building your question set…';
+    resultDiv.innerHTML = '';
+    pendingAIInput = input;
+
+    try {
+        const resp = await fetch('/api/config/questions/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_input: input })
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Generation failed');
+
+        // Import immediately into question config
+        const generated = data.config;
+        questionConfig = generated;
+        questionConfig.sections.forEach(s => { if (s.enabled === undefined) s.enabled = true; });
+
+        // Save to backend
+        await fetch('/api/config/questions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sections: questionConfig.sections })
+        });
+
+        displayQuestionSections();
+        updateActiveQuestionCount();
+
+        btn.disabled = false;
+        btn.textContent = '🤖 Generate Question Set';
+        status.textContent = '';
+
+        const qCount = questionConfig.sections.reduce((s, sec) => s + sec.questions.length, 0);
+        const sCount = questionConfig.sections.length;
+
+        resultDiv.innerHTML = `
+            <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 15px;">
+                <p style="margin: 0 0 12px; color: #166534; font-weight: 600;">
+                    ✅ Imported ${qCount} questions across ${sCount} section${sCount !== 1 ? 's' : ''}.
+                </p>
+                <p style="margin: 0 0 12px; color: #444; font-size: 14px;">
+                    Would you also like to see AI-suggested additional questions based on your context?
+                    (Up to 3 extra sections with 10 questions each, all relevant to your topic.)
+                </p>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn" id="yesAdditionalBtn" onclick="fetchAdditionalQuestions()">
+                        Yes, show me more questions
+                    </button>
+                    <button class="btn btn-secondary" onclick="closeQuestionSetHub()">
+                        No thanks, use these
+                    </button>
+                </div>
+                <div id="additionalQuestionsArea" style="margin-top: 15px;"></div>
+            </div>
+        `;
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '🤖 Generate Question Set';
+        status.textContent = '';
+        resultDiv.innerHTML = `<div style="color: #dc2626; padding: 10px;">❌ Error: ${e.message}</div>`;
+        Logger.error('AI generation failed: ' + e.message);
+    }
+}
+
+async function fetchAdditionalQuestions() {
+    const btn = document.getElementById('yesAdditionalBtn');
+    const area = document.getElementById('additionalQuestionsArea');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating additional questions…';
+
+    try {
+        const resp = await fetch('/api/config/questions/generate-additional', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_input: pendingAIInput,
+                existing_sections: questionConfig.sections
+            })
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Generation failed');
+
+        const extra = data.additional_sections;
+        if (!extra || extra.length === 0) {
+            area.innerHTML = '<p style="color: #666; font-size: 14px;">No additional questions were generated.</p>';
+            return;
+        }
+
+        // Store for applyAdditionalQuestions()
+        pendingAdditionalSections = extra;
+
+        // Render preview with select-all checkboxes per section
+        let html = `<h4 style="margin: 0 0 10px; color: #1E3A8A;">Additional Suggested Questions</h4>
+            <p style="color: #555; font-size: 13px; margin-bottom: 12px;">Select the sections and questions you'd like to add:</p>`;
+
+        extra.forEach((sec, si) => {
+            html += `
+                <div style="margin-bottom: 12px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                    <div style="background: #f8f9ff; padding: 10px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #ddd;">
+                        <input type="checkbox" id="addSec_${si}" checked style="width: 16px; height: 16px;">
+                        <strong style="color: #1E3A8A;">${sec.section_name}</strong>
+                        <span style="color: #888; font-size: 12px;">(${sec.questions.length} questions)</span>
+                    </div>
+                    <div style="padding: 10px 14px;">`;
+            sec.questions.forEach((q, qi) => {
+                html += `
+                        <label style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; font-size: 13px; cursor: pointer;">
+                            <input type="checkbox" class="addQ_${si}" data-qi="${qi}" checked style="margin-top: 2px;">
+                            <span>${q.text}</span>
+                        </label>`;
+            });
+            html += `</div></div>`;
+        });
+
+        html += `
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button class="btn" onclick="applyAdditionalQuestions()">
+                    Add Selected Questions
+                </button>
+                <button class="btn btn-secondary" onclick="closeQuestionSetHub()">
+                    Skip & use current set
+                </button>
+            </div>`;
+
+        area.innerHTML = html;
+        btn.style.display = 'none';
+    } catch (e) {
+        area.innerHTML = `<div style="color: #dc2626;">❌ Error: ${e.message}</div>`;
+        btn.disabled = false;
+        btn.textContent = 'Yes, show me more questions';
+    }
+}
+
+async function applyAdditionalQuestions() {
+    const extraSections = pendingAdditionalSections;
+    // Collect only selected sections/questions
+    extraSections.forEach((sec, si) => {
+        const secChecked = document.getElementById(`addSec_${si}`)?.checked;
+        if (!secChecked) return;
+        const selectedQs = [...document.querySelectorAll(`.addQ_${si}:checked`)].map(cb => {
+            return sec.questions[parseInt(cb.dataset.qi)];
+        });
+        if (selectedQs.length === 0) return;
+        // Merge into existing config or add as new section
+        const existing = questionConfig.sections.find(s => s.section_id === sec.section_id);
+        if (existing) {
+            selectedQs.forEach(q => {
+                if (!existing.questions.find(eq => eq.id === q.id)) {
+                    existing.questions.push(q);
+                }
+            });
+        } else {
+            questionConfig.sections.push({ ...sec, questions: selectedQs, enabled: true });
+        }
+    });
+
+    // Save merged config
+    await fetch('/api/config/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sections: questionConfig.sections })
+    });
+
+    displayQuestionSections();
+    updateActiveQuestionCount();
+    const total = questionConfig.sections.reduce((s, sec) => s + sec.questions.length, 0);
+    Logger.success(`✅ Question set finalized: ${total} questions across ${questionConfig.sections.length} sections`);
+    closeQuestionSetHub();
 }
 
 // ============================================================================
@@ -4792,6 +5111,19 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
     </script>
+
+    <!-- Question Set Hub Modal -->
+    <div id="questionSetHubModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center;">
+        <div style="background: white; width: 90%; max-width: 640px; max-height: 90vh; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="background: linear-gradient(135deg, #1E3A8A, #5B7FCC); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0;">⚙️ Question Set</h2>
+                <button onclick="closeQuestionSetHub()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px;">Close</button>
+            </div>
+            <div id="hubContent" style="padding: 24px; overflow-y: auto; flex: 1;">
+                <!-- Content rendered by JavaScript -->
+            </div>
+        </div>
+    </div>
 
     <!-- Question Manager Modal -->
     <div id="questionManagerModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000; justify-content: center; align-items: center;">

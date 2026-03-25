@@ -2805,6 +2805,177 @@ def add_question():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/config/questions/generate', methods=['POST'])
+@require_auth
+def generate_question_set():
+    """
+    AI Question Set Generator — Phase 1 (Initial).
+    Takes free-text user input (questions + context) and generates a structured
+    question set JSON preserving every user-supplied question verbatim.
+    """
+    import requests as http_requests
+
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 500
+
+    data = request.get_json()
+    user_input = (data or {}).get('user_input', '').strip()
+    if not user_input:
+        return jsonify({'success': False, 'error': 'user_input is required'}), 400
+
+    system_prompt = (
+        "You are a master expert question architect and specialist in creating structured question sets "
+        "for BidBrief, an AI document analysis platform. Your job is to take a user's free-text input "
+        "(which may contain specific questions, contextual descriptions, or both) and produce a clean "
+        "JSON question set for document analysis.\n\n"
+        "RULES:\n"
+        "1. Preserve EVERY specific question the user wrote, word-for-word, without abridging or paraphrasing.\n"
+        "2. Infer the domain/purpose from the user's context and organize questions into logical sections.\n"
+        "3. Generate question IDs as Q1, Q2, Q3... sequentially across all sections.\n"
+        "4. Each section needs: section_id (snake_case), section_name (human-readable), section_description.\n"
+        "5. Each question needs: id, text, required (true/false), expected_type (string/number/date/technical_spec), enabled (true).\n"
+        "6. Return ONLY valid JSON — no markdown fences, no commentary, nothing else.\n\n"
+        "Output format:\n"
+        '{"sections": [{"section_id": "...", "section_name": "...", "section_description": "...", '
+        '"questions": [{"id": "Q1", "text": "...", "required": true, "expected_type": "string", "enabled": true}]}]}'
+    )
+
+    try:
+        resp = http_requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json={
+                'model': 'gpt-4o',
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_input}
+                ],
+                'temperature': 0.3,
+                'max_tokens': 4000
+            },
+            timeout=60
+        )
+        resp.raise_for_status()
+        raw = resp.json()['choices'][0]['message']['content'].strip()
+
+        # Strip markdown fences if present
+        if raw.startswith('```'):
+            raw = raw.split('```')[1]
+            if raw.startswith('json'):
+                raw = raw[4:]
+
+        parsed = json.loads(raw)
+        sections = parsed.get('sections', [])
+        total_questions = sum(len(s.get('questions', [])) for s in sections)
+
+        logger.info(f'🤖 AI generated question set: {len(sections)} sections, {total_questions} questions')
+        return jsonify({
+            'success': True,
+            'config': {
+                'sections': sections,
+                'totalQuestions': total_questions,
+                'version': '1.0'
+            }
+        })
+
+    except json.JSONDecodeError as e:
+        logger.error(f'AI question generation: JSON parse error: {e}')
+        return jsonify({'success': False, 'error': 'AI returned invalid JSON. Please try again or rephrase your input.'}), 500
+    except Exception as e:
+        logger.error(f'AI question generation failed: {e}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config/questions/generate-additional', methods=['POST'])
+@require_auth
+def generate_additional_questions():
+    """
+    AI Question Set Generator — Phase 2 (Additional suggestions).
+    Given the user's original context and existing sections, generates up to
+    3 additional sections with up to 10 questions each.
+    """
+    import requests as http_requests
+
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 500
+
+    data = request.get_json()
+    user_input = (data or {}).get('user_input', '').strip()
+    existing_sections = (data or {}).get('existing_sections', [])
+
+    if not user_input:
+        return jsonify({'success': False, 'error': 'user_input is required'}), 400
+
+    existing_summary = ', '.join(s.get('section_name', '') for s in existing_sections) if existing_sections else 'none'
+    existing_q_texts = [q.get('text', '') for s in existing_sections for q in s.get('questions', [])]
+
+    # Find the highest existing question number for sequential IDs
+    max_q_num = 0
+    for s in existing_sections:
+        for q in s.get('questions', []):
+            qid = q.get('id', '')
+            if qid.startswith('Q'):
+                try:
+                    max_q_num = max(max_q_num, int(qid[1:]))
+                except ValueError:
+                    pass
+
+    system_prompt = (
+        "You are a master expert question architect specializing in document analysis question sets. "
+        "The user already has a question set based on their input. Your job is to suggest ADDITIONAL "
+        "valuable questions that complement what they already have.\n\n"
+        "RULES:\n"
+        "1. Create UP TO 3 new sections with UP TO 10 questions each.\n"
+        "2. Do NOT repeat any questions that already exist in the set.\n"
+        "3. Questions must be directly relevant and useful for the user's domain/context.\n"
+        "4. Start question IDs from Q{next_id} (continue the existing sequence).\n"
+        "5. Return ONLY valid JSON — no markdown fences, no commentary.\n\n"
+        f"Existing sections already covered: {existing_summary}\n"
+        f"Start new question IDs from Q{max_q_num + 1}.\n\n"
+        "Output format:\n"
+        '{"additional_sections": [{"section_id": "...", "section_name": "...", "section_description": "...", '
+        '"questions": [{"id": "Q...", "text": "...", "required": false, "expected_type": "string", "enabled": true}]}]}'
+    )
+
+    try:
+        resp = http_requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json={
+                'model': 'gpt-4o',
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': f"Original context:\n{user_input}\n\nAlready have these questions:\n" + '\n'.join(f'- {q}' for q in existing_q_texts)}
+                ],
+                'temperature': 0.5,
+                'max_tokens': 3000
+            },
+            timeout=60
+        )
+        resp.raise_for_status()
+        raw = resp.json()['choices'][0]['message']['content'].strip()
+
+        if raw.startswith('```'):
+            raw = raw.split('```')[1]
+            if raw.startswith('json'):
+                raw = raw[4:]
+
+        parsed = json.loads(raw)
+        additional = parsed.get('additional_sections', [])
+
+        logger.info(f'🤖 AI generated {len(additional)} additional sections')
+        return jsonify({'success': True, 'additional_sections': additional})
+
+    except json.JSONDecodeError as e:
+        logger.error(f'AI additional generation: JSON parse error: {e}')
+        return jsonify({'success': False, 'error': 'AI returned invalid JSON. Please try again.'}), 500
+    except Exception as e:
+        logger.error(f'AI additional generation failed: {e}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/progress-estimator')
 def progress_estimator():
     """Serve CIPP Production Estimator (Comprehensive - All Penalties/Boosts/Pipe Sizes)"""
