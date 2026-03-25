@@ -162,4 +162,5 @@ class SmartAnalysisOrchestrator:
             strategic_recommendations=synthesis.get('strategic_recommendations') or [],
             user_question_responses=user_responses.get('responses') or [],
             evidence_classification=synthesis.get('evidence_classification') or {},
+            document_understanding=doc_profile.get('document_understanding') or {},
         )

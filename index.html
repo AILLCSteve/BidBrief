@@ -2069,7 +2069,7 @@ async function runSmartAnalysis() {
 
     btn.disabled = true;
     btn.textContent = '🧠 Running Smart Analysis...';
-    statusEl.textContent = 'Analyzing document — this may take 30-60 seconds...';
+    statusEl.textContent = 'Smart Analysis is underway...';
     outputEl.style.display = 'none';
     outputEl.innerHTML = '';
 
@@ -2113,11 +2113,22 @@ function renderSmartAnalysisResult(r) {
         if (!items || !items.length) return '<p style="color:#888;font-size:13px;">None identified.</p>';
         return items.map(it => {
             const fud = it.follow_up_direction || {};
-            const fudHTML = fud.action ? `
+            // Support both v3 multi-step fields and v2 legacy fields
+            const hasV3 = fud.what_to_ask || fud.why_unclear || fud.verification_step;
+            const hasV2 = fud.action;
+            const fudHTML = (hasV3 || hasV2) ? `
                 <div style="margin-top:8px;padding:8px 10px;background:#f0f9ff;border-left:3px solid #3B82F6;border-radius:4px;font-size:12px;color:#1e40af;">
+                    ${hasV3 ? `
+                    ${fud.why_unclear ? `<div style="margin-bottom:3px;"><strong>Why unclear:</strong> ${fud.why_unclear}</div>` : ''}
+                    ${fud.verification_step ? `<div style="margin-bottom:3px;"><strong>Check first:</strong> ${fud.verification_step}</div>` : ''}
+                    ${fud.what_to_ask ? `<div style="margin-bottom:3px;"><strong>Ask:</strong> &ldquo;${fud.what_to_ask}&rdquo;</div>` : ''}
+                    ${fud.who_to_ask ? `<div style="margin-bottom:3px;"><strong>Who:</strong> ${fud.who_to_ask}</div>` : ''}
+                    ${fud.where_to_look ? `<div><strong>Where:</strong> ${fud.where_to_look}</div>` : ''}
+                    ` : `
                     <strong>Follow-up:</strong> ${fud.action}
                     ${fud.target ? ` &rarr; <em>${fud.target}</em>` : ''}
                     ${fud.specific_question ? `<div style="margin-top:3px;color:#1e3a8a;">&ldquo;${fud.specific_question}&rdquo;</div>` : ''}
+                    `}
                 </div>` : '';
             return `
             <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:10px;background:#fff;">
@@ -2189,6 +2200,21 @@ function renderSmartAnalysisResult(r) {
             </div>
         </div>
 
+        ${r.document_understanding && r.document_understanding.document_overview ? section('Document Overview', `
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-size:13px;">
+                <p style="margin:0 0 10px;color:#374151;line-height:1.6;">${r.document_understanding.document_overview}</p>
+                ${r.document_understanding.major_workstreams && r.document_understanding.major_workstreams.length ? `
+                <div style="margin-bottom:8px;"><strong style="color:#1e40af;">Major Workstreams:</strong>
+                <ul style="margin:4px 0 0 16px;padding:0;color:#374151;">${r.document_understanding.major_workstreams.map(w=>`<li>${w}</li>`).join('')}</ul></div>` : ''}
+                ${r.document_understanding.key_obligations && r.document_understanding.key_obligations.length ? `
+                <div style="margin-bottom:8px;"><strong style="color:#1e40af;">Key Obligations:</strong>
+                <ul style="margin:4px 0 0 16px;padding:0;color:#374151;">${r.document_understanding.key_obligations.map(o=>`<li>${o}</li>`).join('')}</ul></div>` : ''}
+                ${r.document_understanding.key_constraints && r.document_understanding.key_constraints.length ? `
+                <div style="margin-bottom:8px;"><strong style="color:#1e40af;">Key Constraints:</strong>
+                <ul style="margin:4px 0 0 16px;padding:0;color:#374151;">${r.document_understanding.key_constraints.map(c=>`<li>${c}</li>`).join('')}</ul></div>` : ''}
+                ${r.document_understanding.structural_organization ? `
+                <div style="color:#64748b;font-size:12px;font-style:italic;">${r.document_understanding.structural_organization}</div>` : ''}
+            </div>`) : ''}
         ${r.assessments && r.assessments.length ? section('Professional Assessments', assessmentsHTML) : ''}
         ${r.executive_summary ? section('Executive Summary', `<p style="font-size:13px;line-height:1.7;color:#374151;white-space:pre-wrap;">${r.executive_summary}</p>`) : ''}
         ${r.key_insights && r.key_insights.length ? section('Key Insights', insightsHTML) : ''}
@@ -2207,6 +2233,8 @@ function renderSmartAnalysisResult(r) {
                     `<div style="margin-bottom:8px;"><strong style="color:#dc2626;">Confirmed Absent:</strong> ${r.evidence_classification.confirmed_absent_flagged.join(', ')}</div>` : ''}
                 ${r.evidence_classification.unverified_flagged && r.evidence_classification.unverified_flagged.length ?
                     `<div style="margin-bottom:8px;"><strong style="color:#d97706;">Unverified/Partial:</strong> ${r.evidence_classification.unverified_flagged.join(', ')}</div>` : ''}
+                ${r.evidence_classification.language_tiers_applied ?
+                    `<div style="margin-bottom:4px;color:#475569;"><em>${r.evidence_classification.language_tiers_applied}</em></div>` : ''}
             </div>`
         ) : ''}
     </div>`;

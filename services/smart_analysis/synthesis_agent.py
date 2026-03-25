@@ -1,6 +1,17 @@
 """
 Synthesis Agent — combines all agent outputs into the final executive report.
 
+v3 major changes:
+  - max_tokens 5000 → 8000 to support mandatory minimum output counts
+  - MANDATORY MINIMUM COUNTS enforced in system prompt:
+      ≥5 risks, ≥5 opportunities, ≥5 ambiguities, ≥5 key_insights,
+      ≥6 assessments, ≥6 follow_up_questions, ≥5 strategic_recommendations
+  - Assessment categories MUST be derived uniquely from THIS document — not static labels
+  - follow_up_direction expanded to 5-field multi-step sequence on risks, ambiguities, opportunities
+  - document_understanding from DocProfile included in context and output
+  - opportunities now include follow_up_direction
+  - "unclear" items require full action sequence: why, verification, what/who/where
+
 v2 major changes:
   - Receives doc_profile (confirmed_present/absent/unverified + expertise_profile)
   - MUST verify all "missing/absent" claims against confirmed_present before including
@@ -45,11 +56,29 @@ complexity high), you must:
   - State what benchmark supports the judgment
   - Flag when evidence is insufficient to support a strong claim
 
+MANDATORY MINIMUM OUTPUTS — You MUST produce at minimum:
+  - key_insights: AT LEAST 5 (aim for 7-8 genuinely distinct, decision-relevant insights)
+  - risks: AT LEAST 5 (aim for 7-10 — each must have a full follow_up_direction)
+  - opportunities: AT LEAST 5 (each must have a follow_up_direction)
+  - ambiguities: AT LEAST 5 (each must have a full follow_up_direction)
+  - assessments: AT LEAST 6, using categories derived uniquely from THIS document's \
+    specific characteristics, risk profile, and industry context. Do NOT use the same \
+    assessment categories across different documents. Categories must reflect what actually \
+    matters for THIS contract's specific scope, sector, value, and risk exposure. \
+    Think: what are the 6-8 things a decision-maker MUST evaluate for THIS specific deal?
+  - follow_up_questions: AT LEAST 6 (specific, targeted, with who to ask)
+  - strategic_recommendations: AT LEAST 5 (each with clear reasoning basis)
+
+  If any category genuinely cannot reach its minimum (evidence too thin), add a final item \
+  explaining why further items are not supported by the available analysis.
+
 OUTPUT REQUIREMENTS:
-  - Every risk, ambiguity, and uncertainty item must include a follow_up_direction
+  - Every risk, ambiguity, uncertainty, and opportunity item must include a full follow_up_direction \
+    with all five fields: why_unclear, verification_step, what_to_ask, who_to_ask, where_to_look
   - Merge overlapping SCOUT and MIRROR findings — do not list the same issue twice
   - Be decisive where evidence supports it; acknowledge uncertainty where it does not
   - Write the executive summary for a busy decision-maker who needs the full picture in 2 minutes
+  - Assessment categories must be unique to this run — derive them from the document
 
 Respond with valid JSON only."""
 
@@ -61,6 +90,13 @@ Document: {doc_name}
 Type: {doc_type}
 Analysis Status: {completeness} — {answer_rate}% of questions answered
 {partial_note}
+
+DOCUMENT OVERVIEW:
+{document_overview}
+
+Major workstreams: {major_workstreams}
+Key obligations: {key_obligations}
+Key constraints: {key_constraints}
 
 EXPERTISE PROFILE:
 Role: {expert_role}
@@ -104,20 +140,23 @@ Produce the comprehensive professional executive report. Remember:
   1. VERIFY every "missing/absent" claim against the confirmed_present list above
   2. Use the mandatory language tiers for all evidence status statements
   3. Benchmark professional judgments against the expertise profile
-  4. Every uncertain/missing/risky item MUST include specific follow-up direction
+  4. Every uncertain/missing/risky/opportunity item MUST include a full 5-field follow_up_direction
   5. Merge SCOUT + MIRROR overlapping findings — do not duplicate
+  6. Produce AT MINIMUM the required counts for every output category
+  7. Assessment categories MUST be derived from THIS document — not generic labels
 
 Respond as JSON:
 {{
-  "executive_summary": "3-5 paragraph professional narrative. Cover: (1) what the analysis \
-confirms about the document, (2) key decision factors, (3) most significant risks or gaps, \
-(4) overall professional assessment. Use precise language tiers throughout. Write for a \
-decision-maker who needs the full picture in 2 minutes.",
+  "executive_summary": "3-5 paragraph professional narrative. Cover: (1) what this document \
+is and what it is procuring (using document_overview), (2) key decision factors confirmed by \
+analysis, (3) most significant risks or gaps with language tiers, (4) overall professional \
+assessment grounded in expertise benchmarks. Write for a decision-maker who needs the full \
+picture in 2 minutes.",
 
   "key_insights": [
     "Most important insight — specific, evidence-based, decision-relevant (cite tier)",
     "Second insight",
-    "..."
+    "Third insight (minimum 5 total, aim for 7-8)"
   ],
 
   "risks": [
@@ -128,9 +167,11 @@ decision-maker who needs the full picture in 2 minutes.",
       "evidence": ["Specific evidence point from analysis"],
       "page_refs": [],
       "follow_up_direction": {{
-        "action": "What to do",
-        "target": "Who or what source",
-        "specific_question": "Exact follow-up question"
+        "why_unclear": "What makes this risk uncertain or difficult to fully assess",
+        "verification_step": "What to check or read before escalating",
+        "what_to_ask": "Specific question to ask",
+        "who_to_ask": "Specific party, role, or department",
+        "where_to_look": "Document section, specification, or external reference"
       }}
     }}
   ],
@@ -138,10 +179,17 @@ decision-maker who needs the full picture in 2 minutes.",
   "opportunities": [
     {{
       "title": "Short title",
-      "description": "Specific, actionable description",
+      "description": "Specific, actionable description of the opportunity",
       "severity": "high|medium|low",
       "evidence": ["Supporting evidence"],
-      "page_refs": []
+      "page_refs": [],
+      "follow_up_direction": {{
+        "why_unclear": "What would need to be confirmed to pursue this opportunity",
+        "verification_step": "What to verify or review first",
+        "what_to_ask": "Specific question to ask",
+        "who_to_ask": "Who to approach about this opportunity",
+        "where_to_look": "Where to find supporting information"
+      }}
     }}
   ],
 
@@ -153,9 +201,11 @@ decision-maker who needs the full picture in 2 minutes.",
       "evidence": ["What partial evidence exists"],
       "page_refs": [],
       "follow_up_direction": {{
-        "action": "What to do",
-        "target": "Who or what source",
-        "specific_question": "Exact follow-up question"
+        "why_unclear": "Which analysis tier applies and what makes this unresolved",
+        "verification_step": "What to check or search before asking",
+        "what_to_ask": "Exact question to ask",
+        "who_to_ask": "Owner, engineer, spec author, or specific party",
+        "where_to_look": "Which section, addendum, or reference to consult"
       }}
     }}
   ],
@@ -172,26 +222,27 @@ decision-maker who needs the full picture in 2 minutes.",
 
   "assessments": [
     {{
-      "category": "e.g., Risk Level, Profitability Outlook, Execution Complexity",
-      "rating": "e.g., High, Moderate, Favorable",
-      "rationale": "One sentence explanation with benchmark reference",
+      "category": "Unique assessment category derived from THIS document's specific characteristics",
+      "rating": "Assessment rating (e.g., High, Moderate, Favorable, Elevated, Acceptable)",
+      "rationale": "One sentence explanation with benchmark reference from the expertise profile",
       "confidence": "high|medium|low"
     }}
   ],
 
   "follow_up_questions": [
-    "Specific, targeted question that must be answered before decision — include who to ask"
+    "Specific, targeted question that must be answered before decision — include who to ask and why it matters"
   ],
 
   "strategic_recommendations": [
-    "Specific, actionable recommendation with the reasoning basis"
+    "Specific, actionable recommendation with the reasoning basis and expected benefit"
   ],
 
   "evidence_classification": {{
     "confirmed_present_used": ["Topics from confirmed_present that informed the analysis"],
     "confirmed_absent_flagged": ["Topics from confirmed_absent flagged as gaps"],
     "unverified_flagged": ["Topics from unverified flagged as unresolved"],
-    "language_tiers_applied": "Brief note on how the language tiers were applied"
+    "language_tiers_applied": "Brief note on how the language tiers were applied",
+    "minimum_count_notes": "Note any categories where minimum counts were difficult to reach and why"
   }}
 }}"""
 
@@ -208,6 +259,12 @@ def _fmt_profile_list(items: list, key: str, sub_key: str = '') -> str:
         else:
             lines.append(f"  • {primary}")
     return '\n'.join(lines)
+
+
+def _fmt_list(items: list) -> str:
+    if not items:
+        return '(none)'
+    return ', '.join(str(i) for i in items)
 
 
 class SynthesisAgent:
@@ -238,6 +295,7 @@ class SynthesisAgent:
         confirmed_present = profile.get('confirmed_present', [])
         confirmed_absent = profile.get('confirmed_absent', [])
         unverified = profile.get('unverified', [])
+        doc_understanding = profile.get('document_understanding') or {}
 
         user_resp_list = user_responses.get('responses', [])
 
@@ -252,6 +310,10 @@ class SynthesisAgent:
                         completeness='Partial' if is_partial else 'Complete',
                         answer_rate=ctx.get('answer_rate_pct', 0),
                         partial_note=partial_note,
+                        document_overview=doc_understanding.get('document_overview', '(not available)'),
+                        major_workstreams=_fmt_list(doc_understanding.get('major_workstreams', [])),
+                        key_obligations=_fmt_list(doc_understanding.get('key_obligations', [])),
+                        key_constraints=_fmt_list(doc_understanding.get('key_constraints', [])),
                         expert_role=expertise.get('role', 'Document Analyst'),
                         industry_context=expertise.get('industry_context', ''),
                         benchmarks='\n'.join(f"  • {b}" for b in expertise.get('key_benchmarks', [])) or '  (none)',
@@ -276,9 +338,9 @@ class SynthesisAgent:
                     )},
                 ],
                 temperature=0.2,
-                max_tokens=5000,
+                max_tokens=8000,
                 response_format={'type': 'json_object'},
-                timeout=120.0,
+                timeout=180.0,
             )
             result = json.loads(response.choices[0].message.content)
             logger.info('[Synthesis] Complete')

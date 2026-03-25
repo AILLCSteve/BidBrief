@@ -1,17 +1,25 @@
 """
 Document Profile Agent — grounding pass before SCOUT/MIRROR run.
 
+v3 changes:
+  - max_tokens 3000 → 4500 for richer output
+  - Adds document_understanding block: overview, workstreams, constraints, obligations
+  - Expertise profile forced to derive uniquely from THIS document's specifics
+  - Example benchmarks removed from schema to prevent cross-run repetition
+  - Empty fallback includes document_understanding
+
 Establishes a verified evidence inventory and expertise posture before
 any subjective analysis begins. This prevents downstream agents from
 making false "X is missing" claims when X is actually present in the
 analysis artifacts.
 
 Outputs:
-  confirmed_present  — topics explicitly evidenced in the analysis
-  confirmed_absent   — topics confidently absent (conservative — high bar)
-  unverified         — topics that exist but aren't clearly resolved
-  expertise_profile  — expert role, industry norms, benchmarks, red flags
-  key_items          — categorized summary: scope, schedule, commercial, compliance
+  confirmed_present    — topics explicitly evidenced in the analysis
+  confirmed_absent     — topics confidently absent (conservative — high bar)
+  unverified           — topics that exist but aren't clearly resolved
+  expertise_profile    — expert role, industry norms, benchmarks, red flags
+  key_items            — categorized summary: scope, schedule, commercial, compliance
+  document_understanding — holistic document overview (v3 addition)
 """
 
 import json
@@ -36,6 +44,14 @@ Use strict language tiers:
   confirmed_absent   — actively searched, no evidence found anywhere in the artifacts
   unverified         — not clearly addressed, or addressed only partially/vaguely
 
+EXPERTISE UNIQUENESS RULE:
+  Your expertise_profile must be derived entirely from the specific characteristics of THIS \
+  document — its trade type, scope scale, contract value, geographic context, public/private \
+  sector, complexity, and identified risk profile. Do NOT reuse generic textbook benchmarks. \
+  Two contracts of the same general type will have different benchmarks if their specifics differ. \
+  Your benchmarks, red flags, and normal expectations must be specific enough that they \
+  could only apply to THIS document, not to every document of this type.
+
 Also establish the appropriate expert posture for this document type, industry, and geography.
 
 Respond with valid JSON only."""
@@ -47,9 +63,14 @@ Perform a grounding analysis of this document analysis.
 
 ---
 
-Your task has two parts:
+Your task has three parts:
 
-PART 1 — EVIDENCE INVENTORY
+PART 1 — DOCUMENT UNDERSTANDING
+Provide a holistic understanding of what this document IS and what it is trying to accomplish.
+This is not a risk assessment — it is a clear-eyed description of the document's structure, \
+intent, and major components before any evaluation begins.
+
+PART 2 — EVIDENCE INVENTORY
 For each major topic area relevant to this document type, determine whether it is:
   - confirmed_present: the analysis contains clear evidence of this
   - confirmed_absent:  you searched the full analysis text above and found NO evidence of this
@@ -66,15 +87,36 @@ Focus on topics appropriate for a {doc_type} document. Common topics include:
 
 Only include topics that are genuinely relevant to this specific document. Do not manufacture topics.
 
-PART 2 — EXPERTISE PROFILE
-Determine the appropriate expert posture for evaluating this document. Consider:
+PART 3 — EXPERTISE PROFILE
+Determine the appropriate expert posture for evaluating this document. Derive ALL elements \
+from the actual characteristics of THIS document — not from generic industry examples:
   - Document type and mode ({doc_type}, mode={mode})
-  - Industry / trade type (e.g., trenchless rehab, municipal water/sewer, public works)
-  - Geographic context if known
-  - Public vs. private sector context
+  - Specific trade type, work methodology, and scale found in the document
+  - Geographic context and regulatory environment if evident
+  - Public vs. private sector, agency type, procurement method
+  - Contract value range and corresponding risk/bonding expectations
+  - Specific complexity factors visible in this document
+
+Your benchmarks must be derived from what you observe in this specific document.
 
 Respond as JSON:
 {{
+  "document_understanding": {{
+    "document_overview": "2-3 sentences: what this document IS, its purpose, and what it's trying to procure or accomplish",
+    "major_workstreams": [
+      "Major scope workstream or deliverable 1",
+      "Major scope workstream or deliverable 2"
+    ],
+    "key_obligations": [
+      "Primary obligation on the contractor/party",
+      "Secondary obligation"
+    ],
+    "key_constraints": [
+      "Time, access, regulatory, or operational constraint 1",
+      "Constraint 2"
+    ],
+    "structural_organization": "1-2 sentences describing how the document is organized (sections, divisions, spec format, etc.)"
+  }},
   "confirmed_present": [
     {{
       "topic": "Brief topic name (e.g., Scope of Work)",
@@ -95,19 +137,19 @@ Respond as JSON:
     }}
   ],
   "expertise_profile": {{
-    "role": "e.g., Public Works Bid/Spec Reviewer — Trenchless Sewer Rehabilitation",
-    "industry_context": "2-3 sentences on typical norms for this type of work",
+    "role": "Specific expert role title derived from THIS document's trade/industry/context",
+    "industry_context": "2-3 sentences on typical norms for THIS specific type of work, derived from document specifics",
     "key_benchmarks": [
-      "e.g., CIPP lining production rates typically 500-1000 LF/day depending on pipe size",
-      "e.g., Public works projects typically require 10% bid bond and 100% performance/payment bonds"
+      "Benchmark specific to THIS document's trade, scale, and method — not a generic example",
+      "Second benchmark specific to this document"
     ],
     "typical_red_flags": [
-      "e.g., Missing soil/groundwater investigation data in an open-trench spec",
-      "e.g., Liquidated damages with no definition of substantial vs. final completion"
+      "Red flag specific to the risk profile evident in THIS document",
+      "Second red flag relevant to this specific document type and scope"
     ],
     "normal_expectations": [
-      "e.g., Working-day contracts in CA municipal work typically run 60-120 days for trenchless rehab",
-      "e.g., Prevailing wage requirement is standard for CA public works > $25K threshold"
+      "Expectation calibrated to THIS document's geography, sector, and scale",
+      "Second expectation relevant to this specific work"
     ]
   }},
   "key_items": {{
@@ -151,9 +193,9 @@ class DocumentProfileAgent:
                     )},
                 ],
                 temperature=0.15,
-                max_tokens=3000,
+                max_tokens=4500,
                 response_format={'type': 'json_object'},
-                timeout=60.0,
+                timeout=90.0,
             )
             result = json.loads(response.choices[0].message.content)
 
@@ -164,7 +206,8 @@ class DocumentProfileAgent:
                 f'[DocProfile] {n_present} confirmed present, '
                 f'{n_absent} confirmed absent, '
                 f'{n_unverified} unverified | '
-                f'role={result.get("expertise_profile", {}).get("role", "unknown")}'
+                f'role={result.get("expertise_profile", {}).get("role", "unknown")} | '
+                f'doc_understanding={"yes" if result.get("document_understanding") else "no"}'
             )
             return result
 
@@ -172,6 +215,13 @@ class DocumentProfileAgent:
             logger.error(f'[DocProfile] Failed: {e}')
             # Return safe empty profile — downstream agents handle this gracefully
             return {
+                'document_understanding': {
+                    'document_overview': '',
+                    'major_workstreams': [],
+                    'key_obligations': [],
+                    'key_constraints': [],
+                    'structural_organization': '',
+                },
                 'confirmed_present': [],
                 'confirmed_absent': [],
                 'unverified': [],

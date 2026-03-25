@@ -61,6 +61,9 @@ class SmartAnalysisResult:
     # v2: evidence classification from synthesis (how language tiers were applied)
     evidence_classification: Dict[str, Any] = field(default_factory=dict)
 
+    # v3: holistic document understanding (overview, workstreams, constraints, obligations)
+    document_understanding: Dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         def _item_dict(item: SmartAnalysisItem) -> dict:
             d = vars(item).copy()
@@ -84,4 +87,5 @@ class SmartAnalysisResult:
             'strategic_recommendations': self.strategic_recommendations,
             'user_question_responses': self.user_question_responses,
             'evidence_classification': self.evidence_classification,
+            'document_understanding': self.document_understanding,
         }
