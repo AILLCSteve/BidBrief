@@ -174,6 +174,9 @@
         .action-btn:hover { background: #1E3A8A; }
         .action-btn.export { background: #22c55e; }
         .action-btn.export:hover { background: #16a34a; }
+        .action-btn.smart { background: #7c3aed; }
+        .action-btn.smart:hover { background: #5b21b6; }
+        .action-btn.smart:disabled { background: #9ca3af; cursor: not-allowed; }
 
         /* Modal Styles */
         .modal {
@@ -449,6 +452,7 @@
                     <button class="tab-btn" onclick="switchTab('footnotes')">Footnotes</button>
                     <button class="tab-btn" id="pageIndexTabBtn" style="display: none;" onclick="switchTab('pageIndex')">Page Index</button>
                     <button class="tab-btn" id="ragTabBtn" style="display: none;" onclick="switchTab('rag')">Deep RAG</button>
+                    <button class="tab-btn" id="smartTabBtn" style="display: none;" onclick="switchTab('smart')">🧠 Smart Analysis</button>
                 </div>
             </div>
 
@@ -479,6 +483,9 @@
             </div>
             <div id="tab-rag" class="tab-content">
                 <div id="ragContent"></div>
+            </div>
+            <div id="tab-smart" class="tab-content">
+                <div id="smartContent"></div>
             </div>
         </div>
     </div>
@@ -530,9 +537,11 @@
                 html += `<td>${session.total_tokens ? session.total_tokens.toLocaleString() : 'N/A'}</td>`;
                 html += `<td>${formatDuration(session.processing_time)}</td>`;
                 html += `<td>${formatDateTime(session.completed_at || session.stopped_at)}</td>`;
+                const safeFilename = (session.pdf_filename || 'Unknown.pdf').replace(/'/g, "\\'");
                 html += `<td>
-                    <button class="action-btn" onclick="viewAnalysis('${session.session_id}', '${session.pdf_filename || 'Unknown.pdf'}')">View</button>
+                    <button class="action-btn" onclick="viewAnalysis('${session.session_id}', '${safeFilename}')">View</button>
                     <button class="action-btn export" onclick="exportAnalysis('${session.session_id}', '${mode}')">Export</button>
+                    <button class="action-btn smart" onclick="runAdminSmartAnalysis('${session.session_id}', '${safeFilename}')">🧠 Smart</button>
                 </td>`;
                 html += '</tr>';
             });
@@ -1643,6 +1652,181 @@
             } else {
                 window.open(`/api/export/excel-dashboard/${sessionId}`, '_blank');
             }
+        }
+
+        // ── Smart Analysis ─────────────────────────────────────────────────────
+
+        async function runAdminSmartAnalysis(sessionId, pdfFilename) {
+            // Ensure modal is open and initialized for this session
+            const modal = document.getElementById('resultsModal');
+            const modalTitle = document.getElementById('modalTitle');
+            modal.style.display = 'block';
+            modalTitle.textContent = pdfFilename || 'Smart Analysis';
+
+            // Show and switch to Smart tab
+            document.getElementById('smartTabBtn').style.display = 'inline-block';
+            switchTab('smart');
+
+            const smartContent = document.getElementById('smartContent');
+            smartContent.innerHTML = `
+                <div style="text-align:center;padding:60px 20px;">
+                    <div style="font-size:36px;margin-bottom:14px;">🧠</div>
+                    <p style="color:#1E3A8A;font-weight:600;font-size:15px;">Smart Analysis is underway...</p>
+                    <p style="color:#6b7280;font-size:13px;margin-top:6px;">This takes 60–90 seconds. Please wait.</p>
+                </div>`;
+
+            try {
+                // Check for cached result first
+                const checkRes = await fetch(`/api/smart-analysis/${sessionId}`);
+                if (checkRes.ok) {
+                    const checkData = await checkRes.json();
+                    if (checkData.success && checkData.result) {
+                        renderSmartAnalysisTab(checkData.result, sessionId);
+                        return;
+                    }
+                }
+
+                // Run new analysis
+                const res = await fetch(`/api/smart-analysis/${sessionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Smart Analysis failed');
+                renderSmartAnalysisTab(data.result, sessionId);
+
+            } catch (err) {
+                smartContent.innerHTML = `<div class="error">Smart Analysis error: ${err.message}</div>`;
+            }
+        }
+
+        function saBadge(severity) {
+            const map = {
+                critical: { bg: '#fef2f2', color: '#dc2626', border: '#fca5a5' },
+                high:     { bg: '#fff7ed', color: '#ea580c', border: '#fdba74' },
+                medium:   { bg: '#fefce8', color: '#ca8a04', border: '#fde047' },
+                low:      { bg: '#f0fdf4', color: '#16a34a', border: '#86efac' },
+                info:     { bg: '#eff6ff', color: '#2563eb', border: '#93c5fd' },
+            };
+            const s = (severity || 'medium').toLowerCase();
+            const c = map[s] || map.medium;
+            return `<span style="background:${c.bg};color:${c.color};border:1px solid ${c.border};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;text-transform:uppercase;">${s}</span>`;
+        }
+
+        function saSection(title, content) {
+            return `
+            <div style="margin-bottom:18px;">
+                <h4 style="margin:0 0 8px;padding:7px 14px;background:#1E3A8A;color:#fff;border-radius:6px;font-size:13px;">${title}</h4>
+                ${content}
+            </div>`;
+        }
+
+        function saItemsHTML(items) {
+            if (!items || !items.length) return '<p style="color:#888;font-size:13px;">None identified.</p>';
+            return items.map(it => {
+                const fud = it.follow_up_direction || {};
+                const hasV3 = fud.what_to_ask || fud.why_unclear || fud.verification_step;
+                const hasV2 = fud.action;
+                const fudHTML = (hasV3 || hasV2) ? `
+                    <div style="margin-top:8px;padding:8px 10px;background:#f0f9ff;border-left:3px solid #3B82F6;border-radius:4px;font-size:12px;color:#1e40af;">
+                        ${hasV3 ? `
+                        ${fud.why_unclear ? `<div style="margin-bottom:3px;"><strong>Why unclear:</strong> ${fud.why_unclear}</div>` : ''}
+                        ${fud.verification_step ? `<div style="margin-bottom:3px;"><strong>Check first:</strong> ${fud.verification_step}</div>` : ''}
+                        ${fud.what_to_ask ? `<div style="margin-bottom:3px;"><strong>Ask:</strong> &ldquo;${fud.what_to_ask}&rdquo;</div>` : ''}
+                        ${fud.who_to_ask ? `<div style="margin-bottom:3px;"><strong>Who:</strong> ${fud.who_to_ask}</div>` : ''}
+                        ${fud.where_to_look ? `<div><strong>Where:</strong> ${fud.where_to_look}</div>` : ''}
+                        ` : `
+                        <strong>Follow-up:</strong> ${fud.action}
+                        ${fud.target ? ` &rarr; <em>${fud.target}</em>` : ''}
+                        ${fud.specific_question ? `<div style="margin-top:3px;">&ldquo;${fud.specific_question}&rdquo;</div>` : ''}
+                        `}
+                    </div>` : '';
+                return `
+                <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:8px;background:#fff;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+                        ${saBadge(it.severity)}
+                        <strong style="font-size:13px;color:#1e293b;">${it.title}</strong>
+                    </div>
+                    <p style="margin:0 0 5px;font-size:12px;color:#374151;">${it.description}</p>
+                    ${it.evidence && it.evidence.length ? `<ul style="margin:3px 0 0 14px;padding:0;font-size:11px;color:#64748b;">${it.evidence.map(e=>`<li>${e}</li>`).join('')}</ul>` : ''}
+                    ${fudHTML}
+                </div>`;
+            }).join('');
+        }
+
+        function renderSmartAnalysisTab(r, sessionId) {
+            const completeness = r.analysis_completeness === 'partial'
+                ? '<span style="background:#F59E0B;color:#1F2937;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:700;">PARTIAL</span>'
+                : '<span style="background:#22C55E;color:#fff;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:700;">FULL</span>';
+
+            const docUnderstanding = r.document_understanding || {};
+            const duHTML = docUnderstanding.document_overview ? saSection('Document Overview', `
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;font-size:13px;">
+                    <p style="margin:0 0 8px;color:#374151;line-height:1.6;">${docUnderstanding.document_overview}</p>
+                    ${docUnderstanding.major_workstreams && docUnderstanding.major_workstreams.length ? `<div style="margin-bottom:6px;"><strong style="color:#1e40af;">Workstreams:</strong> ${docUnderstanding.major_workstreams.join(' · ')}</div>` : ''}
+                    ${docUnderstanding.key_constraints && docUnderstanding.key_constraints.length ? `<div><strong style="color:#1e40af;">Constraints:</strong> ${docUnderstanding.key_constraints.join(' · ')}</div>` : ''}
+                </div>`) : '';
+
+            const assessmentsHTML = (r.assessments || []).map(a =>
+                `<div style="display:flex;gap:8px;padding:7px 10px;background:#eff6ff;border-radius:6px;margin-bottom:5px;font-size:12px;">
+                    <strong style="min-width:150px;color:#1e40af;">${a.category}</strong>
+                    <span><strong>${a.rating}</strong> — ${a.rationale} <em style="color:#64748b;">(${a.confidence})</em></span>
+                </div>`).join('');
+
+            const insightsHTML = (r.key_insights || []).map((ins, i) =>
+                `<div style="padding:7px 10px;background:${i%2?'#f1f5f9':'#fff'};border-radius:5px;margin-bottom:3px;font-size:12px;">${i+1}. ${ins}</div>`).join('');
+
+            const recsHTML = (r.strategic_recommendations || []).map((rec, i) =>
+                `<div style="display:flex;gap:8px;padding:7px 10px;background:${i%2?'#f1f5f9':'#fff'};border-radius:5px;margin-bottom:3px;font-size:12px;"><span style="min-width:20px;font-weight:700;color:#1e40af;">${i+1}.</span><span>${rec}</span></div>`).join('');
+
+            const followHTML = (r.follow_up_questions || []).map((q, i) =>
+                `<div style="display:flex;gap:8px;padding:7px 10px;background:${i%2?'#f1f5f9':'#fff'};border-radius:5px;margin-bottom:3px;font-size:12px;"><span style="min-width:20px;color:#64748b;">${i+1}.</span><span>${q}</span></div>`).join('');
+
+            const userQHTML = (r.user_question_responses || []).length ? saSection('Your Questions',
+                (r.user_question_responses).map(q => `
+                <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:7px;background:#fff;">
+                    <p style="margin:0 0 5px;font-weight:700;font-size:12px;color:#1e293b;">${q.question}</p>
+                    <p style="margin:0 0 3px;font-size:12px;color:#374151;">${q.response}</p>
+                    <span style="font-size:11px;color:#64748b;">Confidence: ${q.confidence}</span>
+                </div>`).join('')) : '';
+
+            document.getElementById('smartContent').innerHTML = `
+            <div style="padding:16px;">
+                <!-- Export bar -->
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                    <div>
+                        <strong style="color:#1E3A8A;font-size:14px;">🧠 Smart Analysis</strong>
+                        <span style="margin-left:10px;font-size:12px;color:#64748b;">${r.document_name}</span>
+                        <span style="margin-left:8px;">${completeness}</span>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="action-btn export" onclick="exportAdminSmartExcel('${sessionId}')">📊 Excel</button>
+                        <button class="action-btn export" onclick="exportAdminSmartPDF('${sessionId}')">📄 PDF</button>
+                        <button class="action-btn smart" onclick="runAdminSmartAnalysis('${sessionId}', '${r.document_name}')">↻ Re-run</button>
+                    </div>
+                </div>
+
+                ${duHTML}
+                ${r.assessments && r.assessments.length ? saSection('Professional Assessments', assessmentsHTML) : ''}
+                ${r.executive_summary ? saSection('Executive Summary', `<p style="font-size:13px;line-height:1.7;color:#374151;white-space:pre-wrap;">${r.executive_summary}</p>`) : ''}
+                ${r.key_insights && r.key_insights.length ? saSection('Key Insights', insightsHTML) : ''}
+                ${userQHTML}
+                ${r.risks && r.risks.length ? saSection(`Risks (${r.risks.length})`, saItemsHTML(r.risks)) : ''}
+                ${r.opportunities && r.opportunities.length ? saSection(`Opportunities (${r.opportunities.length})`, saItemsHTML(r.opportunities)) : ''}
+                ${r.ambiguities && r.ambiguities.length ? saSection(`Ambiguities (${r.ambiguities.length})`, saItemsHTML(r.ambiguities)) : ''}
+                ${r.contradictions && r.contradictions.length ? saSection(`Contradictions (${r.contradictions.length})`, saItemsHTML(r.contradictions)) : ''}
+                ${recsHTML ? saSection('Strategic Recommendations', recsHTML) : ''}
+                ${followHTML ? saSection('Follow-Up Questions', followHTML) : ''}
+            </div>`;
+        }
+
+        function exportAdminSmartExcel(sessionId) {
+            window.open(`/api/smart-analysis/${sessionId}/export/excel`, '_blank');
+        }
+
+        function exportAdminSmartPDF(sessionId) {
+            window.open(`/api/smart-analysis/${sessionId}/export/pdf`, '_blank');
         }
 
         function closeModal() {
