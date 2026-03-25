@@ -939,7 +939,7 @@
 let currentFile = null;
 let currentSessionId = null;
 let currentAnalysisResult = null;
-let currentKeyRequirements = null;  // Store key requirements from analysis
+let currentKeyRequirements = null;  // Store key document details from analysis
 let currentOptimizedScanData = null;  // Store optimized scan data from V2 pipeline
 let currentUnansweredPassData = null;  // Store unanswered pass data from V2 pipeline
 let currentRagData = null;  // Store RAG data from V2 pipeline
@@ -1304,21 +1304,21 @@ function handleEvent(data) {
             Logger.success(`✅ Recheck complete: ${data.total_new_answers} additional answers from ${data.windows_rechecked} windows`);
             ProgressTracker.update(85, 'Recheck complete...');
         }
-        // Key Requirements Events
+        // Key Document Details Events
         else if (data.event === 'key_requirements_start') {
-            Logger.info(`🔑 Extracting Key Project Requirements...`);
-            ProgressTracker.update(18, 'Extracting key requirements...');
+            Logger.info(`🔑 Extracting Key Document Details...`);
+            ProgressTracker.update(18, 'Extracting key document details...');
         }
         else if (data.event === 'key_requirements_complete') {
-            Logger.success(`✅ Key Requirements extracted: ${data.count} items`);
-            // Store key requirements for later use in modals
+            Logger.success(`✅ Key Document Details extracted: ${data.count} items`);
+            // Store key details for later use in modals
             if (data.requirements) {
                 currentKeyRequirements = data.requirements;
             }
-            ProgressTracker.update(20, 'Key requirements extracted...');
+            ProgressTracker.update(20, 'Key document details extracted...');
         }
         else if (data.event === 'key_requirements_failed') {
-            Logger.warning(`⚠️ Key requirements extraction failed: ${data.error}`);
+            Logger.warning(`⚠️ Key document details extraction failed: ${data.error}`);
         }
         else if (data.event === 'results_ready') {
             // Store the complete result from polling (no need for separate fetch)
@@ -3709,30 +3709,17 @@ function renderFullViewSummaryTab() {
             </table>
         `;
     } else {
-        // Build Key Project Requirements section for Bid/Spec mode
+        // Build Key Document Details section
         let krpHtml = '';
         if (currentKeyRequirements && Object.keys(currentKeyRequirements).length > 0) {
             krpHtml = `
-                <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Project Requirements</h3>
+                <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Document Details</h3>
                 <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
                     <tbody>
             `;
-            const krpLabels = {
-                'project_name': 'Project Name',
-                'owner': 'Owner/Agency',
-                'engineer': 'Engineer/Designer',
-                'bid_date': 'Bid Date',
-                'location': 'Location',
-                'scope': 'Scope',
-                'contract_days': 'Contract Days',
-                'liquidated_damages': 'Liquidated Damages',
-                'bond_requirements': 'Bond Requirements',
-                'insurance': 'Insurance Requirements',
-                'warranty': 'Warranty Period'
-            };
             for (const [key, value] of Object.entries(currentKeyRequirements)) {
                 if (value && value.trim()) {
-                    const label = krpLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                    const label = key;
                     krpHtml += `
                         <tr>
                             <td style="padding: 10px; font-weight: 600; background: #fef3c7; border: 1px solid #e5e7eb; width: 200px;">${label}</td>

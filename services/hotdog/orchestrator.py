@@ -40,7 +40,7 @@ from .smart_accumulator import SmartAccumulator
 from .output_compiler import OutputCompiler
 from .second_pass_processor import SecondPassProcessor
 from .token_optimizer import TokenOptimizer
-from .key_requirements_extractor import KeyRequirementsExtractor
+from .key_document_details_extractor import KeyDocumentDetailsExtractor
 from .mode_config import ModeConfig, AnalysisMode, get_mode_config
 from .append_accumulator import AppendOnlyAccumulator
 from .synthesis_agent import SynthesisAgent
@@ -159,12 +159,12 @@ class HotdogOrchestrator:
         )
         self.layer6_compiler = OutputCompiler()
 
-        # Key Requirements Extractor - ALWAYS runs regardless of selected sections
-        self.key_requirements_extractor = KeyRequirementsExtractor(
+        # Key Document Details Extractor - ALWAYS runs regardless of selected sections
+        self.key_details_extractor = KeyDocumentDetailsExtractor(
             api_key=openai_api_key,
             model=self.model
         )
-        self.extracted_key_requirements = {}  # Store extracted requirements
+        self.extracted_key_details = []  # Store extracted details (list of KeyDocumentDetail)
         self.optimized_scan_data = {}  # Store v2 pipeline navigation/optimized scan data for exports
 
         # Store windows and experts for second pass
@@ -242,10 +242,10 @@ class HotdogOrchestrator:
             self.cached_windows = windows
 
             # ============================================================
-            # KEY REQUIREMENTS EXTRACTION (runs ALWAYS, regardless of sections)
+            # KEY DOCUMENT DETAILS EXTRACTION (runs ALWAYS, regardless of sections)
             # ============================================================
-            logger.info("🔑 Extracting Key Project Requirements...")
-            self._emit_progress('key_requirements_start', {'layer': 'Key Requirements Extraction'})
+            logger.info("🔑 Extracting Key Document Details...")
+            self._emit_progress('key_requirements_start', {'layer': 'Key Document Details Extraction'})
 
             try:
                 # Build pages data for extractor
@@ -253,16 +253,16 @@ class HotdogOrchestrator:
                     {'page_num': p.page_num, 'text': p.text}
                     for p in pages
                 ]
-                self.extracted_key_requirements = await self.key_requirements_extractor.extract_from_document(
+                self.extracted_key_details = await self.key_details_extractor.extract_from_document(
                     pages_for_extraction
                 )
-                logger.info(f"  ✅ Extracted {len(self.extracted_key_requirements)} key requirements")
+                logger.info(f"  ✅ Extracted {len(self.extracted_key_details)} key document details")
                 self._emit_progress('key_requirements_complete', {
-                    'count': len(self.extracted_key_requirements),
-                    'requirements': self.key_requirements_extractor.get_summary_data()
+                    'count': len(self.extracted_key_details),
+                    'requirements': self.key_details_extractor.get_summary_data()
                 })
             except Exception as e:
-                logger.warning(f"  ⚠️ Key requirements extraction failed (non-fatal): {e}")
+                logger.warning(f"  ⚠️ Key document details extraction failed (non-fatal): {e}")
                 self._emit_progress('key_requirements_failed', {'error': str(e)})
 
             # ============================================================
@@ -1081,7 +1081,7 @@ class HotdogOrchestrator:
         """
         output = self.layer6_compiler.format_for_browser(result, config)
         # Add extracted key requirements (from Key Requirements Extractor)
-        output['key_requirements'] = self.key_requirements_extractor.get_summary_data()
+        output['key_requirements'] = self.key_details_extractor.get_summary_data()
         return output
 
     def get_excel_output(self, result: AnalysisResult, config: ParsedConfig) -> dict:
@@ -1177,7 +1177,7 @@ class HotdogOrchestrator:
 
         return {
             'sections': sections,
-            'key_requirements': self.key_requirements_extractor.get_summary_data()
+            'key_requirements': self.key_details_extractor.get_summary_data()
         }
 
 

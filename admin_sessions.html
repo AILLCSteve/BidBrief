@@ -874,32 +874,9 @@
                     </table>
                 `;
             } else {
-                // Bid/Spec mode - Key Project Requirements
-                // Get key_requirements from API response (from orchestrator.extracted_key_requirements)
+                // Non-BestPrep mode - Key Document Details
+                // Keys are already display names from KeyDocumentDetailsExtractor.get_summary_data()
                 const apiKeyReqs = data.key_requirements || {};
-
-                // Key requirement label mappings
-                const keyReqLabels = {
-                    'project_name': 'Project Name',
-                    'owner': 'Owner/Agency',
-                    'engineer': 'Engineer',
-                    'location': 'Location',
-                    'bid_date': 'Bid Deadline',
-                    'bid_deadline': 'Bid Deadline',
-                    'scope': 'Scope',
-                    'contract_days': 'Timeline',
-                    'timeline': 'Timeline',
-                    'liquidated_damages': 'Liquidated Damages',
-                    'bond_requirements': 'Bonding',
-                    'bonding': 'Bonding',
-                    'insurance': 'Insurance',
-                    'warranty': 'Warranty',
-                    'certifications': 'Certifications',
-                    'payment_terms': 'Payment'
-                };
-
-                // Preferred display order
-                const displayOrder = ['project_name', 'owner', 'engineer', 'location', 'bid_date', 'bid_deadline', 'scope', 'contract_days', 'timeline', 'liquidated_damages', 'bond_requirements', 'bonding', 'warranty', 'certifications', 'insurance', 'payment_terms'];
 
                 html += `
                     <h3 style="margin: 0 0 15px 0; color: #1E3A8A; font-size: 16px;">Analysis Statistics</h3>
@@ -937,39 +914,20 @@
                     </table>
                 `;
 
-                // Only show Key Requirements section if we have data from API
+                // Only show Key Document Details section if we have data from API
                 if (Object.keys(apiKeyReqs).length > 0) {
                     html += `
-                        <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Project Requirements</h3>
+                        <h3 style="margin: 25px 0 15px 0; color: #1E3A8A; font-size: 16px;">🔑 Key Document Details</h3>
                         <table class="results-table">
                             <tbody>
                     `;
 
-                    // Display in preferred order, then any remaining keys
-                    const displayedKeys = new Set();
-                    displayOrder.forEach(key => {
-                        if (apiKeyReqs[key] && apiKeyReqs[key].trim()) {
-                            const label = keyReqLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-                            // Clean the value - remove PDF citations for cleaner display
-                            let cleanValue = apiKeyReqs[key].replace(/<PDF pg[^>]+>/g, '').trim();
-                            html += `
-                                <tr>
-                                    <td style="width: 200px; font-weight: 600; background: #fef3c7;">${label}</td>
-                                    <td>${cleanValue}</td>
-                                </tr>
-                            `;
-                            displayedKeys.add(key);
-                        }
-                    });
-
-                    // Add any keys not in preferred order
                     for (const [key, value] of Object.entries(apiKeyReqs)) {
-                        if (!displayedKeys.has(key) && value && value.trim()) {
-                            const label = keyReqLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                        if (value && value.trim()) {
                             let cleanValue = value.replace(/<PDF pg[^>]+>/g, '').trim();
                             html += `
                                 <tr>
-                                    <td style="width: 200px; font-weight: 600; background: #fef3c7;">${label}</td>
+                                    <td style="width: 200px; font-weight: 600; background: #fef3c7;">${key}</td>
                                     <td>${cleanValue}</td>
                                 </tr>
                             `;

@@ -443,7 +443,7 @@ def _transform_to_legacy_format(hotdog_output: dict) -> dict:
         'questions_answered': hotdog_output.get('questions_answered', 0),
         'total_questions': hotdog_output.get('total_questions', 0),
         'metadata': hotdog_output.get('metadata', {}),
-        'key_requirements': hotdog_output.get('key_requirements', {}),  # Preserve key requirements
+        'key_requirements': hotdog_output.get('key_requirements', {}),  # Preserve key document details
         'footnotes': hotdog_output.get('footnotes', [])  # Preserve compiled footnotes array
     }
 
@@ -1433,10 +1433,9 @@ def get_results(session_id):
             }
         }
 
-        # Add key requirements from orchestrator (for bid_spec mode)
-        # Use get_summary_data() for JSON-serializable output (extracted_key_requirements contains dataclass objects)
-        if hasattr(orchestrator, 'key_requirements_extractor') and orchestrator.key_requirements_extractor:
-            key_reqs = orchestrator.key_requirements_extractor.get_summary_data()
+        # Add key document details from orchestrator (always runs, context-aware)
+        if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
+            key_reqs = orchestrator.key_details_extractor.get_summary_data()
             if key_reqs:
                 response['key_requirements'] = key_reqs
 
@@ -1485,10 +1484,9 @@ def get_results(session_id):
             }
         }
 
-        # Add key requirements from orchestrator (for bid_spec mode)
-        # Use get_summary_data() for JSON-serializable output (extracted_key_requirements contains dataclass objects)
-        if hasattr(orchestrator, 'key_requirements_extractor') and orchestrator.key_requirements_extractor:
-            key_reqs = orchestrator.key_requirements_extractor.get_summary_data()
+        # Add key document details from orchestrator (always runs, context-aware)
+        if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
+            key_reqs = orchestrator.key_details_extractor.get_summary_data()
             if key_reqs:
                 response['key_requirements'] = key_reqs
 
@@ -1568,10 +1566,9 @@ def get_results(session_id):
             }
         }
 
-        # Add key requirements from orchestrator (for bid_spec mode)
-        # Use get_summary_data() for JSON-serializable output (extracted_key_requirements contains dataclass objects)
-        if hasattr(orchestrator, 'key_requirements_extractor') and orchestrator.key_requirements_extractor:
-            key_reqs = orchestrator.key_requirements_extractor.get_summary_data()
+        # Add key document details from orchestrator (always runs, context-aware)
+        if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
+            key_reqs = orchestrator.key_details_extractor.get_summary_data()
             if key_reqs:
                 response['key_requirements'] = key_reqs
 
@@ -1781,7 +1778,7 @@ def export_excel_dashboard(session_id):
         # but browser_output has {'question_text': ..., 'primary_answer': {'text': ..., 'pages': ...}}
         legacy_result = _transform_to_legacy_format(browser_output)
 
-        # Extract API key requirements if available (from KeyRequirementsExtractor)
+        # Extract key document details if available (from KeyDocumentDetailsExtractor)
         api_key_requirements = browser_output.get('key_requirements', {})
 
         # Extract V2 pipeline data (document navigator audit, unanswered pass, RAG)
@@ -1939,8 +1936,9 @@ def export_bestprep_excel(session_id):
 
         # Try to get project name from key requirements first
         project_name = None
-        if hasattr(orchestrator, 'extracted_key_requirements') and orchestrator.extracted_key_requirements:
-            project_name = orchestrator.extracted_key_requirements.get('project_name') or orchestrator.extracted_key_requirements.get('Project Name')
+        if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
+            summary = orchestrator.key_details_extractor.get_summary_data()
+            project_name = summary.get('Project Name') or summary.get('project_name')
 
         # Fallback to document name
         if not project_name:
@@ -2248,8 +2246,8 @@ def run_deep_rag_on_selected(session_id):
                 'message': 'TAVILY service not configured properly'
             }), 503
 
-        # Extract project context from key requirements
-        key_reqs = orchestrator.extracted_key_requirements if hasattr(orchestrator, 'extracted_key_requirements') else {}
+        # Extract project context from key document details
+        key_reqs = orchestrator.key_details_extractor.get_summary_data() if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor else {}
 
         # Run RAG search with project context and questions
         loop = asyncio.new_event_loop()

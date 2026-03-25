@@ -348,10 +348,10 @@ class ExcelDashboardGenerator:
 
         row += 1
 
-        # === KEY PROJECT REQUIREMENTS SECTION ===
+        # === KEY DOCUMENT DETAILS SECTION ===
         if self.key_requirements:
             ws.merge_cells(f'A{row}:C{row}')
-            ws[f'A{row}'] = 'Key Project Requirements'
+            ws[f'A{row}'] = 'Key Document Details'
             ws[f'A{row}'].font = self.SECTION_FONT
             ws[f'A{row}'].fill = self.SECTION_FILL
             ws[f'A{row}'].alignment = Alignment(horizontal='left', vertical='center', indent=1)
