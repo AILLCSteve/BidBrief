@@ -542,6 +542,12 @@ def _is_authorized_for_session(session_id: str) -> bool:
         elif session_id in analysis_results:
             session_data = analysis_results[session_id]
         else:
+            logger.warning(
+                f"[AUTH-403] Session {session_id[:12]} not found in any dict. "
+                f"active_keys={[k[:8] for k in list(active_analyses.keys())[:5]]}, "
+                f"completed_keys={[k[:8] for k in list(completed_analyses.keys())[:5]]}, "
+                f"partial_keys={[k[:8] for k in list(partial_analyses.keys())[:5]]}"
+            )
             return False
 
     owner = session_data.get('owner') if session_data else None
@@ -553,6 +559,14 @@ def _is_authorized_for_session(session_id: str) -> bool:
         return True
     if username and username == owner:
         return True
+
+    # Log why ownership check failed — critical for diagnosing permanent 403s
+    cookie_present = bool(request.cookies.get('bidbrief_auth'))
+    logger.warning(
+        f"[AUTH-403] Ownership check failed for {session_id[:12]}: "
+        f"owner={owner}, username={username}, cookie_present={cookie_present}, "
+        f"session_status={session_data.get('status', 'unknown')}"
+    )
     return False
 
 
@@ -1107,19 +1121,14 @@ def analyze_document():
                 use_pipeline_v2=(pipeline_mode == 'v2_pipeline')
             )
 
-            # Store in active_analyses IMMEDIATELY (for partial results)
-            # Determine owner (if any) and store for ownership checks
+            # Update pre-registered active_analyses entry with the now-ready orchestrator
             owner = username if username else None
-
-            active_analyses[session_id] = {
+            active_analyses[session_id].update({
                 'orchestrator': orchestrator,
                 'config_path': config_path,
-                'pdf_path': pdf_path,
-                'pdf_filename': pdf_filename,
-                'mode': analysis_mode,
-                'owner': owner
-            }
-            logger.info(f"Orchestrator stored in active_analyses: {session_id} (mode: {analysis_mode}, owner={owner})")
+                'status': 'running'
+            })
+            logger.info(f"Orchestrator ready in active_analyses: {session_id} (mode: {analysis_mode}, owner={owner})")
 
             # Run analysis (blocking in THIS thread, not main Flask thread)
             loop = asyncio.new_event_loop()
@@ -1227,10 +1236,25 @@ def analyze_document():
                     'session_id': session_id
                 })
             else:
-                # Clean up failed analysis on actual errors
-                if session_id in active_analyses:
-                    del active_analyses[session_id]
-                    logger.info(f"Session cleaned up due to error: {session_id[:12]}...")
+                # FIX: Move failed analysis to partial_analyses instead of deleting.
+                # Deleting caused permanent 403s — session vanished from all dicts,
+                # so ownership checks failed and polling returned 403 instead of an error.
+                with session_lock:
+                    if session_id in active_analyses:
+                        partial_analyses[session_id] = {
+                            'orchestrator': active_analyses[session_id].get('orchestrator'),
+                            'config_path': active_analyses[session_id].get('config_path', config_path),
+                            'pdf_path': '[CLEANED]',
+                            'pdf_filename': active_analyses[session_id].get('pdf_filename', pdf_filename),
+                            'mode': active_analyses[session_id].get('mode', analysis_mode),
+                            'stopped_at': datetime.now(),
+                            'status': 'error',
+                            'error': error_msg,
+                            'owner': active_analyses[session_id].get('owner')
+                        }
+                        del active_analyses[session_id]
+                        session_timestamps[session_id] = datetime.now()
+                        logger.info(f"Session moved to partial_analyses (error): {session_id[:12]}...")
 
                 # Audit log failure (don't include full error message - may contain sensitive info)
                 audit_log('analyze_failed', username, {
@@ -1240,6 +1264,20 @@ def analyze_document():
 
             # Always clean up temp files on failure
             _cleanup_temp_files()
+
+    # FIX: Pre-register session in active_analyses BEFORE starting thread to eliminate
+    # race condition where early polls arrive before thread has inited the orchestrator.
+    owner = username if username else None
+    active_analyses[session_id] = {
+        'orchestrator': None,  # Populated by thread once orchestrator is ready
+        'config_path': None,
+        'pdf_path': pdf_path,
+        'pdf_filename': pdf_filename,
+        'mode': analysis_mode,
+        'owner': owner,
+        'status': 'initializing'
+    }
+    logger.info(f"Session pre-registered in active_analyses (main thread): {session_id[:12]}... owner={owner}")
 
     # Start analysis thread
     thread = threading.Thread(target=run_analysis, daemon=True)
@@ -1984,10 +2022,13 @@ def stop_analysis(session_id):
             logger.info(f"Active: {list(active_analyses.keys())}")
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
-        # Set stop flag on orchestrator
-        orchestrator = active_analyses[session_id]['orchestrator']
-        orchestrator.stop_requested = True
-        logger.info(f"✅ Stop flag set on orchestrator: {session_id}")
+        # Set stop flag on orchestrator (may be None if still initializing — safe to skip)
+        orchestrator = active_analyses[session_id].get('orchestrator')
+        if orchestrator:
+            orchestrator.stop_requested = True
+            logger.info(f"✅ Stop flag set on orchestrator: {session_id}")
+        else:
+            logger.info(f"⏳ Stop requested but orchestrator still initializing: {session_id}")
 
     # Send error event to progress queue
     if session_id in progress_queues:

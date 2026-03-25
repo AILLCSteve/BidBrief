@@ -16,6 +16,7 @@ Before **any** refactor, debug, extend, or test task:
 2. Ingest other `*digest*.md`, `*summary*.md`, `README` docs after — defer to the synopsis on conflicts.
 3. **If no synopsis exists**: tell the user, recommend running `/digest`, then proceed with smaller changes and no assumptions.
 4. **Check for `HANDOFF.md`** in the project root. If present, it contains in-progress session state — read it before touching code. After completing a long task, write one yourself.
+5. **For debugging tasks: read `memory/debug_history.md` (project) AND `~/.claude/memory/debug_history.md` (global) before forming any hypothesis.** These contain confirmed architectural facts and wrong assumptions that must not be repeated.
 
 > Non-negotiable: synopsis → plan → code. Never the reverse.
 
@@ -142,6 +143,7 @@ Default posture: **circumspect and evidence-driven**. No patches before analysis
 ### Gate 1 — Context Audit (before anything else)
 - Is there context rot? (§2.3) Fix it first.
 - Is the digest current? Read it.
+- **Have I read `memory/debug_history.md` (project) and `~/.claude/memory/debug_history.md` (global)?** Do this before forming any hypothesis — confirmed facts and past wrong assumptions live there.
 - Do I have the actual error output, not a summary?
 
 ### Gate 2 — Hypothesis Formation

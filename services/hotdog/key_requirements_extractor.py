@@ -154,7 +154,8 @@ CRITICAL: Include page numbers from <PDF pg X> markers when available."""
                 ],
                 temperature=0.1,  # Low temperature for factual extraction
                 max_tokens=2000,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                timeout=90.0  # Prevent indefinite hang on slow/failed API calls
             )
 
             result_text = response.choices[0].message.content
