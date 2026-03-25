@@ -1063,7 +1063,8 @@ class HotdogOrchestrator:
                 lines.extend(section_lines)
                 lines.append("")
 
-        lines.append(f"\n---\n**Total Progress: {total_answered}/{total_questions} questions answered ({total_answered/total_questions*100:.1f}%)**")
+        pct = (total_answered / total_questions * 100) if total_questions > 0 else 0.0
+        lines.append(f"\n---\n**Total Progress: {total_answered}/{total_questions} questions answered ({pct:.1f}%)**")
 
         return "\n".join(lines)
 

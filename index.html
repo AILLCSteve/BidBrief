@@ -3284,9 +3284,9 @@ async function generateAIQuestions() {
         questionConfig = generated;
         questionConfig.sections.forEach(s => { if (s.enabled === undefined) s.enabled = true; });
 
-        // Save to backend
+        // Save to backend (PUT — the correct method for this route)
         await fetch('/api/config/questions', {
-            method: 'POST',
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sections: questionConfig.sections })
         });
@@ -3440,9 +3440,9 @@ async function applyAdditionalQuestions() {
         }
     });
 
-    // Save merged config
+    // Save merged config (PUT — the correct method for this route)
     await fetch('/api/config/questions', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sections: questionConfig.sections })
     });

@@ -640,7 +640,8 @@ class PipelineCoordinator:
 
         total_answered = len(self.state.answered_questions)
         total_questions = len(self.state.all_questions)
-        logger.info(f"\n  TOTAL: {total_answered}/{total_questions} answered ({total_answered/total_questions*100:.1f}%)")
+        pct = (total_answered / total_questions * 100) if total_questions > 0 else 0.0
+        logger.info(f"\n  TOTAL: {total_answered}/{total_questions} answered ({pct:.1f}%)")
         logger.info("="*64)
 
     def get_pipeline_summary(self) -> Dict:
