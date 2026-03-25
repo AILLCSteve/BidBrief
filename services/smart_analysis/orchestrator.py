@@ -1,10 +1,11 @@
 """
 Smart Analysis Orchestrator — coordinates all agents and produces SmartAnalysisResult.
 
-Execution order:
-  1. ContextAggregatorAgent  (no AI call — pure data)
-  2. SCOUTAgent + MIRRORAgent + UserInputAgent  (parallel async)
-  3. SynthesisAgent  (final call — receives all agent outputs)
+v2 execution order:
+  1. ContextAggregatorAgent     (no AI — fixed field names, richer context)
+  2. DocumentProfileAgent       (1 AI call — grounding pass, evidence inventory, expertise)
+  3. SCOUTAgent + MIRRORAgent + UserInputAgent  (parallel async — now doc-profile-aware)
+  4. SynthesisAgent             (final call — all outputs + doc_profile + language discipline)
 
 Entry point: SmartAnalysisOrchestrator.run() — synchronous, uses new event loop.
 """
@@ -16,6 +17,7 @@ from typing import Any, Dict
 
 from .models import ProfessionalAssessment, SmartAnalysisItem, SmartAnalysisResult
 from .context_aggregator import ContextAggregatorAgent
+from .document_profile_agent import DocumentProfileAgent
 from .scout_agent import SCOUTAgent
 from .mirror_agent import MIRRORAgent
 from .user_input_agent import UserInputAgent
@@ -62,28 +64,41 @@ class SmartAnalysisOrchestrator:
         aggregator = ContextAggregatorAgent()
         ctx = aggregator.aggregate(analysis_data, doc_context, user_input)
         analysis_text = aggregator.build_analysis_text(ctx)
+        rich_analysis_text = aggregator.build_rich_analysis_text(ctx)
 
-        # Step 2: Run SCOUT, MIRROR, UserInput in parallel
+        logger.info(
+            f'[SmartAnalysis] Context built — '
+            f'{ctx["questions_answered"]}/{ctx["total_questions"]} answered, '
+            f'analysis_text={len(analysis_text)}c, '
+            f'rich_text={len(rich_analysis_text)}c'
+        )
+
+        # Step 2: Document profile + expertise (serial — required before parallel agents)
+        logger.info('[SmartAnalysis] Running document profile pass...')
+        profile_agent = DocumentProfileAgent(self.api_key, self.model)
+        doc_profile = await profile_agent.profile(ctx, rich_analysis_text)
+
+        # Step 3: SCOUT, MIRROR, UserInput in parallel (all receive doc_profile)
         logger.info('[SmartAnalysis] Running SCOUT + MIRROR + UserInput in parallel...')
         scout_agent = SCOUTAgent(self.api_key, self.model)
         mirror_agent = MIRRORAgent(self.api_key, self.model)
         user_agent = UserInputAgent(self.api_key, self.model)
 
         scout_findings, mirror_findings, user_responses = await asyncio.gather(
-            scout_agent.analyze(ctx, analysis_text),
-            mirror_agent.analyze(ctx, analysis_text),
-            user_agent.process(ctx, analysis_text, user_input),
+            scout_agent.analyze(ctx, analysis_text, doc_profile),
+            mirror_agent.analyze(ctx, analysis_text, doc_profile),
+            user_agent.process(ctx, analysis_text, user_input, doc_profile),
         )
 
-        # Step 3: Synthesize
+        # Step 4: Synthesis (receives all outputs + doc_profile)
         logger.info('[SmartAnalysis] Running synthesis...')
         synthesizer = SynthesisAgent(self.api_key, self.model)
         synthesis = await synthesizer.synthesize(
-            ctx, scout_findings, mirror_findings, user_responses
+            ctx, scout_findings, mirror_findings, user_responses, doc_profile
         )
 
-        # Step 4: Build result object
-        result = self._build_result(session_id, ctx, synthesis, user_responses)
+        # Step 5: Build typed result
+        result = self._build_result(session_id, ctx, synthesis, user_responses, doc_profile)
         logger.info(
             f'[SmartAnalysis] Done — '
             f'{len(result.risks)} risks, '
@@ -98,6 +113,7 @@ class SmartAnalysisOrchestrator:
         ctx: dict,
         synthesis: dict,
         user_responses: dict,
+        doc_profile: dict,
     ) -> SmartAnalysisResult:
 
         def _items(raw: list) -> list:
@@ -111,6 +127,7 @@ class SmartAnalysisOrchestrator:
                     severity=str(item.get('severity', 'medium')),
                     evidence=item.get('evidence') or [],
                     page_refs=item.get('page_refs') or [],
+                    follow_up_direction=item.get('follow_up_direction') or {},
                 ))
             return out
 
@@ -144,4 +161,5 @@ class SmartAnalysisOrchestrator:
             follow_up_questions=synthesis.get('follow_up_questions') or [],
             strategic_recommendations=synthesis.get('strategic_recommendations') or [],
             user_question_responses=user_responses.get('responses') or [],
+            evidence_classification=synthesis.get('evidence_classification') or {},
         )

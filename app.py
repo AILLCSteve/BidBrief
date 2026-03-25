@@ -1180,7 +1180,9 @@ def analyze_document():
                             'mode': analysis_mode,
                             'owner': owner,
                             'completed_at': datetime.now(),
-                            'status': 'completed'
+                            'status': 'completed',
+                            # Preserve doc_context for Smart Analysis (PDF will be gone)
+                            'doc_context': active_analyses[session_id].get('doc_context', ''),
                         }
                         del active_analyses[session_id]
                         # Update timestamp so cleanup doesn't delete recently completed analyses
@@ -1225,7 +1227,8 @@ def analyze_document():
                             'stopped_at': datetime.now(),
                             'status': 'stopped',
                             'error': error_msg,
-                            'owner': active_analyses[session_id].get('owner')
+                            'owner': active_analyses[session_id].get('owner'),
+                            'doc_context': active_analyses[session_id].get('doc_context', ''),
                         }
                         del active_analyses[session_id]
                         # Update timestamp so cleanup doesn't delete stopped analyses
@@ -1251,7 +1254,8 @@ def analyze_document():
                             'stopped_at': datetime.now(),
                             'status': 'error',
                             'error': error_msg,
-                            'owner': active_analyses[session_id].get('owner')
+                            'owner': active_analyses[session_id].get('owner'),
+                            'doc_context': active_analyses[session_id].get('doc_context', ''),
                         }
                         del active_analyses[session_id]
                         session_timestamps[session_id] = datetime.now()
@@ -1269,6 +1273,16 @@ def analyze_document():
     # FIX: Pre-register session in active_analyses BEFORE starting thread to eliminate
     # race condition where early polls arrive before thread has inited the orchestrator.
     owner = username if username else None
+
+    # Pre-extract doc context while PDF is still on disk. Stored here so Smart Analysis
+    # can use it later even if the PDF temp file has been cleaned up by then.
+    _preextracted_doc_context = ''
+    try:
+        if pdf_path and os.path.exists(pdf_path):
+            _preextracted_doc_context = _extract_doc_context(pdf_path, max_chars=10000)
+    except Exception:
+        pass
+
     active_analyses[session_id] = {
         'orchestrator': None,  # Populated by thread once orchestrator is ready
         'config_path': None,
@@ -1276,7 +1290,8 @@ def analyze_document():
         'pdf_filename': pdf_filename,
         'mode': analysis_mode,
         'owner': owner,
-        'status': 'initializing'
+        'status': 'initializing',
+        'doc_context': _preextracted_doc_context,
     }
     logger.info(f"Session pre-registered in active_analyses (main thread): {session_id[:12]}... owner={owner}")
 
@@ -4236,14 +4251,17 @@ def _build_smart_analysis_data(session_id: str):
         return None, (jsonify({'success': False, 'error': 'Session not found'}), 404)
 
     key_details = {}
-    if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
-        key_details = orchestrator.key_details_extractor.get_summary_data() or {}
-
+    key_details_list = []
     document_type = ''
     document_type_label = ''
     if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
-        document_type = orchestrator.key_details_extractor.get_document_type() or ''
-        document_type_label = orchestrator.key_details_extractor.get_document_type_label() or ''
+        kde = orchestrator.key_details_extractor
+        key_details = kde.get_summary_data() or {}
+        # v2: include full details list with quotes and page refs for richer grounding
+        if hasattr(kde, 'get_details_list'):
+            key_details_list = kde.get_details_list() or []
+        document_type = kde.get_document_type() or ''
+        document_type_label = kde.get_document_type_label() or ''
 
     analysis_data = {
         'is_partial': is_partial,
@@ -4251,6 +4269,7 @@ def _build_smart_analysis_data(session_id: str):
         'pdf_filename': session_data.get('pdf_filename', 'Unknown.pdf'),
         'result': legacy_result,
         'key_details': key_details,
+        'key_details_list': key_details_list,
         'document_type': document_type,
         'document_type_label': document_type_label,
     }
@@ -4279,7 +4298,8 @@ def run_smart_analysis(session_id: str):
     if err:
         return err
 
-    # Extract doc context from the uploaded PDF (best-effort)
+    # Extract doc context — prefer stored context from session, fallback to PDF extraction.
+    # Smart Analysis uses a larger extraction budget (10K chars) than question generation (4K).
     doc_context = ''
     try:
         if session_id in completed_analyses:
@@ -4288,9 +4308,13 @@ def run_smart_analysis(session_id: str):
             sd = partial_analyses[session_id]
         else:
             sd = {}
-        pdf_path = sd.get('pdf_path', '')
-        if pdf_path and pdf_path != '[CLEANED]' and os.path.exists(pdf_path):
-            doc_context = _extract_doc_context(pdf_path)
+        # Use stored doc_context if available (captured when analysis was started)
+        doc_context = sd.get('doc_context', '')
+        if not doc_context:
+            # Fallback: try to extract from PDF if still on disk
+            pdf_path = sd.get('pdf_path', '')
+            if pdf_path and pdf_path != '[CLEANED]' and os.path.exists(pdf_path):
+                doc_context = _extract_doc_context(pdf_path, max_chars=10000)
     except Exception as e:
         logger.warning(f'[SmartAnalysis] Could not extract doc context: {e}')
 

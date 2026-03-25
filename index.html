@@ -2111,7 +2111,15 @@ function renderSmartAnalysisResult(r) {
 
     function itemsHTML(items) {
         if (!items || !items.length) return '<p style="color:#888;font-size:13px;">None identified.</p>';
-        return items.map(it => `
+        return items.map(it => {
+            const fud = it.follow_up_direction || {};
+            const fudHTML = fud.action ? `
+                <div style="margin-top:8px;padding:8px 10px;background:#f0f9ff;border-left:3px solid #3B82F6;border-radius:4px;font-size:12px;color:#1e40af;">
+                    <strong>Follow-up:</strong> ${fud.action}
+                    ${fud.target ? ` &rarr; <em>${fud.target}</em>` : ''}
+                    ${fud.specific_question ? `<div style="margin-top:3px;color:#1e3a8a;">&ldquo;${fud.specific_question}&rdquo;</div>` : ''}
+                </div>` : '';
+            return `
             <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:10px;background:#fff;">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                     ${badge(it.severity)}
@@ -2119,7 +2127,9 @@ function renderSmartAnalysisResult(r) {
                 </div>
                 <p style="margin:0 0 6px;font-size:13px;color:#374151;">${it.description}</p>
                 ${it.evidence && it.evidence.length ? `<ul style="margin:4px 0 0 16px;padding:0;font-size:12px;color:#64748b;">${it.evidence.map(e=>`<li>${e}</li>`).join('')}</ul>` : ''}
-            </div>`).join('');
+                ${fudHTML}
+            </div>`;
+        }).join('');
     }
 
     function section(title, content) {
@@ -2140,12 +2150,21 @@ function renderSmartAnalysisResult(r) {
         <div style="padding:8px 12px;background:${i%2?'#f1f5f9':'#fff'};border-radius:6px;margin-bottom:4px;font-size:13px;">${i+1}. ${ins}</div>`).join('');
 
     const userQHTML = (r.user_question_responses || []).length ? `
-        ${section('Your Questions', (r.user_question_responses).map(q => `
+        ${section('Your Questions', (r.user_question_responses).map(q => {
+            const fud = q.follow_up_direction || {};
+            const fudHTML = fud.action ? `
+                <div style="margin-top:8px;padding:6px 10px;background:#f0f9ff;border-left:3px solid #3B82F6;border-radius:4px;font-size:11px;color:#1e40af;">
+                    <strong>Follow-up:</strong> ${fud.action}${fud.target ? ` &rarr; ${fud.target}` : ''}
+                    ${fud.specific_question ? `<div style="margin-top:2px;">&ldquo;${fud.specific_question}&rdquo;</div>` : ''}
+                </div>` : '';
+            return `
             <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:8px;background:#fff;">
                 <p style="margin:0 0 6px;font-weight:700;font-size:13px;color:#1e293b;">${q.question}</p>
                 <p style="margin:0 0 4px;font-size:13px;color:#374151;">${q.response}</p>
                 <span style="font-size:11px;color:#64748b;">Confidence: ${q.confidence}</span>
-            </div>`).join(''))}` : '';
+                ${fudHTML}
+            </div>`;
+        }).join(''))}` : '';
 
     const recsHTML = (r.strategic_recommendations || []).map((rec, i) =>
         `<div style="display:flex;gap:10px;padding:8px 12px;background:${i%2?'#f1f5f9':'#fff'};border-radius:6px;margin-bottom:4px;font-size:13px;"><span style="min-width:22px;font-weight:700;color:#1e40af;">${i+1}.</span><span>${rec}</span></div>`).join('');
@@ -2180,6 +2199,16 @@ function renderSmartAnalysisResult(r) {
         ${r.contradictions && r.contradictions.length ? section('Contradictions', itemsHTML(r.contradictions)) : ''}
         ${recsHTML ? section('Strategic Recommendations', recsHTML) : ''}
         ${followHTML ? section('Follow-Up Questions', followHTML) : ''}
+        ${r.evidence_classification && r.evidence_classification.confirmed_present_used && r.evidence_classification.confirmed_present_used.length ? section('Evidence Classification',
+            `<div style="font-size:12px;color:#475569;">
+                ${r.evidence_classification.confirmed_present_used && r.evidence_classification.confirmed_present_used.length ?
+                    `<div style="margin-bottom:8px;"><strong style="color:#16a34a;">Confirmed Present:</strong> ${r.evidence_classification.confirmed_present_used.join(', ')}</div>` : ''}
+                ${r.evidence_classification.confirmed_absent_flagged && r.evidence_classification.confirmed_absent_flagged.length ?
+                    `<div style="margin-bottom:8px;"><strong style="color:#dc2626;">Confirmed Absent:</strong> ${r.evidence_classification.confirmed_absent_flagged.join(', ')}</div>` : ''}
+                ${r.evidence_classification.unverified_flagged && r.evidence_classification.unverified_flagged.length ?
+                    `<div style="margin-bottom:8px;"><strong style="color:#d97706;">Unverified/Partial:</strong> ${r.evidence_classification.unverified_flagged.join(', ')}</div>` : ''}
+            </div>`
+        ) : ''}
     </div>`;
 }
 
