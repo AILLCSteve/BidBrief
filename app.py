@@ -2805,11 +2805,86 @@ def add_question():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _extract_doc_context(pdf_path: str, max_chars: int = 4000) -> str:
+    """
+    Lightly extract context from a PDF for question generation guidance.
+    Pulls title page, first few pages, and scans for TOC / glossary / appendix pages.
+    Returns a compact text summary (capped at max_chars).
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        try:
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                pages_text = []
+                total = len(pdf.pages)
+                # First 4 pages + last 3 pages
+                indices = list(range(min(4, total))) + list(range(max(0, total - 3), total))
+                seen = set()
+                for i in indices:
+                    if i in seen:
+                        continue
+                    seen.add(i)
+                    t = pdf.pages[i].extract_text() or ''
+                    if t.strip():
+                        pages_text.append(f"[Page {i+1}]\n{t.strip()}")
+                raw = '\n\n'.join(pages_text)
+                return raw[:max_chars]
+        except Exception:
+            return ''
+
+    try:
+        doc = fitz.open(pdf_path)
+        total = doc.page_count
+        context_pages = []
+
+        # Always grab first 4 pages (title, intro, TOC)
+        for i in range(min(4, total)):
+            context_pages.append(i)
+
+        # Scan up to first 20 pages for TOC / table of contents keywords
+        toc_keywords = {'table of contents', 'contents', 'index', 'toc'}
+        for i in range(min(20, total)):
+            if i in context_pages:
+                continue
+            page_text_lower = doc[i].get_text('text').lower()
+            if any(kw in page_text_lower for kw in toc_keywords):
+                context_pages.append(i)
+                if len(context_pages) >= 8:
+                    break
+
+        # Scan last 15 pages for glossary / appendix
+        gloss_keywords = {'glossary', 'appendix', 'definitions', 'abbreviations'}
+        for i in range(max(0, total - 15), total):
+            if i in context_pages:
+                continue
+            page_text_lower = doc[i].get_text('text').lower()
+            if any(kw in page_text_lower for kw in gloss_keywords):
+                context_pages.append(i)
+                if len(context_pages) >= 12:
+                    break
+
+        parts = []
+        for i in sorted(set(context_pages)):
+            t = doc[i].get_text('text').strip()
+            if t:
+                parts.append(f"[Page {i+1}]\n{t}")
+
+        doc.close()
+        raw = '\n\n'.join(parts)
+        return raw[:max_chars]
+    except Exception as e:
+        logger.warning(f'Doc context extraction failed: {e}')
+        return ''
+
+
 @app.route('/api/config/questions/generate', methods=['POST'])
 @require_auth
 def generate_question_set():
     """
     AI Question Set Generator — Phase 1 (Initial).
+    Accepts JSON (no file) or multipart/form-data (with optional PDF for context).
     Takes free-text user input (questions + context) and generates a structured
     question set JSON preserving every user-supplied question verbatim.
     """
@@ -2819,10 +2894,42 @@ def generate_question_set():
     if not api_key:
         return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 500
 
-    data = request.get_json()
-    user_input = (data or {}).get('user_input', '').strip()
+    # Support both JSON and multipart/form-data
+    if request.content_type and 'multipart' in request.content_type:
+        user_input = request.form.get('user_input', '').strip()
+        uploaded_file = request.files.get('file')
+    else:
+        data = request.get_json() or {}
+        user_input = data.get('user_input', '').strip()
+        uploaded_file = None
+
     if not user_input:
         return jsonify({'success': False, 'error': 'user_input is required'}), 400
+
+    # Extract document context if a file was provided
+    doc_context = ''
+    doc_context_note = ''
+    if uploaded_file:
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                uploaded_file.save(tmp.name)
+                tmp_path = tmp.name
+            doc_context = _extract_doc_context(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            if doc_context:
+                doc_context_note = (
+                    "\n\nDOCUMENT CONTEXT (extracted from title page, TOC, glossary, appendix):\n"
+                    "Use this to better understand the document's domain and infer appropriate question sections "
+                    "and terminology. Do NOT generate questions about the document structure itself — "
+                    "use it only to inform relevance and domain language.\n\n"
+                    f"{doc_context}"
+                )
+                logger.info(f'🗂️ Doc context extracted: {len(doc_context)} chars for question generation')
+        except Exception as e:
+            logger.warning(f'Could not extract doc context: {e}')
 
     system_prompt = (
         "You are a master expert question architect and specialist in creating structured question sets "
@@ -2831,7 +2938,8 @@ def generate_question_set():
         "JSON question set for document analysis.\n\n"
         "RULES:\n"
         "1. Preserve EVERY specific question the user wrote, word-for-word, without abridging or paraphrasing.\n"
-        "2. Infer the domain/purpose from the user's context and organize questions into logical sections.\n"
+        "2. Infer the domain/purpose from the user's context (and document context if provided) and organize "
+        "questions into logical sections.\n"
         "3. Generate question IDs as Q1, Q2, Q3... sequentially across all sections.\n"
         "4. Each section needs: section_id (snake_case), section_name (human-readable), section_description.\n"
         "5. Each question needs: id, text, required (true/false), expected_type (string/number/date/technical_spec), enabled (true).\n"
@@ -2839,6 +2947,7 @@ def generate_question_set():
         "Output format:\n"
         '{"sections": [{"section_id": "...", "section_name": "...", "section_description": "...", '
         '"questions": [{"id": "Q1", "text": "...", "required": true, "expected_type": "string", "enabled": true}]}]}'
+        + doc_context_note
     )
 
     try:
