@@ -1,7 +1,7 @@
 # PM Tools Suite - Python Dependencies
 
 # Web Framework
-Flask>=2.2.0,<2.3.0
+Flask>=2.2.0,<3.2.0
 flask-cors>=4.0.0,<7.0.0
 Werkzeug>=3.0.0,<3.1.0
 
