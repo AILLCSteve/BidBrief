@@ -764,4 +764,144 @@ Default 100-question set covering:
 
 ---
 
+---
+
+## 11. Smart Analysis — Multi-Agent Executive Analysis Layer
+
+> **Added:** commit d65a75d (v1) → e4cf7ca (v2) → 887e82a (v3, current)
+> **Full architecture reference:** `docs/smart_analysis/SMART_ANALYSIS_ARCHITECTURE.md`
+> **Refactoring guide:** `docs/smart_analysis/SMART_ANALYSIS_REFACTORING_GUIDE.md`
+> **v3 refactor analysis:** `docs/smart_analysis/V3_REFACTOR_ANALYSIS.md`
+
+### 11.1 Overview
+
+Smart Analysis is a post-extraction executive analysis feature. It runs after HOTDOG completes Q&A extraction and the user explicitly triggers it. It consumes the extraction results and produces a decision-oriented executive report with risks, opportunities, ambiguities, assessments, and strategic recommendations.
+
+**Pipeline (5 AI calls, mixed serial/parallel):**
+```
+ContextAggregator (no AI)
+  → DocumentProfileAgent (serial, 1 AI call)
+  → gather(SCOUTAgent, MIRRORAgent, UserInputAgent) (parallel, up to 3 AI calls)
+  → SynthesisAgent (serial, 1 AI call)
+  → SmartAnalysisResult
+```
+
+### 11.2 Agent Reference
+
+| Agent | File | Tokens | Timeout | Role |
+|-------|------|--------|---------|------|
+| ContextAggregator | context_aggregator.py | No AI | — | Builds analysis_text + rich_analysis_text from Q&A results; handles both legacy and modern result field names via `_resolve_question_fields()` |
+| DocumentProfileAgent | document_profile_agent.py | 4500 | 90s | Evidence grounding: confirmed_present/absent/unverified, expertise_profile (document-specific), key_items, document_understanding |
+| SCOUTAgent | scout_agent.py | 5000 | 120s | SCOUT framework: lens_selection_reasoning, sanity_flags, criteria_gaps, opportunities, uncertainties (5-field follow_up), assumptions (5-field follow_up) |
+| MIRRORAgent | mirror_agent.py | 5000 | 120s | MIRROR framework: lens_selection_reasoning, missing_elements (5-field follow_up), interpretation_risks, risks (5-field follow_up), stakeholder_perspectives, failure_scenarios |
+| UserInputAgent | user_input_agent.py | 2500 | 90s | Answers user-provided questions; skipped if no user_input; 3-field follow_up_direction |
+| SynthesisAgent | synthesis_agent.py | 8000 | 180s | Final synthesis: mandatory minimums (≥5 risks, ≥5 opps, ≥5 ambiguities, ≥6 assessments, ≥6 follow_up_questions, ≥5 recommendations), unique assessment categories, 5-field follow_up_direction |
+
+### 11.3 Key Design Principles (v3)
+
+1. **EXPERTISE UNIQUENESS RULE** (DocProfile): Benchmarks derived from THIS document's specifics — not generic examples. Prevents cross-run repetition.
+2. **LENS GENERATION RULE** (SCOUT + MIRROR): Each agent must justify 5-7 document-specific analytical dimensions before applying them. `lens_selection_reasoning` is a required output field.
+3. **4-Tier Language Discipline** (all agents): CONFIRMED PRESENT / CONFIRMED ABSENT / NOT SURFACED BY ANALYSIS / PRESENT BUT UNRESOLVED — never conflated.
+4. **Mandatory Minimum Outputs** (Synthesis): ≥5/6 per output category. If minimum can't be reached, a justification item is required.
+5. **Multi-Step Follow-Up Direction** (v3): All risk/opportunity/ambiguity items carry a 5-field sequence: why_unclear, verification_step, what_to_ask, who_to_ask, where_to_look.
+6. **Document Understanding Layer** (v3): DocProfile outputs a `document_understanding` block (overview, workstreams, obligations, constraints) consumed by all downstream agents and rendered in UI.
+
+### 11.4 Smart Analysis Data Models
+
+```python
+@dataclass
+class SmartAnalysisItem:
+    title: str
+    description: str
+    severity: str           # 'critical' | 'high' | 'medium' | 'low'
+    evidence: List[str]
+    page_refs: List[int]
+    follow_up_direction: Dict[str, str]  # v3: 5-field; v2: 3-field (backward compat)
+
+@dataclass
+class ProfessionalAssessment:
+    category: str           # Unique per run — derived from document
+    rating: str
+    rationale: str
+    confidence: str         # 'high' | 'medium' | 'low'
+
+@dataclass
+class SmartAnalysisResult:
+    session_id: str
+    document_name: str
+    document_type: str
+    document_type_label: str
+    analysis_completeness: str          # 'full' | 'partial'
+    generated_at: str                   # ISO timestamp
+    executive_summary: str
+    key_insights: List[str]
+    risks: List[SmartAnalysisItem]
+    opportunities: List[SmartAnalysisItem]
+    ambiguities: List[SmartAnalysisItem]
+    contradictions: List[SmartAnalysisItem]
+    assessments: List[ProfessionalAssessment]
+    follow_up_questions: List[str]
+    strategic_recommendations: List[str]
+    user_question_responses: List[Dict[str, Any]]
+    evidence_classification: Dict[str, Any]  # v2
+    document_understanding: Dict[str, Any]   # v3
+```
+
+### 11.5 Smart Analysis API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/smart-analysis/<session_id>` | Run analysis (cached on first call) |
+| GET | `/api/smart-analysis/<session_id>` | Retrieve cached result |
+| GET | `/api/smart-analysis/<session_id>/export/excel` | Export to Excel |
+| GET | `/api/smart-analysis/<session_id>/export/pdf` | Export to PDF |
+
+### 11.6 app.py Smart Analysis Functions
+
+| Function | Purpose |
+|----------|---------|
+| `_build_smart_analysis_data(session_id)` | Assembles analysis_data dict from HOTDOG results; includes key_details_list from KeyDocumentDetailsExtractor |
+| `_extract_doc_context(pdf_path, max_chars)` | Extracts up to 10K chars of document context from PDF; called at analysis start before PDF cleanup |
+| `run_smart_analysis(session_id)` | POST handler; checks cache, builds data, runs orchestrator, caches result |
+| `get_smart_analysis(session_id)` | GET handler; returns cached result |
+| `export_smart_analysis_excel(session_id)` | Excel export via SmartAnalysisExcelGenerator |
+| `export_smart_analysis_pdf(session_id)` | PDF export via SmartAnalysisPDFGenerator |
+
+### 11.7 Critical Implementation Notes
+
+- **asyncio pattern**: `asyncio.new_event_loop()` + `loop.run_until_complete()` — required for async agents in sync Gunicorn workers
+- **doc_context persistence**: PDF is deleted after analysis. doc_context (10K chars) is pre-extracted at analysis start and stored in `active_analyses[session_id]['doc_context']`. All three session transitions (completed/stopped/error) must preserve it.
+- **legacy field compat**: HOTDOG result format uses `question`/`answer`/`page_citations`. `_resolve_question_fields()` handles both this and the modern `question_text`/`primary_answer` format. This was the v2 critical bug — wrong field names made all Q&A invisible to agents.
+- **smart_analysis_results cache**: `smart_analysis_results` dict caches results by session_id. POST accepts `force_refresh=true` to bypass cache.
+- **key_details_list**: `_build_smart_analysis_data()` uses `get_details_list()` (not `get_summary_data()`) to include PDF quotes and page references in addition to name→value pairs.
+
+### 11.8 Version History
+
+| Version | Commit | Key Changes |
+|---------|--------|-------------|
+| v1 | d65a75d | Initial build: 10 service files, 4 API routes, SCOUT/MIRROR/UserInput/Synthesis agents, UI integration |
+| v2 | e4cf7ca | Critical fix: context_aggregator field name bug. Added DocumentProfileAgent, 4-tier language discipline, evidence grounding, follow_up_direction (3-field: action/target/specific_question), rich_analysis_text |
+| v3 | 887e82a | Depth refactor: document_understanding layer, EXPERTISE UNIQUENESS RULE, LENS GENERATION RULE, mandatory minimum output counts (≥5/6 per category), 5-field follow_up_direction, unique assessment categories, token increases (DocProfile 3000→4500, SCOUT 3500→5000, MIRROR 3500→5000, Synthesis 5000→8000), UI rendering updates |
+
+---
+
+## 12. Delta Since Last Full Digest (post-2026-01-31)
+
+The following changes were made after the digest was originally generated. The function mapping in §8 does not yet reflect these:
+
+1. **KeyRequirementsExtractor replaced**: `key_requirements_extractor.py` superseded by `key_document_details_extractor.py` (KeyDocumentDetailsExtractor). New version includes `get_details_list()` returning items with PDF quotes and page references, not just name→value pairs.
+
+2. **Smart Analysis service module**: New `services/smart_analysis/` package with 11 files (see §11). Not in §2.2 module table.
+
+3. **app.py Smart Analysis routes**: 4 new routes + 2 helper functions (see §11.5, §11.6). Not in §8.1 function table.
+
+4. **app.py doc_context persistence**: doc_context pre-extraction and preservation through session transitions added. Not in §8.1.
+
+5. **PDF export**: `services/smart_analysis/pdf_generator.py` adds PDF export for Smart Analysis results. Not in §7.2 gaps list (was previously listed as a gap).
+
+6. **New API endpoints** (see §10): `/api/smart-analysis/*` routes not in §10 table.
+
+---
+
 *Generated by /digest skill - Last updated: 2026-01-31*
+*Δ Updated: 2026-03-25 — Smart Analysis v3 added (§11), delta summary added (§12)*
