@@ -27,7 +27,7 @@ striprtf>=0.0.26
 python-dotenv>=1.0.0,<2.0.0
 
 # Security - Encryption for ephemeral upload storage
-cryptography>=42.0.0,<44.0.0
+cryptography>=42.0.0,<47.0.0
 
 # AI/ML - OpenAI API for HOTDOG AI
 openai>=1.0.0,<2.0.0
