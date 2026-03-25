@@ -109,6 +109,7 @@ active_analyses = {}  # session_id -> {'orchestrator': HotdogOrchestrator, 'conf
 completed_analyses = {}  # session_id -> {'orchestrator': ..., 'result': ..., 'config_path': ..., 'completed_at': datetime, 'status': 'completed'}
 partial_analyses = {}  # session_id -> {'orchestrator': ..., 'config_path': ..., 'stopped_at': datetime, 'status': 'stopped'}
 session_timestamps = {}  # session_id -> last_access_time (for cleanup)
+smart_analysis_results = {}  # session_id -> SmartAnalysisResult (cached after first run)
 
 # Upload store: mapping upload_id -> {'path','filename','uploaded_at','expires_at','owner','encrypted'}
 UPLOAD_STORE: dict = {}
@@ -4193,6 +4194,191 @@ def health_check():
         'active_sessions': len(active_analyses),
         'completed_sessions': len(analysis_results)
     }), 200
+
+
+# ============================================================================
+# SMART ANALYSIS ROUTES
+# ============================================================================
+
+def _build_smart_analysis_data(session_id: str):
+    """
+    Build the analysis_data dict for SmartAnalysisOrchestrator from any session type.
+    Returns (analysis_data, error_response) — one will be None.
+    """
+    from services.hotdog.layers import ConfigurationLoader
+
+    if session_id in completed_analyses:
+        session_data = completed_analyses[session_id]
+        orchestrator = session_data['orchestrator']
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            config_loader = ConfigurationLoader()
+            parsed_config = config_loader.load_from_json(session_data['config_path'])
+        browser_output = orchestrator.get_browser_output(session_data['result'], parsed_config)
+        legacy_result = _transform_to_legacy_format(browser_output)
+        is_partial = False
+
+    elif session_id in partial_analyses:
+        session_data = partial_analyses[session_id]
+        orchestrator = session_data.get('orchestrator')
+        if not orchestrator:
+            return None, (jsonify({'success': False, 'error': 'Partial analysis has no data'}), 422)
+        accumulated_answers = orchestrator.layer4_accumulator.get_accumulated_answers()
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            config_loader = ConfigurationLoader()
+            parsed_config = config_loader.load_from_json(session_data['config_path'])
+        browser_output = orchestrator._build_partial_browser_output(accumulated_answers, parsed_config)
+        legacy_result = _transform_to_legacy_format(browser_output)
+        is_partial = True
+
+    else:
+        return None, (jsonify({'success': False, 'error': 'Session not found'}), 404)
+
+    key_details = {}
+    if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
+        key_details = orchestrator.key_details_extractor.get_summary_data() or {}
+
+    document_type = ''
+    document_type_label = ''
+    if hasattr(orchestrator, 'key_details_extractor') and orchestrator.key_details_extractor:
+        document_type = orchestrator.key_details_extractor.get_document_type() or ''
+        document_type_label = orchestrator.key_details_extractor.get_document_type_label() or ''
+
+    analysis_data = {
+        'is_partial': is_partial,
+        'mode': session_data.get('mode', 'bid_spec'),
+        'pdf_filename': session_data.get('pdf_filename', 'Unknown.pdf'),
+        'result': legacy_result,
+        'key_details': key_details,
+        'document_type': document_type,
+        'document_type_label': document_type_label,
+    }
+    return analysis_data, None
+
+
+@app.route('/api/smart-analysis/<session_id>', methods=['POST'])
+def run_smart_analysis(session_id: str):
+    """Run BidBrief Smart Analysis on a completed or partial session."""
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+    username, _ = _current_user_info()
+
+    # Parse optional body fields
+    body = request.get_json(silent=True) or {}
+    user_input = str(body.get('user_input', '') or '').strip()
+    force_refresh = bool(body.get('force_refresh', False))
+
+    # Return cached result unless force_refresh requested
+    if not force_refresh and session_id in smart_analysis_results:
+        result = smart_analysis_results[session_id]
+        return jsonify({'success': True, 'result': result.to_dict()})
+
+    analysis_data, err = _build_smart_analysis_data(session_id)
+    if err:
+        return err
+
+    # Extract doc context from the uploaded PDF (best-effort)
+    doc_context = ''
+    try:
+        if session_id in completed_analyses:
+            sd = completed_analyses[session_id]
+        elif session_id in partial_analyses:
+            sd = partial_analyses[session_id]
+        else:
+            sd = {}
+        pdf_path = sd.get('pdf_path', '')
+        if pdf_path and pdf_path != '[CLEANED]' and os.path.exists(pdf_path):
+            doc_context = _extract_doc_context(pdf_path)
+    except Exception as e:
+        logger.warning(f'[SmartAnalysis] Could not extract doc context: {e}')
+
+    api_key = os.getenv('OPENAI_API_KEY', '')
+    if not api_key:
+        return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 503
+
+    try:
+        from services.smart_analysis.orchestrator import SmartAnalysisOrchestrator
+        orchestrator = SmartAnalysisOrchestrator(api_key=api_key)
+        result = orchestrator.run(
+            session_id=session_id,
+            analysis_data=analysis_data,
+            user_input=user_input,
+            doc_context=doc_context,
+        )
+        smart_analysis_results[session_id] = result
+        session_timestamps[session_id] = datetime.now()
+        audit_log('smart_analysis_run', username, {'session_id': session_id})
+        return jsonify({'success': True, 'result': result.to_dict()})
+
+    except Exception as e:
+        logger.error(f'[SmartAnalysis] Failed for {session_id}: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/smart-analysis/<session_id>', methods=['GET'])
+def get_smart_analysis(session_id: str):
+    """Return the cached Smart Analysis result for a session."""
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+    if session_id not in smart_analysis_results:
+        return jsonify({'success': False, 'error': 'No Smart Analysis result for this session'}), 404
+
+    return jsonify({'success': True, 'result': smart_analysis_results[session_id].to_dict()})
+
+
+@app.route('/api/smart-analysis/<session_id>/export/excel', methods=['GET'])
+def export_smart_analysis_excel(session_id: str):
+    """Download Smart Analysis result as Excel."""
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+    if session_id not in smart_analysis_results:
+        return jsonify({'success': False, 'error': 'No Smart Analysis result for this session'}), 404
+
+    try:
+        from services.smart_analysis.excel_generator import SmartAnalysisExcelGenerator
+        result = smart_analysis_results[session_id]
+        buf = SmartAnalysisExcelGenerator(result).generate()
+        safe_name = result.document_name.replace('/', '-').replace('\\', '-')[:60]
+        filename = f'BidBrief_SmartAnalysis_{safe_name}.xlsx'
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as e:
+        logger.error(f'[SmartAnalysis] Excel export failed: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/smart-analysis/<session_id>/export/pdf', methods=['GET'])
+def export_smart_analysis_pdf(session_id: str):
+    """Download Smart Analysis result as PDF."""
+    if not _is_authorized_for_session(session_id):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+    if session_id not in smart_analysis_results:
+        return jsonify({'success': False, 'error': 'No Smart Analysis result for this session'}), 404
+
+    try:
+        from services.smart_analysis.pdf_generator import SmartAnalysisPDFGenerator
+        result = smart_analysis_results[session_id]
+        buf = SmartAnalysisPDFGenerator(result).generate()
+        safe_name = result.document_name.replace('/', '-').replace('\\', '-')[:60]
+        filename = f'BidBrief_SmartAnalysis_{safe_name}.pdf'
+        return send_file(
+            buf,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as e:
+        logger.error(f'[SmartAnalysis] PDF export failed: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ============================================================================

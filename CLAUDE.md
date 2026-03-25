@@ -17,6 +17,7 @@ Before **any** refactor, debug, extend, or test task:
 3. **If no synopsis exists**: tell the user, recommend running `/digest`, then proceed with smaller changes and no assumptions.
 4. **Check for `HANDOFF.md`** in the project root. If present, it contains in-progress session state — read it before touching code. After completing a long task, write one yourself.
 5. **For debugging tasks: read `memory/debug_history.md` (project) AND `~/.claude/memory/debug_history.md` (global) before forming any hypothesis.** These contain confirmed architectural facts and wrong assumptions that must not be repeated.
+6. **Track the digest in `memory/MEMORY.md`** (reference type). After any significant feature addition, note what changed so the digest stays meaningful as a nav aid.
 
 > Non-negotiable: synopsis → plan → code. Never the reverse.
 
@@ -71,32 +72,39 @@ Detect and eliminate these before debugging:
 
 ## 3. Planning Protocol
 
-**Never jump straight to code.** Use the Explore → Plan → Implement → Commit cycle.
+**Never jump straight to code.** Six mandatory phases — never skip one.
 
-### Phase 1 — Explore (Plan Mode)
-Enter Plan Mode. Read files, trace call paths, understand data contracts. No edits.
-```
-Read src/auth and understand session handling. Check env var patterns.
-```
+### Phase 1 — Analysis
+Thorough analysis of the current implementation. Enter Plan Mode, no edits.
+- Read all files touched by the change. Trace call paths, data contracts, return types.
+- **For refactors**: grep ALL reference sites of the thing being replaced. Use a subagent if the codebase is large. Missing one site = broken build.
+- For large features: `SPEC.md` first — let Claude **interview you** with `AskUserQuestion`, then start a fresh session to execute.
 
 ### Phase 2 — Plan
-Ask Claude to produce a written implementation plan. Review/edit it before proceeding.
-```
-What files change for Google OAuth? What's the session flow? Write a plan.
-```
-For large features: write `SPEC.md` first. Let Claude **interview you** using `AskUserQuestion`, then start a fresh session to execute the spec.
+Write a detailed implementation plan: every file, every function, every change, in order.
+- **Interface preservation**: design the replacement to return the same type as the old. When the interface matches, consumer changes collapse to text-only (labels, comments), not logic rewrites.
 
-### Phase 3 — Implement
-Switch to Normal Mode. Give Claude success criteria (tests, expected output, screenshots).
-```
-Implement the OAuth plan. Write tests for the callback handler, run them, fix failures.
-```
+### Phase 3 — Self-Critique
+Before writing any code: critique the plan and trace every dependency.
+- Does the plan cover every consumer identified in Phase 1?
+- Are there edge cases (e.g. callers that pass/receive a different type, fallback paths)?
+- Does the implementation order matter? (upstream before downstream)
+- Revise the plan until critique finds nothing. Only then proceed.
 
-### Phase 4 — Commit
-```
-Commit with a descriptive message. Open a draft PR.
-```
-> Skip planning only when the diff is describable in one sentence. Otherwise, always plan.
+### Phase 4 — Implement
+Systematic implementation, file by file per the plan.
+- **Read before every Edit** — read the exact lines around the change site; never guess at content.
+- **`replace_all: true`** for identical repeated patterns across a file.
+
+### Phase 5 — Validate
+Final validation before committing.
+- Grep for every old symbol name — any remaining hit = missed update.
+- Confirm all changed files are consistent (no half-updated callers).
+- State explicitly what was changed and what the behavioral difference is.
+
+### Phase 6 — Commit and Push
+One atomic commit covering all touched files. Detailed message: per-file summary + why.
+> Skip phases 2–3 only when the diff is truly one sentence. Otherwise, all six phases.
 
 ---
 
@@ -243,7 +251,7 @@ Task received
   │     └── Gate 1 → 2 → 3 → 4 → 5 (§5). Never skip gates.
   │
   ├── New feature / refactor?
-  │     └── Explore → Plan (write it) → Implement → Verify → Commit
+  │     └── Analysis → Plan → Self-Critique → Implement → Validate → Commit+Push (§3)
   │
   ├── Investigation needed?
   │     └── Dispatch subagent. Don't pollute main context.

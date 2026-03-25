@@ -774,6 +774,23 @@
                     <button onclick="exportResults('json')" style="width: 100%; padding: 12px; border: none; background: white; text-align: left; cursor: pointer;">📋 JSON Data</button>
                 </div>
             </div>
+
+            <!-- Smart Analysis -->
+            <div style="margin-top: 16px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+                <div style="display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;">
+                    <button class="btn" id="smartAnalysisBtn" onclick="runSmartAnalysis()" disabled
+                        style="background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); white-space: nowrap; min-width: 200px;">
+                        🧠 BidBrief Smart Analysis
+                    </button>
+                    <div style="flex: 1; min-width: 260px;">
+                        <textarea id="smartAnalysisInput"
+                            placeholder="Optional: ask specific questions about this document (e.g. 'Is this project worth bidding? What are the biggest red flags?')"
+                            style="width: 100%; min-height: 64px; padding: 10px 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 13px; resize: vertical; box-sizing: border-box; font-family: inherit; color: #222;"
+                        ></textarea>
+                    </div>
+                </div>
+                <div id="smartAnalysisStatus" style="margin-top: 6px; font-size: 13px; color: #666;"></div>
+            </div>
         </div>
 
         <!-- Progress Section -->
@@ -783,6 +800,9 @@
             </div>
             <div class="progress-text" id="progressText">Ready</div>
         </div>
+
+        <!-- Smart Analysis Output -->
+        <div id="smartAnalysisOutput" style="display: none; margin-top: 12px;"></div>
 
         <!-- Debug Tools (Collapsed by Default) -->
         <div class="section debug-section">
@@ -1352,6 +1372,7 @@ function handleEvent(data) {
                 // CRITICAL: Update UI button states (fetchResults does this, but displayResults doesn't)
                 // Without this, Stop button stays enabled and Export button stays disabled
                 document.getElementById('exportBtn').disabled = false;
+                document.getElementById('smartAnalysisBtn').disabled = false;
                 document.getElementById('analyzeBtn').disabled = false;
                 document.getElementById('stopBtn').disabled = true;
                 ProgressTracker.hide();
@@ -1641,8 +1662,9 @@ async function fetchResults(maxRetries = 5) {
             // Update unitary table with final results (instead of separate display)
             updateUnitaryTableAsFinal(data.result, isPartial);
 
-            // Enable export
+            // Enable export and smart analysis
             document.getElementById('exportBtn').disabled = false;
+            document.getElementById('smartAnalysisBtn').disabled = false;
 
             ProgressTracker.hide();
             document.getElementById('analyzeBtn').disabled = false;
@@ -2020,10 +2042,155 @@ function clearResults() {
     document.getElementById('resultsContent').innerHTML = '';
     document.getElementById('logContent').innerHTML = '';
     document.getElementById('exportBtn').disabled = true;
+    document.getElementById('smartAnalysisBtn').disabled = true;
+    document.getElementById('smartAnalysisOutput').style.display = 'none';
+    document.getElementById('smartAnalysisOutput').innerHTML = '';
+    document.getElementById('smartAnalysisStatus').textContent = '';
     currentAnalysisResult = null;
     currentSessionId = null;
     ProgressTracker.hide();
     Logger.info('🗑️ Results cleared');
+}
+
+// ============================================================================
+// SMART ANALYSIS
+// ============================================================================
+
+async function runSmartAnalysis() {
+    if (!currentSessionId) {
+        document.getElementById('smartAnalysisStatus').textContent = 'No active session — run an analysis first.';
+        return;
+    }
+
+    const btn = document.getElementById('smartAnalysisBtn');
+    const statusEl = document.getElementById('smartAnalysisStatus');
+    const outputEl = document.getElementById('smartAnalysisOutput');
+    const userInput = (document.getElementById('smartAnalysisInput').value || '').trim();
+
+    btn.disabled = true;
+    btn.textContent = '🧠 Running Smart Analysis...';
+    statusEl.textContent = 'Analyzing document — this may take 30-60 seconds...';
+    outputEl.style.display = 'none';
+    outputEl.innerHTML = '';
+
+    try {
+        const resp = await fetch(`/api/smart-analysis/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_input: userInput }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || `HTTP ${resp.status}`);
+        }
+        statusEl.textContent = '';
+        outputEl.style.display = 'block';
+        outputEl.innerHTML = renderSmartAnalysisResult(data.result);
+    } catch (e) {
+        statusEl.textContent = `Smart Analysis failed: ${e.message}`;
+        Logger.error(`Smart Analysis error: ${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🧠 BidBrief Smart Analysis';
+    }
+}
+
+function renderSmartAnalysisResult(r) {
+    const sev = {
+        critical: { bg: '#DC2626', fg: '#fff' },
+        high:     { bg: '#EF4444', fg: '#fff' },
+        medium:   { bg: '#F59E0B', fg: '#1F2937' },
+        low:      { bg: '#22C55E', fg: '#fff' },
+        info:     { bg: '#3B82F6', fg: '#fff' },
+    };
+
+    function badge(severity) {
+        const s = sev[severity] || sev.medium;
+        return `<span style="background:${s.bg};color:${s.fg};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;text-transform:uppercase;">${severity}</span>`;
+    }
+
+    function itemsHTML(items) {
+        if (!items || !items.length) return '<p style="color:#888;font-size:13px;">None identified.</p>';
+        return items.map(it => `
+            <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:10px;background:#fff;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                    ${badge(it.severity)}
+                    <strong style="font-size:14px;color:#1e293b;">${it.title}</strong>
+                </div>
+                <p style="margin:0 0 6px;font-size:13px;color:#374151;">${it.description}</p>
+                ${it.evidence && it.evidence.length ? `<ul style="margin:4px 0 0 16px;padding:0;font-size:12px;color:#64748b;">${it.evidence.map(e=>`<li>${e}</li>`).join('')}</ul>` : ''}
+            </div>`).join('');
+    }
+
+    function section(title, content) {
+        return `
+        <div style="margin-bottom:20px;">
+            <h4 style="margin:0 0 10px;padding:8px 14px;background:#1E3A8A;color:#fff;border-radius:6px;font-size:14px;">${title}</h4>
+            ${content}
+        </div>`;
+    }
+
+    const assessmentsHTML = (r.assessments || []).map(a => `
+        <div style="display:flex;gap:10px;padding:8px 12px;background:#eff6ff;border-radius:6px;margin-bottom:6px;font-size:13px;">
+            <strong style="min-width:160px;color:#1e40af;">${a.category}</strong>
+            <span><strong>${a.rating}</strong> — ${a.rationale} <em style="color:#64748b;">(confidence: ${a.confidence})</em></span>
+        </div>`).join('');
+
+    const insightsHTML = (r.key_insights || []).map((ins, i) => `
+        <div style="padding:8px 12px;background:${i%2?'#f1f5f9':'#fff'};border-radius:6px;margin-bottom:4px;font-size:13px;">${i+1}. ${ins}</div>`).join('');
+
+    const userQHTML = (r.user_question_responses || []).length ? `
+        ${section('Your Questions', (r.user_question_responses).map(q => `
+            <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:8px;background:#fff;">
+                <p style="margin:0 0 6px;font-weight:700;font-size:13px;color:#1e293b;">${q.question}</p>
+                <p style="margin:0 0 4px;font-size:13px;color:#374151;">${q.response}</p>
+                <span style="font-size:11px;color:#64748b;">Confidence: ${q.confidence}</span>
+            </div>`).join(''))}` : '';
+
+    const recsHTML = (r.strategic_recommendations || []).map((rec, i) =>
+        `<div style="display:flex;gap:10px;padding:8px 12px;background:${i%2?'#f1f5f9':'#fff'};border-radius:6px;margin-bottom:4px;font-size:13px;"><span style="min-width:22px;font-weight:700;color:#1e40af;">${i+1}.</span><span>${rec}</span></div>`).join('');
+
+    const followHTML = (r.follow_up_questions || []).map((q, i) =>
+        `<div style="display:flex;gap:10px;padding:8px 12px;background:${i%2?'#f1f5f9':'#fff'};border-radius:6px;margin-bottom:4px;font-size:13px;"><span style="min-width:22px;color:#64748b;">${i+1}.</span><span>${q}</span></div>`).join('');
+
+    const completeness = r.analysis_completeness === 'partial'
+        ? '<span style="background:#F59E0B;color:#1F2937;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">PARTIAL ANALYSIS</span>'
+        : '<span style="background:#22C55E;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">FULL ANALYSIS</span>';
+
+    return `
+    <div class="section" style="background:#f8fafc;border:2px solid #1E3A8A;border-radius:10px;padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+            <div>
+                <h3 style="margin:0 0 4px;color:#1E3A8A;font-size:16px;">🧠 BidBrief Smart Analysis</h3>
+                <p style="margin:0;font-size:12px;color:#64748b;">${r.document_name} &bull; ${completeness}</p>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-secondary" onclick="downloadSmartExcel()" style="font-size:12px;padding:6px 12px;">📊 Excel</button>
+                <button class="btn btn-secondary" onclick="downloadSmartPDF()" style="font-size:12px;padding:6px 12px;">📄 PDF</button>
+            </div>
+        </div>
+
+        ${r.assessments && r.assessments.length ? section('Professional Assessments', assessmentsHTML) : ''}
+        ${r.executive_summary ? section('Executive Summary', `<p style="font-size:13px;line-height:1.7;color:#374151;white-space:pre-wrap;">${r.executive_summary}</p>`) : ''}
+        ${r.key_insights && r.key_insights.length ? section('Key Insights', insightsHTML) : ''}
+        ${userQHTML}
+        ${r.risks && r.risks.length ? section('Risks', itemsHTML(r.risks)) : ''}
+        ${r.opportunities && r.opportunities.length ? section('Opportunities', itemsHTML(r.opportunities)) : ''}
+        ${r.ambiguities && r.ambiguities.length ? section('Ambiguities', itemsHTML(r.ambiguities)) : ''}
+        ${r.contradictions && r.contradictions.length ? section('Contradictions', itemsHTML(r.contradictions)) : ''}
+        ${recsHTML ? section('Strategic Recommendations', recsHTML) : ''}
+        ${followHTML ? section('Follow-Up Questions', followHTML) : ''}
+    </div>`;
+}
+
+function downloadSmartExcel() {
+    if (!currentSessionId) return;
+    window.location.href = `/api/smart-analysis/${currentSessionId}/export/excel`;
+}
+
+function downloadSmartPDF() {
+    if (!currentSessionId) return;
+    window.location.href = `/api/smart-analysis/${currentSessionId}/export/pdf`;
 }
 
 // ============================================================================
