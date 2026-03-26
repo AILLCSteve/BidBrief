@@ -2998,7 +2998,13 @@ def generate_question_set():
         "3. Generate question IDs as Q1, Q2, Q3... sequentially across all sections.\n"
         "4. Each section needs: section_id (snake_case), section_name (human-readable), section_description.\n"
         "5. Each question needs: id, text, required (true/false), expected_type (string/number/date/technical_spec), enabled (true).\n"
-        "6. Return ONLY valid JSON — no markdown fences, no commentary, nothing else.\n\n"
+        "6. Return ONLY valid JSON — no markdown fences, no commentary, nothing else.\n"
+        "7. SECTION SPLITTING RULE: If the user has provided 10 or more specific questions, you MUST "
+        "intelligently group them into 2 or more sections based on their topic, subject matter, or theme. "
+        "Do NOT put all questions into a single section when 10 or more are provided. "
+        "Sections should have clear, descriptive names that accurately reflect the questions they contain. "
+        "Aim for 4–12 questions per section. If the user's questions span multiple themes (e.g., commercial "
+        "terms, legal/compliance, technical specs, timeline, parties), create a section for each theme.\n\n"
         "Output format:\n"
         '{"sections": [{"section_id": "...", "section_name": "...", "section_description": "...", '
         '"questions": [{"id": "Q1", "text": "...", "required": true, "expected_type": "string", "enabled": true}]}]}'

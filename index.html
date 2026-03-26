@@ -2275,8 +2275,7 @@ async function checkAdminStatus() {
             document.getElementById('bidSpecModeLabel').textContent = 'Bid/Spec/RFP Mode';
             document.getElementById('bidSpecModeDesc').textContent = 'Smart deduplication, merge similar answers. Best for construction bid specs and RFPs.';
             document.getElementById('modeHint').textContent = 'Bid/Spec: Smart deduplication, optimized for specs';
-            document.getElementById('questionSetBtn').textContent = '⚙️ Manage Questions';
-            // Pre-load CIPP questions for admins
+            // Pre-load question config so sections display on load
             loadQuestionConfig();
             Logger.info('🔐 Admin access granted - Advanced Options, BestPrep & CityScraper available');
         } else {
@@ -3374,11 +3373,6 @@ let pendingAdditionalSections = [];
 let pendingAIInput = '';
 
 function openQuestionSetHub() {
-    if (isUserAdmin) {
-        // Admins go directly to the question manager
-        openQuestionManager();
-        return;
-    }
     document.getElementById('questionSetHubModal').style.display = 'flex';
     showHubHome();
 }
@@ -3402,7 +3396,7 @@ function showHubHome() {
             <button class="hub-option-btn" onclick="loadCIPPQuestionSet()">
                 <span style="font-size: 2em;">📋</span>
                 <div>
-                    <strong>Load CIPP Question Set</strong>
+                    <strong>CIPP Sample Set</strong>
                     <p>Load the built-in 100-question CIPP lining / municipal infrastructure question set.</p>
                 </div>
             </button>
@@ -3477,7 +3471,7 @@ async function generateAIQuestions() {
 
     btn.disabled = true;
     btn.textContent = '⏳ Generating...';
-    status.textContent = 'AI is building your question set…';
+    status.textContent = 'BidBrief is building your question set…';
     resultDiv.innerHTML = '';
     pendingAIInput = input;
 
@@ -3492,7 +3486,7 @@ async function generateAIQuestions() {
                 method: 'POST',
                 body: formData
             });
-            status.textContent = 'AI is reading document context and building your question set…';
+            status.textContent = 'BidBrief is reading your document and building the question set…';
         } else {
             resp = await fetch('/api/config/questions/generate', {
                 method: 'POST',
