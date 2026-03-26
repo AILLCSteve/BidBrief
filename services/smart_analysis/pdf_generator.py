@@ -12,6 +12,8 @@ Layout:
 
 import io
 import logging
+import os
+import re as _re
 from datetime import datetime
 
 from reportlab.lib import colors
@@ -158,6 +160,40 @@ def _styles():
     return s
 
 
+def _clean_display_title(result: 'SmartAnalysisResult') -> str:
+    """
+    Returns the best human-readable document title for the cover page.
+
+    Priority:
+      1. document_understanding.document_title  (AI-extracted from the document)
+      2. Cleaned document_name (strip .tmp paths, decode percent-encoding,
+         remove UUID-style prefixes, strip extension)
+    """
+    # 1 — AI-extracted title
+    doc_title = (result.document_understanding or {}).get('document_title', '').strip()
+    if doc_title:
+        return doc_title
+
+    # 2 — Clean up the raw filename fallback
+    name = result.document_name or 'Document'
+    # Strip directory path components (handles both / and \)
+    name = os.path.basename(name.replace('\\', '/'))
+    # Remove UUID-style prefixes like "abc123_" or "tmpXXXXXX_"
+    name = _re.sub(r'^[a-f0-9\-]{6,}_', '', name, flags=_re.IGNORECASE)
+    name = _re.sub(r'^tmp[a-z0-9]+_?', '', name, flags=_re.IGNORECASE)
+    # Decode percent-encoding artifacts
+    try:
+        from urllib.parse import unquote
+        name = unquote(name)
+    except Exception:
+        pass
+    # Drop file extension
+    name = _re.sub(r'\.(pdf|tmp|docx?|xlsx?)$', '', name, flags=_re.IGNORECASE)
+    # Replace underscores/hyphens with spaces, collapse whitespace
+    name = _re.sub(r'[_\-]+', ' ', name).strip()
+    return name or 'Document'
+
+
 class SmartAnalysisPDFGenerator:
     def __init__(self, result: SmartAnalysisResult):
         self.result = result
@@ -174,7 +210,7 @@ class SmartAnalysisPDFGenerator:
             rightMargin=MARGIN,
             topMargin=MARGIN,
             bottomMargin=MARGIN + 0.3 * inch,   # Extra for footer
-            title=f'Smart Analysis — {self.result.document_name}',
+            title=f'Smart Analysis — {_clean_display_title(self.result)}',
             author='BidBrief',
             subject='Executive Analysis Report',
         )
@@ -222,7 +258,7 @@ class SmartAnalysisPDFGenerator:
         story.append(Spacer(1, 0.3 * inch))
 
         story.append(Paragraph(
-            self.result.document_name,
+            _clean_display_title(self.result),
             ParagraphStyle(
                 'doc_name',
                 fontSize=18,

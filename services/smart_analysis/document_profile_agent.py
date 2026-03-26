@@ -102,6 +102,7 @@ Your benchmarks must be derived from what you observe in this specific document.
 Respond as JSON:
 {{
   "document_understanding": {{
+    "document_title": "The official title of the document exactly as it appears on the cover page or header (e.g. 'Request for Proposals — Downtown Streetscape Improvements', 'Invitation to Bid No. 2024-017'). If no formal title is present, derive a concise descriptive title from the document's subject and issuing agency.",
     "document_overview": "2-3 sentences: what this document IS, its purpose, and what it's trying to procure or accomplish",
     "major_workstreams": [
       "Major scope workstream or deliverable 1",
@@ -216,6 +217,7 @@ class DocumentProfileAgent:
             # Return safe empty profile — downstream agents handle this gracefully
             return {
                 'document_understanding': {
+                    'document_title': '',
                     'document_overview': '',
                     'major_workstreams': [],
                     'key_obligations': [],
