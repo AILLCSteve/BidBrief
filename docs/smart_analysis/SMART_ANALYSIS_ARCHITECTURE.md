@@ -97,6 +97,7 @@ doc_profile = {
     "submission":  [...]
   },
   "document_understanding": {
+    "document_title":         str,           # v3.3: AI-extracted formal document title
     "document_overview":      str,
     "major_workstreams":      [...],
     "key_obligations":        [...],
@@ -106,7 +107,7 @@ doc_profile = {
 }
 ```
 
-The `document_understanding` sub-dict is surfaced directly in the final `SmartAnalysisResult` and rendered in the frontend Document Overview section.
+The `document_understanding` sub-dict is surfaced directly in the final `SmartAnalysisResult` and rendered in the frontend Document Overview section. The `document_title` field is additionally used by `pdf_generator._clean_display_title()` as the primary cover page title for PDF exports.
 
 ### Stage 3: Parallel Agents → SynthesisAgent
 
@@ -285,5 +286,29 @@ services/smart_analysis/
 ├── excel_generator.py
 └── pdf_generator.py
 ```
+
+---
+
+## PDF Export Cover Page — Title Resolution
+
+`pdf_generator._clean_display_title(result)` determines the cover page document title:
+
+1. **Primary**: `result.document_understanding.get('document_title')` — AI-extracted formal title from DocumentProfileAgent
+2. **Fallback**: cleaned `result.document_name` — strips directory path, `tmp...`/UUID prefixes, percent-encoding, file extension; converts underscores/hyphens to spaces
+
+Both the `SimpleDocTemplate(title=)` PDF metadata and the cover page heading `Paragraph` use this function. The raw `document_name` (which is typically a `.tmp` path) is never shown to end users.
+
+---
+
+## Version History
+
+| Version | Commit | Key Changes |
+|---------|--------|-------------|
+| v1 | d65a75d | Initial build: 10 service files, 4 API routes, SCOUT/MIRROR/UserInput/Synthesis |
+| v2 | e4cf7ca | DocumentProfileAgent added; context_aggregator field name bug fixed; 4-tier language discipline; 3-field follow_up_direction |
+| v3 | 887e82a | document_understanding layer; EXPERTISE UNIQUENESS RULE; LENS GENERATION RULE; mandatory minimums (≥5/6); 5-field follow_up_direction; token increases across all agents |
+| v3.1 | 41f562c | Admin panel: 🧠 Smart button + SA tab in session modal + admin export (Excel/PDF) |
+| v3.2 | d7977ed | Question hub uniform for all users; AI question section hard cap ≤10 Qs; max_tokens 4000→6000 |
+| v3.3 | 91eac96 | document_title added to document_understanding; PDF cover page uses _clean_display_title() |
 
 ---
