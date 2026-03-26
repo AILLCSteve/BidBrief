@@ -2999,12 +2999,14 @@ def generate_question_set():
         "4. Each section needs: section_id (snake_case), section_name (human-readable), section_description.\n"
         "5. Each question needs: id, text, required (true/false), expected_type (string/number/date/technical_spec), enabled (true).\n"
         "6. Return ONLY valid JSON — no markdown fences, no commentary, nothing else.\n"
-        "7. SECTION SPLITTING RULE: If the user has provided 10 or more specific questions, you MUST "
-        "intelligently group them into 2 or more sections based on their topic, subject matter, or theme. "
-        "Do NOT put all questions into a single section when 10 or more are provided. "
-        "Sections should have clear, descriptive names that accurately reflect the questions they contain. "
-        "Aim for 4–12 questions per section. If the user's questions span multiple themes (e.g., commercial "
-        "terms, legal/compliance, technical specs, timeline, parties), create a section for each theme.\n\n"
+        "7. SECTION SIZE LIMIT — HARD CAP: No section may contain more than 10 questions. This is a hard "
+        "limit with no exceptions. If you have 60 questions, you must produce at least 6 sections. "
+        "If you have 25 questions, you need at least 3 sections.\n"
+        "   - FORMULA: number of sections = ceil(total_questions / 10). Always create at least that many sections.\n"
+        "   - Split by theme/topic first. If a theme has more than 10 questions, split it into sub-sections "
+        "     (e.g., 'Commercial Terms — Pricing' and 'Commercial Terms — Payment & Retention').\n"
+        "   - Never cluster questions arbitrarily just to stay under 10. Sections must be semantically coherent.\n"
+        "   - Section names must be specific and descriptive — not generic labels like 'General' or 'Other'.\n\n"
         "Output format:\n"
         '{"sections": [{"section_id": "...", "section_name": "...", "section_description": "...", '
         '"questions": [{"id": "Q1", "text": "...", "required": true, "expected_type": "string", "enabled": true}]}]}'
@@ -3022,9 +3024,9 @@ def generate_question_set():
                     {'role': 'user', 'content': user_input}
                 ],
                 'temperature': 0.3,
-                'max_tokens': 4000
+                'max_tokens': 6000
             },
-            timeout=60
+            timeout=90
         )
         resp.raise_for_status()
         raw = resp.json()['choices'][0]['message']['content'].strip()
