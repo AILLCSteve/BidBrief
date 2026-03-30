@@ -303,6 +303,18 @@ def load_authorized_users():
             'role': 'user'
         }
 
+    # User 4 - USER role (basic access only)
+    user4_email = os.getenv('AUTH_USER4_EMAIL')
+    user4_password = os.getenv('AUTH_USER4_PASSWORD')
+    user4_name = os.getenv('AUTH_USER4_NAME', 'User 4')
+
+    if user4_email and user4_password:
+        users[user4_email.lower()] = {
+            'password_hash': hashlib.sha256(user4_password.encode()).hexdigest(),
+            'name': user4_name,
+            'role': 'user'
+        }
+
     if not users:
         print("WARNING: No authorized users configured. Set AUTH_USER*_EMAIL and AUTH_USER*_PASSWORD environment variables.")
 
