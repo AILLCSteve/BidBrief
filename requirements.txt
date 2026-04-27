@@ -21,7 +21,7 @@ pdfminer.six>=20221105
 python-docx>=1.1.0,<2.0.0
 
 # RTF processing (optional)
-striprtf>=0.0.26
+striprtf>=0.0.32
 
 # Environment Management
 python-dotenv>=1.0.0,<2.0.0
