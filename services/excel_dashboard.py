@@ -41,8 +41,8 @@ class ExcelDashboardGenerator:
     """Generate executive-ready Excel report package with 4 professional sheets"""
 
     # Professional color scheme - BidBrief Navy/Blue branding
-    NAVY = "1E3A8A"
-    BLUE = "5B7FCC"
+    NAVY = "104090"
+    BLUE = "5E86D0"
     LIGHT_BLUE = "E8EEF7"
     GREEN = "22C55E"
     GREEN_LIGHT = "DCFCE7"
@@ -55,24 +55,24 @@ class ExcelDashboardGenerator:
     WHITE = "FFFFFF"
 
     # Fills
-    HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
-    SUBHEADER_FILL = PatternFill(start_color="5B7FCC", end_color="5B7FCC", fill_type="solid")
+    HEADER_FILL = PatternFill(start_color="104090", end_color="104090", fill_type="solid")
+    SUBHEADER_FILL = PatternFill(start_color="5E86D0", end_color="5E86D0", fill_type="solid")
     SECTION_FILL = PatternFill(start_color="E8EEF7", end_color="E8EEF7", fill_type="solid")
     ANSWERED_FILL = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
     UNANSWERED_FILL = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
     ALT_ROW_FILL = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
     STAT_FILL = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-    TITLE_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    TITLE_FILL = PatternFill(start_color="104090", end_color="104090", fill_type="solid")
 
     # Fonts
     TITLE_FONT = Font(name='Calibri', size=24, bold=True, color="FFFFFF")
     HEADER_FONT = Font(name='Calibri', size=12, bold=True, color="FFFFFF")
     SUBHEADER_FONT = Font(name='Calibri', size=11, bold=True, color="FFFFFF")
-    SECTION_FONT = Font(name='Calibri', size=12, bold=True, color="1E3A8A")
+    SECTION_FONT = Font(name='Calibri', size=12, bold=True, color="104090")
     DATA_FONT = Font(name='Calibri', size=11, color="374151")
     DATA_FONT_BOLD = Font(name='Calibri', size=11, bold=True, color="1F2937")
     STAT_LABEL_FONT = Font(name='Calibri', size=11, color="374151")
-    STAT_VALUE_FONT = Font(name='Calibri', size=11, bold=True, color="1E3A8A")
+    STAT_VALUE_FONT = Font(name='Calibri', size=11, bold=True, color="104090")
 
     # Borders
     BORDER_THIN = Border(
@@ -144,6 +144,9 @@ class ExcelDashboardGenerator:
         # Sheet 7: Deep RAG (V2 Pipeline - at end)
         if is_v2_pipeline:
             self._create_rag_sheet()
+
+        from services.excel_mobile import mobile_optimize
+        mobile_optimize(self.wb)
 
         output = io.BytesIO()
         self.wb.save(output)
@@ -230,7 +233,7 @@ class ExcelDashboardGenerator:
                 ws.merge_cells(f'A{row}:{end_col}{row}')
                 cell = ws[f'A{row}']
                 cell.value = sanitize_for_excel(f'💡 {insight}')
-                cell.font = Font(name='Calibri', size=9, italic=True, color='1E3A8A')
+                cell.font = Font(name='Calibri', size=9, italic=True, color='104090')
                 cell.alignment = Alignment(wrap_text=True, vertical='top')
                 row += 1
 
@@ -503,7 +506,7 @@ class ExcelDashboardGenerator:
         # Title
         ws.merge_cells('A1:G1')
         ws['A1'] = 'COMPLETE ANALYSIS RESULTS'
-        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="104090")
         ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[1].height = 30
 
@@ -808,7 +811,7 @@ class ExcelDashboardGenerator:
         # Title
         ws.merge_cells('A1:F1')
         ws['A1'] = 'V2 PIPELINE - OPTIMIZED SCAN AUDIT'
-        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="104090")
         ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[1].height = 30
 
@@ -983,7 +986,7 @@ class ExcelDashboardGenerator:
         # Title
         ws.merge_cells('A1:D1')
         ws['A1'] = 'V2 PIPELINE - UNANSWERED QUESTIONS PASS'
-        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="104090")
         ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[1].height = 30
 
@@ -1063,7 +1066,7 @@ class ExcelDashboardGenerator:
         # Title
         ws.merge_cells('A1:E1')
         ws['A1'] = 'V2 PIPELINE - DEEP RAG ANALYSIS'
-        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="1E3A8A")
+        ws['A1'].font = Font(name='Calibri', size=16, bold=True, color="104090")
         ws['A1'].alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[1].height = 30
 

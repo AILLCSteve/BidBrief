@@ -36,8 +36,8 @@ from .models import SmartAnalysisResult
 logger = logging.getLogger(__name__)
 
 # ── Brand Colours ─────────────────────────────────────────────────────────────
-C_NAVY = colors.HexColor('#1E3A8A')
-C_BLUE = colors.HexColor('#3B82F6')
+C_NAVY = colors.HexColor('#104090')
+C_BLUE = colors.HexColor('#2090D0')
 C_LIGHT_BLUE = colors.HexColor('#EFF6FF')
 C_GREEN = colors.HexColor('#22C55E')
 C_AMBER = colors.HexColor('#F59E0B')
@@ -289,7 +289,7 @@ class SmartAnalysisPDFGenerator:
         story.append(HRFlowable(
             width=CONTENT_W,
             thickness=1,
-            color=colors.HexColor('#3B82F6'),
+            color=colors.HexColor('#2090D0'),
             hAlign='CENTER',
         ))
 

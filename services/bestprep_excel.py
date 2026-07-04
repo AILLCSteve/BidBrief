@@ -35,8 +35,8 @@ class BestPrepExcelGenerator:
     """Generate exhaustive Excel report for BestPrep mode."""
 
     # Colors
-    NAVY = "1E3A8A"
-    BLUE = "5B7FCC"
+    NAVY = "104090"
+    BLUE = "5E86D0"
     GREEN = "22C55E"
     GRAY = "F3F4F6"
     LIGHT_GRAY = "F9FAFB"
@@ -68,6 +68,9 @@ class BestPrepExcelGenerator:
         self._create_fragments_sheet()    # Sheet 3: All Fragments
         self._create_footnotes_sheet()    # Sheet 4: All Footnotes
         self._create_sources_sheet()      # Sheet 5: Page Index
+
+        from services.excel_mobile import mobile_optimize
+        mobile_optimize(self.wb)
 
         output = io.BytesIO()
         self.wb.save(output)

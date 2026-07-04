@@ -715,8 +715,10 @@ require LLM assistance. If invoked, help with formatting decisions."""
                         all_source_urls.add(source)
             row_counts[SOURCES_SHEET] = len(all_source_urls)
 
-            # Save workbook
+            # Save workbook (mobile-first sizing for iOS QuickLook)
             self.emit_event("processing", "Saving workbook")
+            from services.excel_mobile import mobile_optimize
+            mobile_optimize(wb)
             wb.save(file_path)
 
             # Get file size

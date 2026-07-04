@@ -1177,8 +1177,24 @@ class HotdogOrchestrator:
 
             sections.append(section_data)
 
+        # Include the same top-level stats the completed output carries — the
+        # iOS results header reads these; without them a stopped/mid-packaging
+        # fetch renders "0/0 questions · 0 pages".
+        answered = sum(
+            1 for s in sections for q in s['questions'] if q.get('has_answer')
+        )
+        total_pages = 0
+        try:
+            if self.cached_windows:
+                total_pages = max(max(w.pages) for w in self.cached_windows if w.pages)
+        except Exception:
+            total_pages = 0
+
         return {
             'sections': sections,
+            'questions_answered': answered,
+            'total_questions': config.total_questions,
+            'total_pages': total_pages,
             'key_requirements': self.key_details_extractor.get_summary_data()
         }
 

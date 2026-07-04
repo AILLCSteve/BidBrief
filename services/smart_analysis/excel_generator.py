@@ -21,8 +21,8 @@ from .models import SmartAnalysisResult
 logger = logging.getLogger(__name__)
 
 # ── Colours (match existing excel_dashboard.py palette) ──────────────────────
-_NAVY = '1E3A8A'
-_BLUE = '3B82F6'
+_NAVY = '104090'
+_BLUE = '2090D0'
 _GREEN = '22C55E'
 _AMBER = 'F59E0B'
 _RED = 'EF4444'
@@ -88,6 +88,9 @@ class SmartAnalysisExcelGenerator:
         self._sheet_recommendations()
         if self.result.user_question_responses:
             self._sheet_user_questions()
+
+        from services.excel_mobile import mobile_optimize
+        mobile_optimize(self.wb)
 
         buf = io.BytesIO()
         self.wb.save(buf)
@@ -273,7 +276,7 @@ class SmartAnalysisExcelGenerator:
             for insight in t.get('insights') or []:
                 ws.merge_cells(f'A{row}:{end_col}{row}')
                 ws[f'A{row}'] = f'💡 {insight}'
-                ws[f'A{row}'].font = _font(size=9, italic=True, color='1E3A8A')
+                ws[f'A{row}'].font = _font(size=9, italic=True, color='104090')
                 ws[f'A{row}'].alignment = _align()
                 ws.row_dimensions[row].height = 22
                 row += 1
