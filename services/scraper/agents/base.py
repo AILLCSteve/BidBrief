@@ -201,21 +201,30 @@ class BaseAgent(ABC):
             raise RuntimeError(f"Agent {self.AGENT_ID} has no OpenAI client")
 
         system = system_prompt or self.get_system_prompt()
+
+        # Research focus directive: every agent in the pipeline leans into the
+        # focus chosen for this session (full_system by default).
+        try:
+            from services.scraper.config import focus_directive
+            focus = getattr(self.config, 'research_focus', None)
+            if focus:
+                system = f"{system}\n\n---\n{focus_directive(focus)}\n---"
+        except Exception:
+            pass
         temp = temperature if temperature is not None else self.config.openai.temperature
         tokens = max_tokens or self.config.openai.max_tokens
 
         start_time = time.time()
-        self.emit_event("processing", f"Calling GPT-4o...")
+        self.emit_event("processing", f"Calling {self.config.openai.model}...")
 
         try:
+            from services.ai_models import completion_params
             response = await self.openai_client.chat.completions.create(
-                model=self.config.openai.model,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=temp,
-                max_tokens=tokens
+                **completion_params(self.config.openai.model, tokens, temperature=temp)
             )
 
             elapsed = time.time() - start_time

@@ -462,14 +462,14 @@ Output only valid JSON, no markdown code blocks."""
         try:
             # Call AI to generate expert using most robust model (AsyncOpenAI)
             try:
+                from services.ai_models import completion_params
                 response = await self.client.chat.completions.create(
-                    model=self.model,
                     messages=[
                         {"role": "system", "content": "You are an expert AI architect."},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.5,  # Moderate creativity for specialized persona generation
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    **completion_params(self.model, temperature=0.5)
                 )
             except Exception as api_error:
                 logger.error(f"OpenAI API call failed: {type(api_error).__name__}: {str(api_error)}")

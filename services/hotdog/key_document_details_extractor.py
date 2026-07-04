@@ -170,8 +170,8 @@ Rules:
             return []
 
         try:
+            from services.ai_models import completion_params
             response = await self.client.chat.completions.create(
-                model=self.model,
                 messages=[
                     {
                         "role": "system",
@@ -184,10 +184,9 @@ Rules:
                         )
                     }
                 ],
-                temperature=0.1,
-                max_tokens=2000,
                 response_format={"type": "json_object"},
-                timeout=90.0
+                timeout=90.0,
+                **completion_params(self.model, 2000, temperature=0.1)
             )
 
             result_text = response.choices[0].message.content

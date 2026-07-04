@@ -183,8 +183,8 @@ class DocumentProfileAgent:
         mode = ctx.get('mode', 'bid_spec')
 
         try:
+            from services.ai_models import completion_params
             response = await self.client.chat.completions.create(
-                model=self.model,
                 messages=[
                     {'role': 'system', 'content': _SYSTEM},
                     {'role': 'user', 'content': _USER_TEMPLATE.format(
@@ -193,10 +193,9 @@ class DocumentProfileAgent:
                         mode=mode,
                     )},
                 ],
-                temperature=0.15,
-                max_tokens=4500,
                 response_format={'type': 'json_object'},
                 timeout=90.0,
+                **completion_params(self.model, 4500, temperature=0.15),
             )
             result = json.loads(response.choices[0].message.content)
 

@@ -137,8 +137,8 @@ CRITICAL: Include page numbers from <PDF pg X> markers when available."""
         req_list = "\n".join([f"- {name}: {desc}" for name, desc in self.REQUIREMENTS])
 
         try:
+            from services.ai_models import completion_params
             response = await self.client.chat.completions.create(
-                model=self.model,
                 messages=[
                     {
                         "role": "system",
@@ -152,10 +152,9 @@ CRITICAL: Include page numbers from <PDF pg X> markers when available."""
                         )
                     }
                 ],
-                temperature=0.1,  # Low temperature for factual extraction
-                max_tokens=2000,
                 response_format={"type": "json_object"},
-                timeout=90.0  # Prevent indefinite hang on slow/failed API calls
+                timeout=90.0,  # Prevent indefinite hang on slow/failed API calls
+                **completion_params(self.model, 2000, temperature=0.1)
             )
 
             result_text = response.choices[0].message.content

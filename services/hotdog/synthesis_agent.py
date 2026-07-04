@@ -118,14 +118,13 @@ OUTPUT: Natural language answer ONLY."""
         )
 
         try:
+            from services.ai_models import completion_params
             response = await self.client.chat.completions.create(
-                model=self.model,
                 messages=[
                     {"role": "system", "content": self.SYNTHESIS_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.3,  # Lower temperature for factual synthesis
-                max_tokens=4000
+                **completion_params(self.model, 4000, temperature=0.3)
             )
 
             synthesized = response.choices[0].message.content

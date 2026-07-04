@@ -83,6 +83,8 @@ class SmartAnalysisExcelGenerator:
 
         self._sheet_summary()
         self._sheet_findings()
+        if getattr(self.result, 'dynamic_tables', None):
+            self._sheet_dynamic_intelligence()
         self._sheet_recommendations()
         if self.result.user_question_responses:
             self._sheet_user_questions()
@@ -192,6 +194,91 @@ class SmartAnalysisExcelGenerator:
         ws[f'A{row}'].alignment = _align()
         ws.row_dimensions[row].height = 200
         row += 1
+
+    # ── Sheet: Document Intelligence (dynamic tables — shape varies per document) ──
+    def _sheet_dynamic_intelligence(self):
+        from openpyxl.utils import get_column_letter
+
+        ws = self.wb.create_sheet('Document Intelligence')
+        tables = self.result.dynamic_tables or []
+        max_cols = max((len(t.get('columns') or []) for t in tables), default=1)
+        max_cols = max(max_cols, 2)
+        last_col = get_column_letter(max_cols)
+        for c in range(1, max_cols + 1):
+            ws.column_dimensions[get_column_letter(c)].width = 28
+
+        row = 1
+        ws.merge_cells(f'A{row}:{last_col}{row}')
+        ws[f'A{row}'] = 'BidBrief Smart Analysis — Document Intelligence'
+        ws[f'A{row}'].font = _HEADER_FONT
+        ws[f'A{row}'].fill = _HEADER_FILL
+        ws[f'A{row}'].alignment = _align(h='center', wrap=False)
+        ws.row_dimensions[row].height = 36
+        row += 1
+
+        focus = getattr(self.result, 'intelligence_focus', '') or ''
+        if focus:
+            ws.merge_cells(f'A{row}:{last_col}{row}')
+            ws[f'A{row}'] = focus
+            ws[f'A{row}'].font = _font(size=10, italic=True)
+            ws[f'A{row}'].fill = _fill(_LIGHT_BLUE_BG)
+            ws[f'A{row}'].border = _BORDER
+            ws[f'A{row}'].alignment = _align()
+            ws.row_dimensions[row].height = 44
+            row += 2
+
+        for t in tables:
+            columns = t.get('columns') or []
+            n = max(len(columns), 1)
+            end_col = get_column_letter(n)
+
+            ws.merge_cells(f'A{row}:{end_col}{row}')
+            ws[f'A{row}'] = t.get('title', 'Table')
+            ws[f'A{row}'].font = _SECTION_FONT
+            ws[f'A{row}'].fill = _SECTION_FILL
+            ws[f'A{row}'].alignment = _align(wrap=False)
+            ws.row_dimensions[row].height = 24
+            row += 1
+
+            why = t.get('why_relevant') or ''
+            if why:
+                ws.merge_cells(f'A{row}:{end_col}{row}')
+                ws[f'A{row}'] = why
+                ws[f'A{row}'].font = _font(size=9, italic=True)
+                ws[f'A{row}'].alignment = _align()
+                ws.row_dimensions[row].height = 26
+                row += 1
+
+            for idx, col in enumerate(columns, 1):
+                cell = ws[f'{get_column_letter(idx)}{row}']
+                cell.value = col.get('label', col.get('key', ''))
+                cell.font = _LABEL_FONT
+                cell.fill = _fill(_LIGHT_GREY_BG)
+                cell.border = _BORDER
+                cell.alignment = _align(wrap=False)
+            ws.row_dimensions[row].height = 20
+            row += 1
+
+            for r_i, data_row in enumerate(t.get('rows') or []):
+                for idx, col in enumerate(columns, 1):
+                    cell = ws[f'{get_column_letter(idx)}{row}']
+                    cell.value = str(data_row.get(col.get('key', ''), ''))
+                    cell.font = _DATA_FONT
+                    cell.fill = _fill(_ALT_ROW if r_i % 2 else _WHITE)
+                    cell.border = _BORDER
+                    cell.alignment = _align()
+                ws.row_dimensions[row].height = 28
+                row += 1
+
+            for insight in t.get('insights') or []:
+                ws.merge_cells(f'A{row}:{end_col}{row}')
+                ws[f'A{row}'] = f'💡 {insight}'
+                ws[f'A{row}'].font = _font(size=9, italic=True, color='1E3A8A')
+                ws[f'A{row}'].alignment = _align()
+                ws.row_dimensions[row].height = 22
+                row += 1
+
+            row += 1
 
     # ── Sheet 2: Findings ─────────────────────────────────────────────────────
     def _sheet_findings(self):

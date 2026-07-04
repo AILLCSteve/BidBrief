@@ -225,6 +225,8 @@ class SmartAnalysisPDFGenerator:
         story += self._findings_section('Opportunities', self.result.opportunities)
         story += self._findings_section('Ambiguities', self.result.ambiguities)
         story += self._findings_section('Contradictions', self.result.contradictions)
+        if getattr(self.result, 'dynamic_tables', None):
+            story += self._dynamic_intelligence_section()
         story += self._recommendations_section()
         if self.result.user_question_responses:
             story += self._user_questions_section()
@@ -456,6 +458,60 @@ class SmartAnalysisPDFGenerator:
         return story
 
     # ── Recommendations ───────────────────────────────────────────────────────
+    def _dynamic_intelligence_section(self):
+        """Dynamic tables — document-specific data views chosen by the intelligence engine."""
+        s = self.styles
+        story = [Paragraph('Document Intelligence', s['h1'])]
+
+        focus = getattr(self.result, 'intelligence_focus', '') or ''
+        if focus:
+            story.append(Paragraph(_safe(focus), s['body']))
+            story.append(Spacer(1, 6))
+
+        cell_style = ParagraphStyle(
+            'di_cell', fontSize=8, textColor=C_DARK_TEXT,
+            fontName='Helvetica', leading=10)
+        head_style = ParagraphStyle(
+            'di_head', fontSize=8, textColor=C_WHITE,
+            fontName='Helvetica-Bold', leading=10)
+
+        for t in self.result.dynamic_tables:
+            columns = t.get('columns') or []
+            if not columns:
+                continue
+            story.append(Paragraph(_safe(t.get('title', 'Table')), s['h2']))
+            why = t.get('why_relevant') or ''
+            if why:
+                story.append(Paragraph(f'<i>{_safe(why)}</i>', s['body']))
+
+            data = [[Paragraph(_safe(c.get('label', c.get('key', ''))), head_style) for c in columns]]
+            for r in t.get('rows') or []:
+                data.append([Paragraph(_safe(str(r.get(c.get('key', ''), ''))), cell_style)
+                             for c in columns])
+
+            col_w = CONTENT_W / len(columns)
+            table = Table(data, colWidths=[col_w] * len(columns), repeatRows=1)
+            style_cmds = [
+                ('BACKGROUND', (0, 0), (-1, 0), C_NAVY),
+                ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#D1D5DB')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ]
+            for i in range(1, len(data)):
+                if i % 2 == 0:
+                    style_cmds.append(('BACKGROUND', (0, i), (-1, i), C_ALT_ROW))
+            table.setStyle(TableStyle(style_cmds))
+            story.append(table)
+
+            for insight in t.get('insights') or []:
+                story.append(Paragraph(f'<i>• {_safe(insight)}</i>', s['body']))
+            story.append(Spacer(1, 10))
+
+        return story
+
     def _recommendations_section(self):
         s = self.styles
         story = []

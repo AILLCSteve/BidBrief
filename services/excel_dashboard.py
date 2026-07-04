@@ -130,6 +130,11 @@ class ExcelDashboardGenerator:
         self._create_detailed_results()       # Sheet 3: Detailed Results
         self._create_by_section()             # Sheet 4: By Section
 
+        # Dynamic Intelligence sheet — document-specific tables sensed from THIS
+        # document's results (shape varies per document by design)
+        if self.result.get('dynamic_tables'):
+            self._create_dynamic_intelligence_sheet()
+
         # Sheet 5: Unanswered Questions Pass (V2 Pipeline)
         if is_v2_pipeline:
             self._create_unanswered_pass_sheet()
@@ -144,6 +149,92 @@ class ExcelDashboardGenerator:
         self.wb.save(output)
         output.seek(0)
         return output
+
+    def _create_dynamic_intelligence_sheet(self):
+        """Render the dynamic intelligence tables with real columns per table."""
+        from openpyxl.utils import get_column_letter
+
+        ws = self.wb.create_sheet('Document Intelligence')
+        tables = self.result.get('dynamic_tables') or []
+        max_cols = max(max((len(t.get('columns') or []) for t in tables), default=1), 2)
+        last_col = get_column_letter(max_cols)
+        for c in range(1, max_cols + 1):
+            ws.column_dimensions[get_column_letter(c)].width = 28
+
+        row = 1
+        ws.merge_cells(f'A{row}:{last_col}{row}')
+        cell = ws[f'A{row}']
+        cell.value = 'Document Intelligence — Dynamic Tables'
+        cell.font = self.HEADER_FONT
+        cell.fill = self.TITLE_FILL
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.row_dimensions[row].height = 32
+        row += 1
+
+        focus = self.result.get('intelligence_focus') or ''
+        if focus:
+            ws.merge_cells(f'A{row}:{last_col}{row}')
+            cell = ws[f'A{row}']
+            cell.value = sanitize_for_excel(focus)
+            cell.font = Font(name='Calibri', size=10, italic=True, color='374151')
+            cell.fill = self.STAT_FILL
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            ws.row_dimensions[row].height = 44
+            row += 2
+
+        for t in tables:
+            columns = t.get('columns') or []
+            if not columns:
+                continue
+            end_col = get_column_letter(len(columns))
+
+            ws.merge_cells(f'A{row}:{end_col}{row}')
+            cell = ws[f'A{row}']
+            cell.value = sanitize_for_excel(t.get('title', 'Table'))
+            cell.font = self.SECTION_FONT
+            cell.fill = self.SECTION_FILL
+            ws.row_dimensions[row].height = 22
+            row += 1
+
+            why = t.get('why_relevant') or ''
+            if why:
+                ws.merge_cells(f'A{row}:{end_col}{row}')
+                cell = ws[f'A{row}']
+                cell.value = sanitize_for_excel(why)
+                cell.font = Font(name='Calibri', size=9, italic=True, color='6B7280')
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
+                row += 1
+
+            for idx, col in enumerate(columns, 1):
+                cell = ws[f'{get_column_letter(idx)}{row}']
+                cell.value = sanitize_for_excel(col.get('label', col.get('key', '')))
+                cell.font = self.SUBHEADER_FONT
+                cell.fill = self.HEADER_FILL
+                cell.border = self.BORDER_THIN
+                cell.alignment = Alignment(vertical='center')
+            row += 1
+
+            for r_i, data_row in enumerate(t.get('rows') or []):
+                for idx, col in enumerate(columns, 1):
+                    cell = ws[f'{get_column_letter(idx)}{row}']
+                    cell.value = sanitize_for_excel(str(data_row.get(col.get('key', ''), '')))
+                    cell.font = self.DATA_FONT
+                    if r_i % 2:
+                        cell.fill = self.ALT_ROW_FILL
+                    cell.border = self.BORDER_THIN
+                    cell.alignment = Alignment(wrap_text=True, vertical='top')
+                ws.row_dimensions[row].height = 26
+                row += 1
+
+            for insight in t.get('insights') or []:
+                ws.merge_cells(f'A{row}:{end_col}{row}')
+                cell = ws[f'A{row}']
+                cell.value = sanitize_for_excel(f'💡 {insight}')
+                cell.font = Font(name='Calibri', size=9, italic=True, color='1E3A8A')
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
+                row += 1
+
+            row += 1
 
     def _collect_footnotes(self):
         """Collect all footnotes from the analysis.

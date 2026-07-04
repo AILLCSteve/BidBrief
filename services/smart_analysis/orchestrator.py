@@ -27,8 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 class SmartAnalysisOrchestrator:
-    def __init__(self, api_key: str, model: str = 'gpt-4o'):
+    def __init__(self, api_key: str, model: str = ''):
         self.api_key = api_key
+        if not model:
+            from services.ai_models import standard_model
+            model = standard_model()
         self.model = model
 
     def run(
@@ -78,16 +81,32 @@ class SmartAnalysisOrchestrator:
         profile_agent = DocumentProfileAgent(self.api_key, self.model)
         doc_profile = await profile_agent.profile(ctx, rich_analysis_text)
 
-        # Step 3: SCOUT, MIRROR, UserInput in parallel (all receive doc_profile)
-        logger.info('[SmartAnalysis] Running SCOUT + MIRROR + UserInput in parallel...')
+        # Step 3: SCOUT, MIRROR, UserInput + Dynamic Intelligence in parallel
+        # (all receive doc_profile; dynamic intelligence senses THIS document's
+        # prevalent data dimensions and builds document-specific tables)
+        logger.info('[SmartAnalysis] Running SCOUT + MIRROR + UserInput + DynamicIntel in parallel...')
+        from services.dynamic_intelligence import DynamicIntelligenceEngine
         scout_agent = SCOUTAgent(self.api_key, self.model)
         mirror_agent = MIRRORAgent(self.api_key, self.model)
         user_agent = UserInputAgent(self.api_key, self.model)
+        intel_engine = DynamicIntelligenceEngine(self.api_key, self.model)
 
-        scout_findings, mirror_findings, user_responses = await asyncio.gather(
+        expertise = (doc_profile.get('expertise_profile') or {})
+        focus_note = expertise.get('role', '')
+        overview = (doc_profile.get('document_understanding') or {}).get('document_overview', '')
+        if overview:
+            focus_note = f'{focus_note}. Document: {overview}' if focus_note else overview
+
+        scout_findings, mirror_findings, user_responses, dynamic_intel = await asyncio.gather(
             scout_agent.analyze(ctx, analysis_text, doc_profile),
             mirror_agent.analyze(ctx, analysis_text, doc_profile),
             user_agent.process(ctx, analysis_text, user_input, doc_profile),
+            intel_engine.generate(
+                context_label=f'Smart Analysis of {ctx.get("document_name", "document")} '
+                              f'({ctx.get("document_type_label") or ctx.get("document_type", "document")})',
+                evidence=rich_analysis_text,
+                focus_note=focus_note,
+            ),
         )
 
         # Step 4: Synthesis (receives all outputs + doc_profile)
@@ -98,12 +117,14 @@ class SmartAnalysisOrchestrator:
         )
 
         # Step 5: Build typed result
-        result = self._build_result(session_id, ctx, synthesis, user_responses, doc_profile)
+        result = self._build_result(session_id, ctx, synthesis, user_responses, doc_profile,
+                                    dynamic_intel)
         logger.info(
             f'[SmartAnalysis] Done — '
             f'{len(result.risks)} risks, '
             f'{len(result.opportunities)} opportunities, '
-            f'{len(result.assessments)} assessments'
+            f'{len(result.assessments)} assessments, '
+            f'{len(result.dynamic_tables)} dynamic tables'
         )
         return result
 
@@ -114,6 +135,7 @@ class SmartAnalysisOrchestrator:
         synthesis: dict,
         user_responses: dict,
         doc_profile: dict,
+        dynamic_intel: dict = None,
     ) -> SmartAnalysisResult:
 
         def _items(raw: list) -> list:
@@ -163,4 +185,6 @@ class SmartAnalysisOrchestrator:
             user_question_responses=user_responses.get('responses') or [],
             evidence_classification=synthesis.get('evidence_classification') or {},
             document_understanding=doc_profile.get('document_understanding') or {},
+            dynamic_tables=(dynamic_intel or {}).get('tables') or [],
+            intelligence_focus=(dynamic_intel or {}).get('intelligence_focus') or '',
         )

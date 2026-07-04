@@ -219,8 +219,8 @@ class SCOUTAgent:
         )
 
         try:
+            from services.ai_models import completion_params
             response = await self.client.chat.completions.create(
-                model=self.model,
                 messages=[
                     {'role': 'system', 'content': _SYSTEM},
                     {'role': 'user', 'content': _USER_TEMPLATE.format(
@@ -245,10 +245,9 @@ class SCOUTAgent:
                         analysis_text=analysis_text,
                     )},
                 ],
-                temperature=0.3,
-                max_tokens=5000,
                 response_format={'type': 'json_object'},
                 timeout=120.0,
+                **completion_params(self.model, 5000, temperature=0.3),
             )
             result = json.loads(response.choices[0].message.content)
             total = sum(len(v) for v in result.values() if isinstance(v, list))

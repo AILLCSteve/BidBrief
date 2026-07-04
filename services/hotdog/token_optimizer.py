@@ -66,6 +66,13 @@ class TokenOptimizer:
 
     # Model configurations - ACTUAL LIMITS (not theoretical)
     MODEL_CONFIGS = {
+        'gpt-5': ModelLimits(
+            context_window=400000,
+            max_completion_tokens_api=128000,  # includes hidden reasoning tokens
+            max_prompt_tokens=272000,
+            recommended_prompt_tokens=75000,  # keep window sizing/TPM identical to gpt-4o era
+            recommended_completion_tokens=16384  # visible-output budget; adapter adds reasoning headroom
+        ),
         'gpt-4': ModelLimits(
             context_window=8192,
             max_completion_tokens_api=8192,  # API allows up to context limit
@@ -118,7 +125,10 @@ class TokenOptimizer:
         model_lower = model_name.lower()
 
         # Check for specific models
-        if 'gpt-4o-mini' in model_lower:
+        if 'gpt-5' in model_lower or model_lower.startswith(('o1', 'o3', 'o4')):
+            limits = cls.MODEL_CONFIGS['gpt-5']
+            logger.info(f"🔍 Detected model: GPT-5 family ({model_name}, 400K context, reasoning)")
+        elif 'gpt-4o-mini' in model_lower:
             limits = cls.MODEL_CONFIGS['gpt-4o-mini']
             logger.info(f"🔍 Detected model: GPT-4o-mini (128K context)")
         elif 'gpt-4o' in model_lower:

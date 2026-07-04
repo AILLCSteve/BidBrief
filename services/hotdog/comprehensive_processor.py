@@ -159,15 +159,14 @@ OUTPUT FORMAT (JSON):
 
         try:
             self.api_calls += 1
+            from services.ai_models import completion_params
             response = await self.client.chat.completions.create(
-                model=self.model,
                 messages=[
                     {"role": "system", "content": expert.system_prompt if expert else "You are a document analysis expert."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
-                max_tokens=2000,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                **completion_params(self.model, 2000, temperature=0.3)
             )
 
             self.tokens_used += response.usage.total_tokens

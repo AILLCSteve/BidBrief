@@ -51,11 +51,16 @@ class TavilyConfig:
 
 @dataclass
 class OpenAIConfig:
-    """OpenAI API configuration."""
+    """OpenAI API configuration. Model defaults to the central standard tier."""
     api_key: str
-    model: str = "gpt-4o"
-    temperature: float = 0.1  # Low for accuracy
-    max_tokens: int = 16384  # Increased from 4096 for complete responses
+    model: str = ""  # resolved in __post_init__ so env changes apply per-instantiation
+    temperature: float = 0.1  # Low for accuracy (legacy models only; reasoning models ignore it)
+    max_tokens: int = 16384  # Desired visible output; adapter adds reasoning headroom
+
+    def __post_init__(self):
+        if not self.model:
+            from services.ai_models import standard_model
+            self.model = standard_model()
 
     @classmethod
     def from_env(cls) -> Optional['OpenAIConfig']:
@@ -65,7 +70,7 @@ class OpenAIConfig:
             return None
         return cls(
             api_key=api_key,
-            model=os.environ.get('SCRAPER_OPENAI_MODEL', 'gpt-4o')
+            model=os.environ.get('SCRAPER_OPENAI_MODEL', '')
         )
 
 
@@ -80,12 +85,72 @@ class AgentConfig:
     prompt_version: str = "1.0.0"
 
 
+# Research focus menu. Default is a general full-system sweep; the others narrow
+# the lens. The directive is appended to every agent's system prompt so the whole
+# pipeline (preflight, extraction, presentation) leans into the chosen focus.
+RESEARCH_FOCUS_PRESETS = {
+    'full_system': {
+        'label': 'Full System (default)',
+        'directive': (
+            'RESEARCH FOCUS — FULL SYSTEM: perform general full-system research across the '
+            'entire municipal organization: all utilities (water, sanitary sewer, storm, reclaimed), '
+            'public works, streets/ROW, facilities, org and governance structure, budgets/CIP, and '
+            'procurement practices. Do NOT privilege sewer/wastewater unless the data itself is '
+            'sewer-dominant; report what the municipality actually operates.'
+        ),
+    },
+    'sewer_wastewater': {
+        'label': 'Sewer / Wastewater',
+        'directive': (
+            'RESEARCH FOCUS — SEWER/WASTEWATER: sanitary sewer and wastewater systems are the '
+            'primary focus (collection, gravity mains, force mains, lift/pump stations, treatment, '
+            'CMOM/SSO history, I&I). Include other systems only where they materially affect '
+            'sewer operations.'
+        ),
+    },
+    'stormwater': {
+        'label': 'Stormwater',
+        'directive': (
+            'RESEARCH FOCUS — STORMWATER: storm drainage systems are the primary focus (storm '
+            'mains, culverts, detention/retention, outfalls, MS4 permit status, flooding history, '
+            'drainage utility fees). Include sanitary only where combined or materially related.'
+        ),
+    },
+    'water_distribution': {
+        'label': 'Water Distribution',
+        'directive': (
+            'RESEARCH FOCUS — WATER DISTRIBUTION: potable water systems are the primary focus '
+            '(source/supply, treatment, storage, distribution mains, pump stations, pressure zones, '
+            'lead service line inventories, CCR data). Include other utilities only where shared '
+            'infrastructure or governance applies.'
+        ),
+    },
+    'streets_row': {
+        'label': 'Streets / Public Works',
+        'directive': (
+            'RESEARCH FOCUS — STREETS & PUBLIC WORKS: streets, right-of-way, paving programs, '
+            'sidewalks, bridges, fleet, and general public-works operations are the primary focus. '
+            'Utilities matter mainly where they drive street cuts, moratoriums, or joint projects.'
+        ),
+    },
+}
+
+DEFAULT_RESEARCH_FOCUS = 'full_system'
+
+
+def focus_directive(focus: str) -> str:
+    """Directive text for a focus id (falls back to full_system)."""
+    preset = RESEARCH_FOCUS_PRESETS.get(focus) or RESEARCH_FOCUS_PRESETS[DEFAULT_RESEARCH_FOCUS]
+    return preset['directive']
+
+
 @dataclass
 class ScraperConfig:
     """Master configuration for CityScraper."""
     tavily: Optional[TavilyConfig]
     openai: Optional[OpenAIConfig]
     agents: AgentConfig = field(default_factory=AgentConfig)
+    research_focus: str = DEFAULT_RESEARCH_FOCUS  # key into RESEARCH_FOCUS_PRESETS
     downloads_dir: str = "scraper_downloads"
     cache_dir: str = "scraper_cache"
     session_timeout_minutes: int = 60
@@ -128,6 +193,24 @@ def reset_config():
     """Reset configuration singleton (for testing)."""
     global _config
     _config = None
+
+
+def get_config_for_tier(high_power: bool = False, research_focus: str = None) -> ScraperConfig:
+    """
+    Config resolved for a model tier + research focus. Always returns a copy when
+    anything differs from the singleton so concurrent sessions never share mutations.
+    """
+    from dataclasses import replace
+    base = get_config()
+    focus = research_focus if research_focus in RESEARCH_FOCUS_PRESETS else DEFAULT_RESEARCH_FOCUS
+    needs_model_swap = high_power and base.openai is not None
+    if not needs_model_swap and focus == base.research_focus:
+        return base
+    openai_cfg = base.openai
+    if needs_model_swap:
+        from services.ai_models import high_power_model
+        openai_cfg = replace(base.openai, model=high_power_model())
+    return replace(base, openai=openai_cfg, research_focus=focus)
 
 
 # Source hierarchy (lower index = more authoritative)

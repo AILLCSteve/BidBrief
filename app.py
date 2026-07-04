@@ -323,6 +323,12 @@ def load_authorized_users():
 AUTHORIZED_USERS = load_authorized_users()
 active_sessions = {}
 
+# Bonus Features: admin-grantable premium access for non-admin users (in-memory,
+# wiped on restart — same semantics as every other server state). Grants unlock
+# High Power model tiers, BestPrep, and CityScraper. They NEVER unlock the admin
+# session dashboard (/api/admin/sessions) or the bonus-feature admin routes.
+bonus_feature_users = set()
+
 # Log loaded users on startup
 logger.info("="*60)
 logger.info("AUTHORIZED USERS LOADED:")
@@ -385,6 +391,68 @@ def cleanup_expired_sessions():
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def _analysis_intel_evidence(legacy_result: dict, orchestrator, doc_context: str) -> str:
+    """Compose the evidence text the DynamicIntelligenceEngine reads for a
+    completed HOTDOG analysis: doc context + key details + all answered Q&A."""
+    parts = []
+    if doc_context:
+        parts.append('DOCUMENT CONTEXT (title page / TOC excerpts):\n' + doc_context[:8000])
+
+    kde = getattr(orchestrator, 'key_details_extractor', None)
+    if kde is not None and hasattr(kde, 'get_details_list'):
+        try:
+            details = kde.get_details_list() or []
+            if details:
+                lines = []
+                for d in details[:60]:
+                    if isinstance(d, dict):
+                        name = d.get('name') or d.get('label') or ''
+                        value = d.get('value') or ''
+                        quote = d.get('quote') or ''
+                        page = d.get('page') or d.get('pages') or ''
+                        line = f'- {name}: {value}'
+                        if quote:
+                            line += f' | quote: "{quote}"'
+                        if page:
+                            line += f' (p. {page})'
+                        lines.append(line)
+                    else:
+                        lines.append(f'- {d}')
+                parts.append('KEY DOCUMENT DETAILS:\n' + '\n'.join(lines))
+        except Exception:
+            pass
+
+    qa_lines = []
+    for section in legacy_result.get('sections', []):
+        for q in section.get('questions', []):
+            if q.get('answer'):
+                pages = ','.join(str(p) for p in (q.get('page_citations') or []))
+                suffix = f' (pages {pages})' if pages else ''
+                qa_lines.append(
+                    f"[{section.get('section_name', '')}] Q: {q.get('question', '')}\n"
+                    f"A: {q.get('answer', '')}{suffix}"
+                )
+    if qa_lines:
+        parts.append('ANSWERED QUESTIONS:\n\n' + '\n\n'.join(qa_lines))
+
+    return '\n\n'.join(parts)
+
+
+def _generate_analysis_dynamic_intel(legacy_result: dict, orchestrator, doc_context: str,
+                                     api_key: str, model: str, label: str) -> dict:
+    """Failure-safe dynamic intelligence pass over completed analysis results."""
+    try:
+        from services.dynamic_intelligence import DynamicIntelligenceEngine
+        evidence = _analysis_intel_evidence(legacy_result, orchestrator, doc_context)
+        if not evidence.strip():
+            return {'intelligence_focus': '', 'tables': []}
+        engine = DynamicIntelligenceEngine(api_key, model=model)
+        return engine.generate_sync(context_label=label, evidence=evidence)
+    except Exception as e:
+        logger.error(f'Dynamic intelligence generation failed: {e}')
+        return {'intelligence_focus': '', 'tables': []}
+
 
 def _transform_to_legacy_format(hotdog_output: dict) -> dict:
     """
@@ -537,6 +605,31 @@ def _current_user_info():
     if not s:
         return None, None
     return s.get('username'), s.get('role')
+
+
+def _session_has_premium(session) -> bool:
+    """Admins always have premium; other users only while an admin has granted Bonus Features."""
+    if not session:
+        return False
+    if session.get('role') == 'admin':
+        return True
+    return session.get('username') in bonus_feature_users
+
+
+def _resolve_high_power_request(requested: bool):
+    """
+    Validate a `high_power: true` request against the caller's entitlements.
+    Returns (model, error_response). Never silently downgrades: an unauthorized
+    high-power request is a 403 so the client can explain, not quietly bill less.
+    """
+    from services.ai_models import resolve_model
+    if not requested:
+        return resolve_model(False), None
+    session = check_auth_cookie()
+    if not _session_has_premium(session):
+        return None, (jsonify({'success': False,
+                               'error': 'High Power mode requires admin or Bonus Features access'}), 403)
+    return resolve_model(True), None
 
 
 def _is_authorized_for_session(session_id: str) -> bool:
@@ -769,7 +862,9 @@ def get_user_info():
         'success': True,
         'username': session.get('username', 'unknown'),
         'role': session.get('role', 'user'),
-        'is_admin': session.get('role') == 'admin'
+        'is_admin': session.get('role') == 'admin',
+        'bonus_features': session.get('username') in bonus_feature_users,
+        'premium': _session_has_premium(session)
     })
 
 
@@ -1013,6 +1108,11 @@ def analyze_document():
     enable_second_pass = data.get('enable_second_pass', False)  # Retry unanswered questions
     enable_deep_rag = data.get('enable_deep_rag', False)  # External search for remaining
     pipeline_mode = data.get('pipeline_mode', 'classic')  # 'classic' or 'v2_pipeline'
+    high_power = bool(data.get('high_power', False))  # Flagship model tier (admin/bonus only)
+
+    analysis_model, hp_error = _resolve_high_power_request(high_power)
+    if hp_error:
+        return hp_error
 
     # SECURITY: Generate cryptographically secure session ID (ignore client-provided for security)
     session_id = f"sess_{secrets.token_hex(16)}"  # 32 hex chars + prefix = unguessable
@@ -1131,7 +1231,8 @@ def analyze_document():
                 recheck_empty_windows=recheck_empty_windows,
                 enable_second_pass=enable_second_pass,
                 enable_deep_rag=enable_deep_rag,
-                use_pipeline_v2=(pipeline_mode == 'v2_pipeline')
+                use_pipeline_v2=(pipeline_mode == 'v2_pipeline'),
+                model=analysis_model
             )
 
             # Update pre-registered active_analyses entry with the now-ready orchestrator
@@ -1165,6 +1266,19 @@ def analyze_document():
                 browser_output = orchestrator.get_browser_output(result, parsed_config)
                 legacy_result = _transform_to_legacy_format(browser_output)
 
+                # Dynamic intelligence pass: sense what's prevalent in THIS document's
+                # results and build document-specific tables (failure-safe, additive)
+                progress_callback('status', {'message': 'Generating dynamic intelligence tables...'})
+                with session_lock:
+                    doc_ctx_for_intel = (active_analyses.get(session_id) or {}).get('doc_context', '')
+                dynamic_intel = _generate_analysis_dynamic_intel(
+                    legacy_result, orchestrator, doc_ctx_for_intel, openai_key, analysis_model,
+                    f'Full document analysis of {pdf_filename} (mode: {analysis_mode})')
+                legacy_result['dynamic_tables'] = dynamic_intel.get('tables', [])
+                legacy_result['intelligence_focus'] = dynamic_intel.get('intelligence_focus', '')
+                analysis_results[session_id]['dynamic_tables'] = legacy_result['dynamic_tables']
+                analysis_results[session_id]['intelligence_focus'] = legacy_result['intelligence_focus']
+
                 # Store full result in session_events so frontend can access via polling
                 progress_callback('results_ready', {
                     'result': legacy_result,
@@ -1195,6 +1309,9 @@ def analyze_document():
                             'status': 'completed',
                             # Preserve doc_context for Smart Analysis (PDF will be gone)
                             'doc_context': active_analyses[session_id].get('doc_context', ''),
+                            # Dynamic intelligence tables (served by /api/results + exports)
+                            'dynamic_tables': legacy_result.get('dynamic_tables', []),
+                            'intelligence_focus': legacy_result.get('intelligence_focus', ''),
                         }
                         del active_analyses[session_id]
                         # Update timestamp so cleanup doesn't delete recently completed analyses
@@ -1443,6 +1560,10 @@ def get_results(session_id):
         browser_output = orchestrator.get_browser_output(result, parsed_config)
         legacy_result = _transform_to_legacy_format(browser_output)
 
+        # Attach stored dynamic intelligence (generated at analysis completion)
+        legacy_result['dynamic_tables'] = session_data.get('dynamic_tables', [])
+        legacy_result['intelligence_focus'] = session_data.get('intelligence_focus', '')
+
         # Get mode for response
         mode = session_data.get('mode', 'bid_spec')
 
@@ -1494,6 +1615,10 @@ def get_results(session_id):
 
         browser_output = orchestrator.get_browser_output(result, parsed_config)
         legacy_result = _transform_to_legacy_format(browser_output)
+
+        # Attach stored dynamic intelligence (generated at analysis completion)
+        legacy_result['dynamic_tables'] = session_data.get('dynamic_tables', [])
+        legacy_result['intelligence_focus'] = session_data.get('intelligence_focus', '')
 
         mode = session_data.get('mode', 'bid_spec')
 
@@ -1805,6 +1930,14 @@ def export_excel_dashboard(session_id):
         # The Excel generator expects {'question': ..., 'answer': ..., 'page_citations': ...}
         # but browser_output has {'question_text': ..., 'primary_answer': {'text': ..., 'pages': ...}}
         legacy_result = _transform_to_legacy_format(browser_output)
+
+        # Attach dynamic intelligence tables so the Excel export includes them
+        with session_lock:
+            _sd = (completed_analyses.get(session_id)
+                   or partial_analyses.get(session_id)
+                   or active_analyses.get(session_id) or {})
+            legacy_result['dynamic_tables'] = _sd.get('dynamic_tables', [])
+            legacy_result['intelligence_focus'] = _sd.get('intelligence_focus', '')
 
         # Extract key document details if available (from KeyDocumentDetailsExtractor)
         api_key_requirements = browser_output.get('key_requirements', {})
@@ -2326,6 +2459,51 @@ def run_deep_rag_on_selected(session_id):
 # ============================================================================
 # ADMIN ENDPOINTS
 # ============================================================================
+
+@app.route('/api/admin/bonus-features', methods=['GET'])
+@require_admin
+def get_bonus_features():
+    """
+    Admin-only: list configured users and their Bonus Features grant state.
+    Exposes email/name/role only — never password hashes, never session data.
+    """
+    users = []
+    for email, data in AUTHORIZED_USERS.items():
+        users.append({
+            'email': email,
+            'name': data.get('name', ''),
+            'role': data.get('role', 'user'),
+            'bonus_features': email in bonus_feature_users,
+        })
+    return jsonify({'success': True, 'users': users})
+
+
+@app.route('/api/admin/bonus-features', methods=['POST'])
+@require_admin
+def set_bonus_features():
+    """Admin-only: grant or revoke Bonus Features for a configured user."""
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email', '') or '').strip().lower()
+    enabled = bool(data.get('enabled', False))
+
+    if not email:
+        return jsonify({'success': False, 'error': 'email is required'}), 400
+    # Tolerate env-configured emails with mixed case: store the canonical key.
+    match = next((k for k in AUTHORIZED_USERS if k.lower() == email), None)
+    if match is None:
+        return jsonify({'success': False, 'error': 'Unknown user'}), 404
+    email = match
+
+    if enabled:
+        bonus_feature_users.add(email)
+    else:
+        bonus_feature_users.discard(email)
+
+    admin_user, _ = _current_user_info()
+    audit_log('bonus_features_change', admin_user, {'target': email, 'enabled': enabled})
+    logger.info(f"Bonus Features {'granted to' if enabled else 'revoked from'} {email} by {admin_user}")
+    return jsonify({'success': True, 'email': email, 'bonus_features': email in bonus_feature_users})
+
 
 @app.route('/api/admin/sessions', methods=['GET'])
 @require_admin
@@ -2965,13 +3143,19 @@ def generate_question_set():
     if request.content_type and 'multipart' in request.content_type:
         user_input = request.form.get('user_input', '').strip()
         uploaded_file = request.files.get('file')
+        high_power = request.form.get('high_power', '').strip().lower() in ('true', '1', 'yes')
     else:
         data = request.get_json() or {}
         user_input = data.get('user_input', '').strip()
         uploaded_file = None
+        high_power = bool(data.get('high_power', False))
 
     if not user_input:
         return jsonify({'success': False, 'error': 'user_input is required'}), 400
+
+    gen_model, hp_error = _resolve_high_power_request(high_power)
+    if hp_error:
+        return hp_error
 
     # Extract document context if a file was provided
     doc_context = ''
@@ -3047,19 +3231,21 @@ def generate_question_set():
     )
 
     try:
+        from services.ai_models import chat_payload, default_effort
         resp = http_requests.post(
             'https://api.openai.com/v1/chat/completions',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-            json={
-                'model': 'gpt-4o',
-                'messages': [
+            json=chat_payload(
+                gen_model,
+                [
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': user_input}
                 ],
-                'temperature': 0.3,
-                'max_tokens': 6000
-            },
-            timeout=90
+                max_output_tokens=6000,
+                temperature=0.3,
+                reasoning_effort=default_effort(high_power),
+            ),
+            timeout=180 if high_power else 120
         )
         resp.raise_for_status()
         raw = resp.json()['choices'][0]['message']['content'].strip()
@@ -3109,9 +3295,14 @@ def generate_additional_questions():
     data = request.get_json()
     user_input = (data or {}).get('user_input', '').strip()
     existing_sections = (data or {}).get('existing_sections', [])
+    high_power = bool((data or {}).get('high_power', False))
 
     if not user_input:
         return jsonify({'success': False, 'error': 'user_input is required'}), 400
+
+    gen_model, hp_error = _resolve_high_power_request(high_power)
+    if hp_error:
+        return hp_error
 
     existing_summary = ', '.join(s.get('section_name', '') for s in existing_sections) if existing_sections else 'none'
     existing_q_texts = [q.get('text', '') for s in existing_sections for q in s.get('questions', [])]
@@ -3145,19 +3336,21 @@ def generate_additional_questions():
     )
 
     try:
+        from services.ai_models import chat_payload, default_effort
         resp = http_requests.post(
             'https://api.openai.com/v1/chat/completions',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-            json={
-                'model': 'gpt-4o',
-                'messages': [
+            json=chat_payload(
+                gen_model,
+                [
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': f"Original context:\n{user_input}\n\nAlready have these questions:\n" + '\n'.join(f'- {q}' for q in existing_q_texts)}
                 ],
-                'temperature': 0.5,
-                'max_tokens': 3000
-            },
-            timeout=60
+                max_output_tokens=3000,
+                temperature=0.5,
+                reasoning_effort=default_effort(high_power),
+            ),
+            timeout=150 if high_power else 90
         )
         resp.raise_for_status()
         raw = resp.json()['choices'][0]['message']['content'].strip()
@@ -3302,7 +3495,8 @@ except ImportError as e:
 
 def _check_scraper_admin():
     """
-    Check if current request has admin access for CityScraper endpoints.
+    Check if current request may use CityScraper endpoints: admin role OR an
+    admin-granted Bonus Features flag. (Name kept for existing call sites.)
     Returns (user_data, None) on success, or (None, error_response) on failure.
     """
     auth_header = request.headers.get('Authorization', '')
@@ -3313,16 +3507,16 @@ def _check_scraper_admin():
         if session_token not in active_sessions:
             return None, (jsonify({'error': 'Invalid session'}), 401)
         user_data = active_sessions[session_token]
-        if user_data.get('role') != 'admin':
-            return None, (jsonify({'error': 'Admin access required'}), 403)
+        if not _session_has_premium(user_data):
+            return None, (jsonify({'error': 'Admin or Bonus Features access required'}), 403)
         return user_data, None
 
     # Try cookie auth (browser requests)
     session = check_auth_cookie()
     if not session:
         return None, (jsonify({'error': 'Authentication required'}), 401)
-    if session.get('role') != 'admin':
-        return None, (jsonify({'error': 'Admin access required'}), 403)
+    if not _session_has_premium(session):
+        return None, (jsonify({'error': 'Admin or Bonus Features access required'}), 403)
     return session, None
 
 
@@ -3383,6 +3577,8 @@ def start_scraper_research():
         data = request.get_json() or {}
         municipality = data.get('municipality', '').strip()
         table_mode = data.get('table_mode', False)
+        high_power = bool(data.get('high_power', False))
+        research_focus = str(data.get('research_focus') or 'full_system').strip().lower()
 
         if not municipality:
             return jsonify({'error': 'Municipality name is required'}), 400
@@ -3399,6 +3595,7 @@ def start_scraper_research():
                 'status': 'initializing',
                 'municipality': municipality,
                 'table_mode': table_mode,
+                'high_power': high_power,
                 'started_at': datetime.now().isoformat(),
                 'user': user_data.get('username', 'unknown')
             }
@@ -3427,8 +3624,10 @@ def start_scraper_research():
                                 event_data['data_update'] = event.data_update
                             cityscraper_events[session_id].append(event_data)
 
-                # Create orchestrator with event callback
+                # Create orchestrator with event callback (config carries tier + focus)
+                from services.scraper.config import get_config_for_tier
                 orchestrator = StandaloneResearchOrchestrator(
+                    config=get_config_for_tier(high_power, research_focus),
                     event_callback=on_event
                 )
 
@@ -3570,6 +3769,13 @@ def start_scraper_preflight():
     data = request.get_json() or {}
     municipality = (data.get('municipality') or '').strip()
     table_mode = data.get('table_mode', 'systems_info')
+    high_power = bool(data.get('high_power', False))
+    research_focus = str(data.get('research_focus') or 'full_system').strip().lower()
+
+    from services.scraper.config import RESEARCH_FOCUS_PRESETS
+    if research_focus not in RESEARCH_FOCUS_PRESETS:
+        return jsonify({'success': False,
+                        'error': f"research_focus must be one of {sorted(RESEARCH_FOCUS_PRESETS)}"}), 400
 
     if not municipality:
         return jsonify({'success': False, 'error': 'Municipality name is required'}), 400
@@ -3579,7 +3785,8 @@ def start_scraper_preflight():
     table_mode = table_mode.strip().lower()
 
     session_id = f"scraper_{secrets.token_hex(8)}"
-    logger.info(f"Starting CityScraper pre-flight: {session_id} for '{municipality}' ({table_mode})")
+    logger.info(f"Starting CityScraper pre-flight: {session_id} for '{municipality}' ({table_mode}, "
+                f"tier={'high_power' if high_power else 'standard'})")
 
     with session_lock:
         cityscraper_sessions[session_id] = {
@@ -3588,6 +3795,8 @@ def start_scraper_preflight():
             'stage': 'preflight',
             'municipality': municipality,
             'table_mode': table_mode,
+            'high_power': high_power,
+            'research_focus': research_focus,
             'started_at': datetime.now().isoformat(),
             'user': user_data.get('username', 'unknown')
         }
@@ -3601,7 +3810,10 @@ def start_scraper_preflight():
             from services.scraper.orchestrators.preflight import PreflightOrchestrator
             from services.scraper.models import PreflightStatus
 
-            orchestrator = PreflightOrchestrator(event_callback=_scraper_event_recorder(session_id))
+            from services.scraper.config import get_config_for_tier
+            orchestrator = PreflightOrchestrator(
+                config=get_config_for_tier(high_power, research_focus),
+                event_callback=_scraper_event_recorder(session_id))
             with session_lock:
                 if session_id in cityscraper_sessions and hasattr(orchestrator, 'cancel'):
                     cityscraper_sessions[session_id]['orchestrator'] = orchestrator
@@ -3676,6 +3888,8 @@ def start_scraper_extraction(session_id):
                             'error': f"Session is not awaiting extraction (status: {s.get('status')})"}), 409
         preflight_result = s['preflight_obj']
         table_mode = s.get('table_mode', 'systems_info')
+        high_power = bool(s.get('high_power', False))  # tier chosen at preflight carries through
+        research_focus = s.get('research_focus', 'full_system')
         preflight_payload = (cityscraper_results.get(session_id) or {}).get('preflight_report')
         s['status'] = 'extracting'
         s['stage'] = 'extraction'
@@ -3692,7 +3906,10 @@ def start_scraper_extraction(session_id):
             mode_enum = (TableMode.MUNICIPAL_PUBLIC_BIDS if table_mode == 'public_bids'
                          else TableMode.MUNICIPAL_SYSTEMS_INFO)
 
-            orchestrator = ExtractionOrchestrator(event_callback=_scraper_event_recorder(session_id))
+            from services.scraper.config import get_config_for_tier
+            orchestrator = ExtractionOrchestrator(
+                config=get_config_for_tier(high_power, research_focus),
+                event_callback=_scraper_event_recorder(session_id))
             with session_lock:
                 if session_id in cityscraper_sessions and hasattr(orchestrator, 'cancel'):
                     cityscraper_sessions[session_id]['orchestrator'] = orchestrator
@@ -3714,6 +3931,31 @@ def start_scraper_extraction(session_id):
             rows_serialized = [_json_safe(asdict(r)) if is_dataclass(r) else _json_safe(r) for r in rows]
             mun = preflight_result.municipality
 
+            # Dynamic intelligence pass over the extracted dataset: sense what is
+            # prevalent/interesting for THIS municipality + focus and build tables
+            # beyond the fixed guardrailed schema (failure-safe, additive).
+            dynamic_intel = {'intelligence_focus': '', 'tables': []}
+            try:
+                from services.dynamic_intelligence import DynamicIntelligenceEngine
+                from services.scraper.config import focus_directive
+                from services.ai_models import resolve_model
+                gaps_txt = ', '.join(str(g) for g in (result.data_gaps or [])[:10])
+                evidence = (
+                    f'MUNICIPALITY: {getattr(mun, "full_name", "")}\n\n'
+                    f'GUARDRAILED {table_mode.upper()} TABLE:\n{table_markdown}\n\n'
+                    f'STATISTICS: sources={result.total_sources_searched}, '
+                    f'data_points={result.total_data_points_extracted}\n'
+                    f'DATA GAPS: {gaps_txt or "(none)"}'
+                )
+                engine = DynamicIntelligenceEngine(
+                    os.getenv('OPENAI_API_KEY', ''), model=resolve_model(high_power))
+                dynamic_intel = engine.generate_sync(
+                    context_label=f'CityScraper municipal research ({table_mode})',
+                    evidence=evidence,
+                    focus_note=focus_directive(research_focus))
+            except Exception as _di_err:
+                logger.warning(f'CityScraper dynamic intelligence failed: {_di_err}')
+
             with session_lock:
                 if session_id in cityscraper_sessions:
                     cityscraper_sessions[session_id]['extraction_obj'] = result  # for exports
@@ -3721,6 +3963,9 @@ def start_scraper_extraction(session_id):
                     cityscraper_results[session_id] = {
                         'stage': 'extraction',
                         'table_mode': table_mode,
+                        'research_focus': research_focus,
+                        'dynamic_tables': dynamic_intel.get('tables', []),
+                        'intelligence_focus': dynamic_intel.get('intelligence_focus', ''),
                         'municipality': {
                             'city': getattr(mun, 'city', None),
                             'state': getattr(mun, 'state', None),
@@ -3762,8 +4007,18 @@ _SCRAPER_COMMS_RULES = (
     "confidently and naturally.\n"
     "UNKNOWNS: never invent. Convert 'Not found' fields into confident, strategically placed "
     "questions we will ask.\n"
-    "Sanitary sewer is primary; include storm only where the dataset shows storm assets/data.\n"
 )
+
+# Focus-conditional primary-system line for the comms engine (legacy behavior was
+# always sewer-primary; now it follows the session's research focus).
+_SCRAPER_COMMS_FOCUS_LINES = {
+    'full_system': "Address the municipality's full system as the dataset presents it — lead with "
+                   "whatever assets dominate the data; do not assume sewer is primary.\n",
+    'sewer_wastewater': "Sanitary sewer is primary; include storm only where the dataset shows storm assets/data.\n",
+    'stormwater': "Storm drainage is primary; include sanitary only where the dataset shows combined or related assets.\n",
+    'water_distribution': "Potable water distribution is primary; include other utilities only where the dataset ties them in.\n",
+    'streets_row': "Streets/public-works operations are primary; utilities matter where they intersect ROW work.\n",
+}
 
 _SCRAPER_COMMS_TASKS = {
     'exploratory_proposal': (
@@ -3866,6 +4121,8 @@ def scraper_comms(session_id):
         table_markdown = result.get('table_markdown')
         table_mode = result.get('table_mode', 'systems_info')
         municipality = result.get('municipality') or {}
+        high_power = bool(cityscraper_sessions[session_id].get('high_power', False))
+        comms_focus = cityscraper_sessions[session_id].get('research_focus', 'sewer_wastewater')
 
     if not table_markdown:
         return jsonify({'success': False, 'error': 'No completed table for this session — run extraction first'}), 409
@@ -3884,9 +4141,10 @@ def scraper_comms(session_id):
     sender_context = ("\n".join(sender_bits)) if sender_bits else "No sender details provided — use clean placeholders."
 
     dataset_label = 'Public Bid Table' if table_mode == 'public_bids' else 'System Info Table'
+    focus_line = _SCRAPER_COMMS_FOCUS_LINES.get(comms_focus, _SCRAPER_COMMS_FOCUS_LINES['sewer_wastewater'])
     system_prompt = (
-        "You are the BidBrief Municipal Communications Engine (sanitary-sewer-primary).\n\n"
-        + _SCRAPER_COMMS_RULES + "\n" + _SCRAPER_COMMS_TASKS[task]
+        "You are the BidBrief Municipal Communications Engine.\n\n"
+        + _SCRAPER_COMMS_RULES + focus_line + "\n" + _SCRAPER_COMMS_TASKS[task]
     )
     user_prompt = (
         f"Dataset Type: {dataset_label}\n"
@@ -3897,19 +4155,21 @@ def scraper_comms(session_id):
 
     try:
         import requests as http_requests
+        from services.ai_models import chat_payload, default_effort, resolve_model
         resp = http_requests.post(
             'https://api.openai.com/v1/chat/completions',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-            json={
-                'model': 'gpt-4o',
-                'messages': [
+            json=chat_payload(
+                resolve_model(high_power),
+                [
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': user_prompt}
                 ],
-                'temperature': 0.6,
-                'max_tokens': 4000
-            },
-            timeout=120
+                max_output_tokens=4000,
+                temperature=0.6,
+                reasoning_effort=default_effort(high_power),
+            ),
+            timeout=150
         )
         resp.raise_for_status()
         output = resp.json()['choices'][0]['message']['content'].strip()
@@ -4431,14 +4691,20 @@ def analyze_bid():
 
 @app.route('/api/scraper/sessions', methods=['GET'])
 def list_scraper_sessions():
-    """List all CityScraper sessions (admin only)."""
+    """List CityScraper sessions. Admins see all; Bonus Features users see ONLY
+    their own (bonus access must never reveal other users' working sessions)."""
     user_data, error = _check_scraper_admin()
     if error:
         return error
 
+    is_true_admin = user_data.get('role') == 'admin'
+    own_username = user_data.get('username')
+
     with session_lock:
         sessions = []
         for session_id, session_data in cityscraper_sessions.items():
+            if not is_true_admin and session_data.get('user') != own_username:
+                continue
             session_info = {
                 'session_id': session_id,
                 'status': session_data.get('status'),
@@ -4471,6 +4737,9 @@ def delete_scraper_session(session_id):
 
         # Cancel if running
         session_data = cityscraper_sessions[session_id]
+        # Bonus users may only delete their own sessions
+        if user_data.get('role') != 'admin' and session_data.get('user') != user_data.get('username'):
+            return jsonify({'error': 'Not your session'}), 403
         if session_data['status'] in ('initializing', 'running'):
             orchestrator = session_data.get('orchestrator')
             if orchestrator and hasattr(orchestrator, 'cancel'):
@@ -4569,6 +4838,37 @@ def export_scraper_excel(session_id):
         }), 500
 
 
+def _dynamic_tables_markdown(result: dict) -> str:
+    """Render a result's dynamic intelligence tables as appended markdown sections."""
+    tables = result.get('dynamic_tables') or []
+    if not tables:
+        return ''
+    parts = ['\n\n---\n\n# Dynamic Intelligence\n']
+    focus = result.get('intelligence_focus') or ''
+    if focus:
+        parts.append(f'_{focus}_\n')
+    for t in tables:
+        columns = t.get('columns') or []
+        if not columns:
+            continue
+        parts.append(f"\n## {t.get('title', 'Table')}\n")
+        why = t.get('why_relevant') or ''
+        if why:
+            parts.append(f'_{why}_\n')
+        header = '| ' + ' | '.join(c.get('label', c.get('key', '')) for c in columns) + ' |'
+        divider = '|' + '|'.join([' --- '] * len(columns)) + '|'
+        parts.append(header)
+        parts.append(divider)
+        for r in t.get('rows') or []:
+            cells = [str(r.get(c.get('key', ''), '')).replace('|', '\\|').replace('\n', ' ')
+                     for c in columns]
+            parts.append('| ' + ' | '.join(cells) + ' |')
+        for insight in t.get('insights') or []:
+            parts.append(f'\n> 💡 {insight}')
+        parts.append('')
+    return '\n'.join(parts)
+
+
 @app.route('/api/scraper/export/markdown/<session_id>', methods=['GET'])
 def export_scraper_markdown(session_id):
     """Export CityScraper results as Markdown tables.
@@ -4593,7 +4893,8 @@ def export_scraper_markdown(session_id):
         city = municipality.get('city') or 'Unknown'
         state = municipality.get('state') or 'XX'
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        response = make_response(result['table_markdown'])
+        content = result['table_markdown'] + _dynamic_tables_markdown(result)
+        response = make_response(content)
         response.headers['Content-Type'] = 'text/markdown; charset=utf-8'
         response.headers['Content-Disposition'] = f'attachment; filename="CityScraper_{city}_{state}_{timestamp}.md"'
         return response
@@ -4760,6 +5061,11 @@ def run_smart_analysis(session_id: str):
     body = request.get_json(silent=True) or {}
     user_input = str(body.get('user_input', '') or '').strip()
     force_refresh = bool(body.get('force_refresh', False))
+    high_power = bool(body.get('high_power', False))
+
+    sa_model, hp_error = _resolve_high_power_request(high_power)
+    if hp_error:
+        return hp_error
 
     # Return cached result unless force_refresh requested
     if not force_refresh and session_id in smart_analysis_results:
@@ -4795,8 +5101,9 @@ def run_smart_analysis(session_id: str):
         return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 503
 
     try:
+        from services.ai_models import model_tier
         from services.smart_analysis.orchestrator import SmartAnalysisOrchestrator
-        orchestrator = SmartAnalysisOrchestrator(api_key=api_key)
+        orchestrator = SmartAnalysisOrchestrator(api_key=api_key, model=sa_model)
         result = orchestrator.run(
             session_id=session_id,
             analysis_data=analysis_data,
@@ -4805,8 +5112,8 @@ def run_smart_analysis(session_id: str):
         )
         smart_analysis_results[session_id] = result
         session_timestamps[session_id] = datetime.now()
-        audit_log('smart_analysis_run', username, {'session_id': session_id})
-        return jsonify({'success': True, 'result': result.to_dict()})
+        audit_log('smart_analysis_run', username, {'session_id': session_id, 'tier': model_tier(sa_model)})
+        return jsonify({'success': True, 'result': result.to_dict(), 'model_tier': model_tier(sa_model)})
 
     except Exception as e:
         logger.error(f'[SmartAnalysis] Failed for {session_id}: {e}', exc_info=True)

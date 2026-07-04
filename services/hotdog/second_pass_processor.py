@@ -251,14 +251,15 @@ class SecondPassProcessor:
 
             # Call OpenAI with enhanced parameters for second pass
             try:
+                from services.ai_models import completion_params
                 response = await self.openai_client.chat.completions.create(
-                    model=self.model,
                     messages=[
                         {"role": "system", "content": enhanced_system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    temperature=0.7,  # Higher temperature for creative inference on difficult questions
-                    max_tokens=self.max_completion_tokens  # Use full API limit for thorough answers
+                    # medium effort: second pass is the "look harder" stage
+                    **completion_params(self.model, self.max_completion_tokens,
+                                        temperature=0.7, reasoning_effort='medium')
                 )
             except Exception as api_error:
                 logger.error(f"OpenAI API call failed in second pass: {type(api_error).__name__}: {str(api_error)}")

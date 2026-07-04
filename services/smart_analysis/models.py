@@ -64,6 +64,11 @@ class SmartAnalysisResult:
     # v3: holistic document understanding (overview, workstreams, constraints, obligations)
     document_understanding: Dict[str, Any] = field(default_factory=dict)
 
+    # v4: dynamic intelligence — document-specific tables chosen and built by the
+    # DynamicIntelligenceEngine (shape varies per document by design)
+    dynamic_tables: List[Dict[str, Any]] = field(default_factory=list)
+    intelligence_focus: str = ''
+
     def to_dict(self) -> dict:
         def _item_dict(item: SmartAnalysisItem) -> dict:
             d = vars(item).copy()
@@ -88,4 +93,6 @@ class SmartAnalysisResult:
             'user_question_responses': self.user_question_responses,
             'evidence_classification': self.evidence_classification,
             'document_understanding': self.document_understanding,
+            'dynamic_tables': self.dynamic_tables,
+            'intelligence_focus': self.intelligence_focus,
         }

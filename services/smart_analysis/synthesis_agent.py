@@ -300,8 +300,8 @@ class SynthesisAgent:
         user_resp_list = user_responses.get('responses', [])
 
         try:
+            from services.ai_models import completion_params
             response = await self.client.chat.completions.create(
-                model=self.model,
                 messages=[
                     {'role': 'system', 'content': _SYSTEM},
                     {'role': 'user', 'content': _USER_TEMPLATE.format(
@@ -337,10 +337,9 @@ class SynthesisAgent:
                         ),
                     )},
                 ],
-                temperature=0.2,
-                max_tokens=8000,
                 response_format={'type': 'json_object'},
                 timeout=180.0,
+                **completion_params(self.model, 8000, temperature=0.2),
             )
             result = json.loads(response.choices[0].message.content)
             logger.info('[Synthesis] Complete')

@@ -81,7 +81,8 @@ class HotdogOrchestrator:
         recheck_empty_windows: bool = False,
         use_pipeline_v2: bool = False,
         enable_second_pass: bool = False,
-        enable_deep_rag: bool = False
+        enable_deep_rag: bool = False,
+        model: Optional[str] = None
     ):
         """
         Initialize the HOTDOG orchestrator.
@@ -115,7 +116,8 @@ class HotdogOrchestrator:
         self.enable_deep_rag = enable_deep_rag
 
         # Detect model limits using TokenOptimizer
-        self.model = "gpt-4o"  # Most robust available model
+        from services.ai_models import standard_model
+        self.model = model or standard_model()  # Central tier registry (High Power passes gpt-5.5)
         model_limits = TokenOptimizer.detect_model_limits(self.model)
 
         # Initialize all layers with optimized token limits

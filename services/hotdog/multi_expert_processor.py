@@ -213,15 +213,14 @@ class MultiExpertProcessor:
         # Execute AI call with optimized token limits
         try:
             try:
+                from services.ai_models import completion_params
                 response = await self.client.chat.completions.create(
-                    model=self.model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.3,  # Low temperature for thorough, consistent extraction
-                    max_tokens=self.max_completion_tokens,  # API enforced limit
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    **completion_params(self.model, self.max_completion_tokens, temperature=0.3)
                 )
             except Exception as api_error:
                 logger.error(f"OpenAI API call failed for expert '{expert.name}': {type(api_error).__name__}: {str(api_error)}")
