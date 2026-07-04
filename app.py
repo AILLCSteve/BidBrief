@@ -3454,6 +3454,15 @@ def start_scraper_research():
                             cityscraper_sessions[session_id]['status'] = 'completed'
                             logger.info(f"CityScraper research completed: {session_id}")
                         cityscraper_results[session_id] = result
+                        # Keep the real ExtractionResult object for exports —
+                        # the serialized result only carries row COUNTS, which
+                        # is why exports produced nothing.
+                        try:
+                            extraction_stage = orchestrator.stage_results.get('extraction', {})
+                            if extraction_stage.get('result') is not None:
+                                cityscraper_sessions[session_id]['extraction_obj'] = extraction_stage['result']
+                        except Exception as keep_error:
+                            logger.warning(f"Could not retain extraction object for exports: {keep_error}")
 
             except Exception as e:
                 logger.error(f"CityScraper research failed: {session_id} - {e}", exc_info=True)
@@ -3504,6 +3513,410 @@ def get_scraper_research(session_id):
     })
 
 
+# ---------------------------------------------------------------------------
+# GATED RESEARCH FLOW (preflight -> user confirmation -> extraction -> table)
+# Mirrors the proven customGPT flow: run the deterministic pre-flight gate
+# first, show the report, and only extract after the user confirms. The final
+# output is ALWAYS the single guardrailed table for the selected table mode.
+# ---------------------------------------------------------------------------
+
+def _scraper_event_recorder(session_id):
+    """Create an event callback that appends agent activity to the session feed."""
+    def on_event(event):
+        with session_lock:
+            if session_id in cityscraper_events:
+                event_data = {
+                    'agent_id': getattr(event, 'agent_id', 'SYS'),
+                    'agent_name': getattr(event, 'agent_name', 'System'),
+                    'status': getattr(event, 'status', 'processing'),
+                    'message': getattr(event, 'message', ''),
+                    'timestamp': datetime.now().isoformat()
+                }
+                if hasattr(event, 'data_update') and event.data_update is not None:
+                    event_data['data_update'] = event.data_update
+                cityscraper_events[session_id].append(event_data)
+    return on_event
+
+
+def _json_safe(value):
+    """Round-trip through json to normalize datetimes/enums for storage."""
+    return json.loads(json.dumps(value, default=str))
+
+
+@app.route('/api/scraper/preflight', methods=['POST'])
+def start_scraper_preflight():
+    """
+    Gated flow step 1: run ONLY the pre-flight validation (PF-1..PF-5).
+
+    Request body:
+    {
+        "municipality": "Round Rock, TX",
+        "table_mode": "systems_info" | "public_bids"
+    }
+
+    Session status becomes 'preflight_complete' when the report is ready —
+    the client then shows the report and asks the user before extraction.
+    """
+    user_data, error = _check_scraper_admin()
+    if error:
+        return error
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    data = request.get_json() or {}
+    municipality = (data.get('municipality') or '').strip()
+    table_mode = data.get('table_mode', 'systems_info')
+
+    if not municipality:
+        return jsonify({'success': False, 'error': 'Municipality name is required'}), 400
+    if not isinstance(table_mode, str) or table_mode.strip().lower() not in ('systems_info', 'public_bids'):
+        return jsonify({'success': False,
+                        'error': "table_mode must be 'systems_info' or 'public_bids' (single table per run)"}), 400
+    table_mode = table_mode.strip().lower()
+
+    session_id = f"scraper_{secrets.token_hex(8)}"
+    logger.info(f"Starting CityScraper pre-flight: {session_id} for '{municipality}' ({table_mode})")
+
+    with session_lock:
+        cityscraper_sessions[session_id] = {
+            'orchestrator': None,
+            'status': 'preflight_running',
+            'stage': 'preflight',
+            'municipality': municipality,
+            'table_mode': table_mode,
+            'started_at': datetime.now().isoformat(),
+            'user': user_data.get('username', 'unknown')
+        }
+        cityscraper_events[session_id] = []
+        cityscraper_results[session_id] = None
+
+    def run_preflight():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            from services.scraper.orchestrators.preflight import PreflightOrchestrator
+            from services.scraper.models import PreflightStatus
+
+            orchestrator = PreflightOrchestrator(event_callback=_scraper_event_recorder(session_id))
+            with session_lock:
+                if session_id in cityscraper_sessions and hasattr(orchestrator, 'cancel'):
+                    cityscraper_sessions[session_id]['orchestrator'] = orchestrator
+
+            display = 'Municipal Public Bids' if table_mode == 'public_bids' else 'Municipal Systems Information'
+            result = loop.run_until_complete(orchestrator.run(
+                municipality_input=municipality,
+                table_mode=display
+            ))
+
+            report = StandaloneResearchOrchestrator()._serialize_preflight_result(result)
+            mun = result.municipality
+            with session_lock:
+                if session_id in cityscraper_sessions:
+                    s = cityscraper_sessions[session_id]
+                    s['preflight_obj'] = result  # kept for the extraction step
+                    cityscraper_results[session_id] = {
+                        'stage': 'preflight',
+                        'table_mode': table_mode,
+                        'readiness': result.status.value if result.status else 'UNKNOWN',
+                        'municipality': {
+                            'city': getattr(mun, 'city', None),
+                            'state': getattr(mun, 'state', None),
+                            'county': getattr(mun, 'county', None),
+                            'full_name': getattr(mun, 'full_name', municipality),
+                        } if mun else {'full_name': municipality},
+                        'preflight_report': _json_safe(report),
+                    }
+                    if result.status == PreflightStatus.FAIL:
+                        s['status'] = 'failed'
+                        gaps = (result.gaps or [])[:3]
+                        s['error'] = 'Pre-flight failed' + (': ' + '; '.join(gaps) if gaps else '')
+                    else:
+                        s['status'] = 'preflight_complete'
+                        logger.info(f"CityScraper pre-flight complete: {session_id} ({result.status.value})")
+        except Exception as e:
+            logger.error(f"CityScraper pre-flight failed: {session_id} - {e}", exc_info=True)
+            with session_lock:
+                if session_id in cityscraper_sessions:
+                    cityscraper_sessions[session_id]['status'] = 'failed'
+                    cityscraper_sessions[session_id]['error'] = str(e)
+        finally:
+            loop.close()
+
+    threading.Thread(target=run_preflight, daemon=True).start()
+
+    return jsonify({
+        'success': True,
+        'session_id': session_id,
+        'message': f'Pre-flight started for {municipality}'
+    })
+
+
+@app.route('/api/scraper/extract/<session_id>', methods=['POST'])
+def start_scraper_extraction(session_id):
+    """
+    Gated flow step 2: after the user confirms the pre-flight report, run the
+    extraction agents and produce the single guardrailed markdown table.
+
+    Auth: session_id acts as the bearer token (same model as other scraper routes).
+    """
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    with session_lock:
+        s = cityscraper_sessions.get(session_id)
+        if not s:
+            return jsonify({'error': 'Session not found'}), 404
+        if s.get('status') != 'preflight_complete' or 'preflight_obj' not in s:
+            return jsonify({'success': False,
+                            'error': f"Session is not awaiting extraction (status: {s.get('status')})"}), 409
+        preflight_result = s['preflight_obj']
+        table_mode = s.get('table_mode', 'systems_info')
+        preflight_payload = (cityscraper_results.get(session_id) or {}).get('preflight_report')
+        s['status'] = 'extracting'
+        s['stage'] = 'extraction'
+
+    def run_extraction():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            from dataclasses import asdict, is_dataclass
+            from services.scraper.orchestrators.extraction import ExtractionOrchestrator
+            from services.scraper.agents.presentation import TableFormatterAgent
+            from services.scraper.models import TableMode
+
+            mode_enum = (TableMode.MUNICIPAL_PUBLIC_BIDS if table_mode == 'public_bids'
+                         else TableMode.MUNICIPAL_SYSTEMS_INFO)
+
+            orchestrator = ExtractionOrchestrator(event_callback=_scraper_event_recorder(session_id))
+            with session_lock:
+                if session_id in cityscraper_sessions and hasattr(orchestrator, 'cancel'):
+                    cityscraper_sessions[session_id]['orchestrator'] = orchestrator
+
+            result = loop.run_until_complete(orchestrator.run(
+                municipality=preflight_result.municipality,
+                table_mode=mode_enum,
+                preflight_result=preflight_result
+            ))
+
+            formatter = TableFormatterAgent()
+            if table_mode == 'public_bids':
+                rows = result.public_bid_rows
+                table_markdown = formatter.format_public_bids_table(rows)
+            else:
+                rows = result.systems_info_rows
+                table_markdown = formatter.format_systems_info_table(rows)
+
+            rows_serialized = [_json_safe(asdict(r)) if is_dataclass(r) else _json_safe(r) for r in rows]
+            mun = preflight_result.municipality
+
+            with session_lock:
+                if session_id in cityscraper_sessions:
+                    cityscraper_sessions[session_id]['extraction_obj'] = result  # for exports
+                    cityscraper_sessions[session_id]['status'] = 'completed'
+                    cityscraper_results[session_id] = {
+                        'stage': 'extraction',
+                        'table_mode': table_mode,
+                        'municipality': {
+                            'city': getattr(mun, 'city', None),
+                            'state': getattr(mun, 'state', None),
+                            'full_name': getattr(mun, 'full_name', None),
+                        },
+                        'preflight_report': preflight_payload,
+                        'table_markdown': table_markdown,
+                        'rows': rows_serialized,
+                        'statistics': {
+                            'sources_found': result.total_sources_searched,
+                            'data_points': result.total_data_points_extracted,
+                            'data_gaps': _json_safe(result.data_gaps),
+                            'conflicts': _json_safe(result.conflicts_detected),
+                        },
+                    }
+                    logger.info(f"CityScraper extraction completed: {session_id} ({len(rows)} rows)")
+        except Exception as e:
+            logger.error(f"CityScraper extraction failed: {session_id} - {e}", exc_info=True)
+            with session_lock:
+                if session_id in cityscraper_sessions:
+                    cityscraper_sessions[session_id]['status'] = 'failed'
+                    cityscraper_sessions[session_id]['error'] = str(e)
+        finally:
+            loop.close()
+
+    threading.Thread(target=run_extraction, daemon=True).start()
+
+    return jsonify({'success': True, 'session_id': session_id, 'message': 'Extraction started'})
+
+
+# Distilled from the proven customGPT comms.md instruction set (MODE A/B).
+_SCRAPER_COMMS_RULES = (
+    "GLOBAL TONE: overwhelmingly confident, collaborative. No hedging ('If you like', "
+    "'You might consider'). Vary sentence openings; use 'we can/we will' only at decision "
+    "points and calls-to-action.\n"
+    "SOURCE-DISCLOSURE PROHIBITION (outward-facing): never cite where system data came from — "
+    "no URLs, no 'according to', never 'your city site says'. Still use the dataset's specific "
+    "numbers (miles/feet, pipe sizes, asset counts, ages, pump stations, practices, incidents) "
+    "confidently and naturally.\n"
+    "UNKNOWNS: never invent. Convert 'Not found' fields into confident, strategically placed "
+    "questions we will ask.\n"
+    "Sanitary sewer is primary; include storm only where the dataset shows storm assets/data.\n"
+)
+
+_SCRAPER_COMMS_TASKS = {
+    'exploratory_proposal': (
+        "TASK: ONE exploratory proposal email per responsible jurisdiction in the dataset "
+        "(if sewer and storm are owned by different agencies, one tailored email each — never "
+        "mention assets outside that agency's scope).\n"
+        "Persona: business communications expert in wet utility infrastructure and municipal "
+        "agency relations.\n"
+        "FORM per email: 'Subject line (3 options)', then the body, then a signature using the "
+        "provided company/sender/title (placeholders for phone/email if not provided).\n"
+        "BODY RULES (mandatory): max 200 words. Simple sincere greeting ('Good morning,' is "
+        "enough). No cheesy intro lines ('I support sewer systems by providing...') — just "
+        "'Hi, I'm <name> from <company>. I've been looking at your system...'. Then a casual "
+        "demonstrative paragraph referencing dataset specifics conversationally (not like "
+        "reading a sheet of numbers), ending with any recent (current/previous year) overflow/"
+        "stoppage/complaint findings mentioned gently. Then transition ('So, I was thinking I'd "
+        "like to know a little more.') into 4-5 calibrated questions (never 'why' questions, "
+        "never yes/no), each separated by white space, with one or two short empathetic "
+        "statements sprinkled between ('Usually there's only so much time, and you can only do "
+        "so much.'). Questions must cover: hard-to-reach segments (easements/steep grades/dead "
+        "ends), realistic annual cleaning coverage ('how much of the X miles is realistically "
+        "touched per year?'), lift/pump stations (grit, wet-weather sensitivity, cadence), "
+        "system emergencies (repeat stoppages, overflow posture), and current contractor "
+        "satisfaction ('How are the current contractor relationships working out for you in "
+        "terms of performance and satisfaction?').\n"
+        "MANDATORY CLOSER (verbatim or an extremely close variant):\n"
+        "'Obviously, you guys are doing an amazing job on a massive undertaking, but it sounds "
+        "like there's something we can do for you here. I mean, are we completely crazy to think "
+        "it might be nice to have even just a little help on all of this?\n\nGive me call, I'd "
+        "like to know more.\n\nOr better yet, if there's a good number for someone I can call "
+        "about this I'll go ahead and follow up with them.\n\nThanks,'"
+    ),
+    'standard_proposal': (
+        "TASK: THREE substantially different sewer maintenance/cleaning proposal email drafts "
+        "(plus TWO more integrating storm drain maintenance IF the dataset shows storm assets). "
+        "One set per responsible jurisdiction; never mention assets outside an agency's scope.\n"
+        "Persona: business communications expert in wet utility infrastructure and municipal "
+        "agency relations.\n"
+        "FORM per draft: 'Subject line (3 options)', body (max 200 words, one cohesive "
+        "copy/paste-ready email), signature with provided company/sender/title.\n"
+        "Each body integrates smoothly: purpose + positioning; demonstrated system understanding "
+        "(numbers mandatory, no attribution); a DISTINCT proposed scope & service model per "
+        "draft (e.g. risk-based program vs capacity restoration + I/I focus vs performance-based "
+        "SLA); coordination + schedule; QA/QC deliverables (CCTV, logs, defect reporting, "
+        "GIS-ready outputs); subtle risk/compliance awareness; a confident CTA. Professional "
+        "greeting + one customary intro sentence first — never open with praise or a blunt ask."
+    ),
+    'summary': (
+        "TASK: FOUR detailed summaries of the dataset from different perspectives — municipal "
+        "asset owner, citizen/consumer, contractor, competitor.\n"
+        "Persona: expert in municipal system infrastructure analysis. Audience: the user (so "
+        "internal analysis is fine here).\n"
+        "Each summary: key system facts (with the dataset's numbers); what those facts imply "
+        "operationally; likely priorities/sensitivities; what's missing and what we will confirm "
+        "next; communications leverage points (ethical, factual)."
+    ),
+    'brainstorm': (
+        "TASK: TEN distinct probable opportunities for sewer/storm maintenance/cleaning work, "
+        "generated via at least five different creative approaches.\n"
+        "Persona: master of municipal systems analysis; insightful, extrapolates logical "
+        "probabilities from context. Audience: the user.\n"
+        "Each item: opportunity title; why it's plausible (tie to dataset numbers/practices/"
+        "incidents); value to the municipality; what the work would look like; what we will ask "
+        "the city to confirm; a gentle proof cue (subtle incident linkage)."
+    ),
+    'bid_breakdown': (
+        "TASK: a detailed breakdown of the selected bid — scope, tasks, timelines, requirements, "
+        "and an estimated range of possible costs based on comparable municipal projects — plus "
+        "TWO additional breakdowns from differing rationales (skeptic requirement). Present all "
+        "three. Account for every relevant PM consideration.\n"
+        "Persona: master of municipal infrastructure contract bid analysis. Audience: the user."
+    ),
+}
+
+
+@app.route('/api/scraper/comms/<session_id>', methods=['POST'])
+def scraper_comms(session_id):
+    """
+    Gated flow step 3 (optional): the communications engine. Takes the completed
+    table for this session and produces MODE A/B outputs per the comms spec.
+
+    Request body:
+    {
+        "task": "exploratory_proposal" | "standard_proposal" | "summary" | "brainstorm" | "bid_breakdown",
+        "company": "...", "sender_name": "...", "sender_title": "..."   (proposals only)
+    }
+    """
+    unavailable = _check_scraper_available()
+    if unavailable:
+        return unavailable
+
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 500
+
+    with session_lock:
+        if session_id not in cityscraper_sessions:
+            return jsonify({'error': 'Session not found'}), 404
+        result = cityscraper_results.get(session_id) or {}
+        table_markdown = result.get('table_markdown')
+        table_mode = result.get('table_mode', 'systems_info')
+        municipality = result.get('municipality') or {}
+
+    if not table_markdown:
+        return jsonify({'success': False, 'error': 'No completed table for this session — run extraction first'}), 409
+
+    data = request.get_json() or {}
+    task = (data.get('task') or '').strip().lower()
+    if task not in _SCRAPER_COMMS_TASKS:
+        return jsonify({'success': False,
+                        'error': f"task must be one of {sorted(_SCRAPER_COMMS_TASKS)}"}), 400
+
+    sender_bits = []
+    for field, label in (('company', 'Company'), ('sender_name', 'Sender name'), ('sender_title', 'Sender title')):
+        value = (data.get(field) or '').strip()
+        if value:
+            sender_bits.append(f"{label}: {value}")
+    sender_context = ("\n".join(sender_bits)) if sender_bits else "No sender details provided — use clean placeholders."
+
+    dataset_label = 'Public Bid Table' if table_mode == 'public_bids' else 'System Info Table'
+    system_prompt = (
+        "You are the BidBrief Municipal Communications Engine (sanitary-sewer-primary).\n\n"
+        + _SCRAPER_COMMS_RULES + "\n" + _SCRAPER_COMMS_TASKS[task]
+    )
+    user_prompt = (
+        f"Dataset Type: {dataset_label}\n"
+        f"Municipality: {municipality.get('full_name') or municipality.get('city') or 'see table'}\n"
+        f"{sender_context}\n\n"
+        f"STRUCTURED TABLE OUTPUT (the dataset):\n{table_markdown}"
+    )
+
+    try:
+        import requests as http_requests
+        resp = http_requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json={
+                'model': 'gpt-4o',
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_prompt}
+                ],
+                'temperature': 0.6,
+                'max_tokens': 4000
+            },
+            timeout=120
+        )
+        resp.raise_for_status()
+        output = resp.json()['choices'][0]['message']['content'].strip()
+        logger.info(f"CityScraper comms generated: {session_id} task={task} ({len(output)} chars)")
+        return jsonify({'success': True, 'task': task, 'output': output})
+    except Exception as e:
+        logger.error(f"CityScraper comms failed: {session_id} - {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/scraper/events/<session_id>', methods=['GET'])
 def get_scraper_events(session_id):
     """Get agent activity events for a session (for UI display).
@@ -3552,7 +3965,7 @@ def stop_scraper_research(session_id):
 
         session_data = cityscraper_sessions[session_id]
 
-        if session_data['status'] not in ('initializing', 'running'):
+        if session_data['status'] not in ('initializing', 'running', 'preflight_running', 'extracting'):
             return jsonify({
                 'success': False,
                 'message': f"Cannot stop session with status: {session_data['status']}"
@@ -4089,9 +4502,12 @@ def export_scraper_excel(session_id):
             return jsonify({'error': 'Session not found or not completed'}), 404
 
         result = cityscraper_results[session_id]
+        # Gated-flow sessions keep the real ExtractionResult object — the
+        # presentation agents need row objects, not the serialized counts.
+        extraction_obj = cityscraper_sessions.get(session_id, {}).get('extraction_obj')
 
     # Check if we have extraction data
-    extraction_result = result.get('extraction_result') or result.get('presentation_result', {}).get('extraction_data')
+    extraction_result = extraction_obj or result.get('extraction_result') or result.get('presentation_result', {}).get('extraction_data')
     if not extraction_result:
         return jsonify({'error': 'No extraction data available for export'}), 400
 
@@ -4166,9 +4582,21 @@ def export_scraper_markdown(session_id):
             return jsonify({'error': 'Session not found or not completed'}), 404
 
         result = cityscraper_results[session_id]
+        extraction_obj = cityscraper_sessions.get(session_id, {}).get('extraction_obj')
+
+    # Gated-flow fast path: the guardrailed table was already formatted.
+    if result.get('table_markdown'):
+        municipality = result.get('municipality') or {}
+        city = municipality.get('city') or 'Unknown'
+        state = municipality.get('state') or 'XX'
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        response = make_response(result['table_markdown'])
+        response.headers['Content-Type'] = 'text/markdown; charset=utf-8'
+        response.headers['Content-Disposition'] = f'attachment; filename="CityScraper_{city}_{state}_{timestamp}.md"'
+        return response
 
     # Check if we have extraction data
-    extraction_result = result.get('extraction_result') or result.get('presentation_result', {}).get('extraction_data')
+    extraction_result = extraction_obj or result.get('extraction_result') or result.get('presentation_result', {}).get('extraction_data')
     if not extraction_result:
         return jsonify({'error': 'No extraction data available for export'}), 400
 
