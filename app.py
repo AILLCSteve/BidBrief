@@ -3503,8 +3503,11 @@ def get_scraper_research(session_id):
         session_data = cityscraper_sessions[session_id].copy()
         result = cityscraper_results.get(session_id)
 
-    # Don't include orchestrator object in response
+    # Strip non-serializable objects held for the gated flow (the orchestrator,
+    # plus the PreflightResult/ExtractionResult kept for extraction and exports).
     session_data.pop('orchestrator', None)
+    session_data.pop('preflight_obj', None)
+    session_data.pop('extraction_obj', None)
 
     return jsonify({
         'success': True,
