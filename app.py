@@ -3321,11 +3321,15 @@ def generate_question_set():
         )
     if grounding_text:
         doc_context_note += (
-            "\n\nDOCUMENT CONTEXT (extracted from title page, TOC, glossary, appendix):\n"
-            "Use this to better understand the document's domain and infer appropriate question sections "
-            "and terminology. Do NOT generate questions about the document structure itself — "
-            "use it only to inform relevance and domain language. Every generated question must be "
-            "relevant to and answerable from a document like this.\n\n"
+            "\n\nDOCUMENT CONTEXT — THE ACTUAL DOCUMENT TO BE ANALYZED (extracted pages below):\n"
+            "This is the real document the generated questions will be run against. GROUND EVERY "
+            "QUESTION IN ITS ACTUAL SUBJECT MATTER: the specific project, systems, scope, materials, "
+            "requirements, deliverables, parties, quantities, deadlines, and terminology that actually "
+            "appear in it. If the user asks for 'N questions' with little other direction, derive those "
+            "N questions from the most important topics found in THIS document. Do NOT produce generic "
+            "questions that could apply to any document, and do NOT ask about the document's "
+            "structure/formatting — every question must extract specific information from a document "
+            "like this one.\n\n"
             f"{grounding_text}"
         )
     if questions_source_text or grounding_text:

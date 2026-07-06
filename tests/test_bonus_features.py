@@ -259,6 +259,49 @@ def test_generate_questions_source_and_context_file_both_used(client, monkeypatc
     assert '4200 linear feet' in architect_user
 
 
+def test_generate_context_only_grounds_in_document(client, monkeypatch):
+    """The user's core path: a single Document-Context file (source_kind=context,
+    the default) makes the generation prompt carry the document's actual content
+    under a grounding directive — so 'give me N questions' produces questions
+    grounded in the document, not generic ones."""
+    monkeypatch.setenv('OPENAI_API_KEY', 'sk-test')
+    _login(client, 'tok-user', 'user@test.local', 'user')
+
+    calls = []
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'choices': [{'message': {'content':
+                '{"sections": [{"section_id": "s1", "section_name": "S1", '
+                '"section_description": "d", "section_summary": "why", '
+                '"questions": [{"id": "Q1", "text": "t", "required": false, '
+                '"expected_type": "string", "enabled": true}]}]}'}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        return _FakeResp()
+
+    import requests as _requests
+    from io import BytesIO
+    monkeypatch.setattr(_requests, 'post', fake_post)
+
+    resp = client.post(
+        '/api/config/questions/generate',
+        data={'user_input': 'give me 3 questions',
+              'file': (BytesIO(b'Section 3: Contractor shall reline 4200 linear feet of '
+                               b'8-inch sanitary sewer main using CIPP.'), 'bid_spec.txt')},
+        content_type='multipart/form-data')
+    assert resp.status_code == 200
+
+    gen_system = calls[-1]['messages'][0]['content'].lower()
+    # Grounding directive + the document's actual content both present.
+    assert 'document to be analyzed' in gen_system
+    assert '4200 linear feet' in gen_system
+
+
 def test_high_power_smart_analysis_403_for_plain_user(client):
     _login(client, 'tok-user', 'user@test.local', 'user')
     resp = client.post('/api/smart-analysis/sess_doesnotexist',
