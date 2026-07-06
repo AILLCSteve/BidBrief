@@ -38,6 +38,7 @@ from .layers import (
 from .multi_expert_processor import MultiExpertProcessor
 from .smart_accumulator import SmartAccumulator
 from .output_compiler import OutputCompiler
+from .answer_summarizer import AnswerSummarizer
 from .second_pass_processor import SecondPassProcessor
 from .token_optimizer import TokenOptimizer
 from .key_document_details_extractor import KeyDocumentDetailsExtractor
@@ -199,6 +200,9 @@ class HotdogOrchestrator:
             max_completion_tokens=model_limits.recommended_completion_tokens  # 16K for GPT-4o
         )
         self.layer6_compiler = OutputCompiler()
+        # Layer 6.5: distills each question's appended quote pile into a
+        # 1-3 sentence summary answer (BID_SPEC; BestPrep uses L7 synthesis).
+        self.layer6_5_summarizer = AnswerSummarizer(self.openai_client, self.model)
 
         # Key Document Details Extractor - ALWAYS runs regardless of selected sections
         self.key_details_extractor = KeyDocumentDetailsExtractor(
@@ -822,6 +826,28 @@ class HotdogOrchestrator:
             else:
                 accumulated_answers = self.layer4_accumulator.get_accumulated_answers()
 
+            # ============================================================
+            # LAYER 6.5: ANSWER SUMMARIZATION (BID_SPEC only)
+            # BestPrep skips this — its Layer 7 synthesis already produces
+            # the distilled per-question answer.
+            # ============================================================
+            if self.mode != AnalysisMode.BESTPREP:
+                logger.info("\n🧾 Layer 6.5: Answer Summarization")
+                self._emit_progress('layer_6_5_start', {'layer': 'Answer Summarization'})
+                try:
+                    await self.layer6_5_summarizer.summarize_answers(
+                        accumulated_answers, config, self.cached_experts or {},
+                        progress_callback=self._emit_progress
+                    )
+                    self._emit_progress('layer_6_5_complete', {
+                        'summarized': len([a for a in accumulated_answers.values()
+                                           if a and a[0].summary])
+                    })
+                except Exception as e:
+                    # Belt and braces — the summarizer is already non-fatal per section.
+                    logger.warning(f"  ⚠️ Layer 6.5 failed (non-fatal): {e}")
+                    self._emit_progress('layer_6_5_failed', {'error': str(e)})
+
             total_tokens = self.layer5_token_manager.total_tokens_used
 
             result = self.layer6_compiler.compile_results(
@@ -989,6 +1015,19 @@ class HotdogOrchestrator:
             from .output_compiler import OutputCompiler
             compiler = OutputCompiler()
             first_pass_result.footnotes = compiler._compile_footnotes(first_pass_result.questions)
+
+            # L6.5: summarize ONLY the questions the second pass just answered
+            if second_pass_answers and self.cached_config:
+                try:
+                    await self.layer6_5_summarizer.summarize_answers(
+                        first_pass_result.questions,
+                        self.cached_config,
+                        self.cached_experts or {},
+                        progress_callback=self._emit_progress,
+                        only_question_ids=set(second_pass_answers.keys()),
+                    )
+                except Exception as e:
+                    logger.warning(f"  ⚠️ L6.5 second-pass summarization failed (non-fatal): {e}")
 
             # Final statistics
             logger.info(f"\n{'='*64}")

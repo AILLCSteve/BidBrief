@@ -254,6 +254,7 @@ class OutputCompiler:
 
         return {
             'text': text,
+            'summary': answer.summary or '',  # L6.5 distilled answer summary
             'pages': answer.pages,
             'confidence': answer.confidence,
             'confidence_level': confidence_level.value,
@@ -302,7 +303,7 @@ class OutputCompiler:
         }
 
         # Sheet 2: Answers
-        answers_rows = [['Section', 'Question ID', 'Question', 'Answer', 'Pages', 'Confidence', 'Expert']]
+        answers_rows = [['Section', 'Question ID', 'Question', 'Answer', 'Answer Summary', 'Pages', 'Confidence', 'Expert']]
 
         for section in config.sections:
             for question in section.questions:
@@ -319,6 +320,7 @@ class OutputCompiler:
                         question.id,
                         question.text,
                         clean_text,
+                        primary_answer.summary or '',
                         pages_str,
                         f"{primary_answer.confidence:.2%}",
                         primary_answer.expert
@@ -329,6 +331,7 @@ class OutputCompiler:
                         question.id,
                         question.text,
                         'NOT FOUND',
+                        '',
                         '',
                         '',
                         ''

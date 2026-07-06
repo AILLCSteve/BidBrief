@@ -112,3 +112,48 @@ def test_answer_model_has_summary_default():
     a = Answer(question_id="Q9", text="x <PDF pg 1>", pages=[1],
                confidence=0.5, expert="E", window=0)
     assert a.summary == ""
+
+
+# ---------------------------------------------------------------------------
+# Integration surfaces: legacy transform + browser format carry the summary
+# ---------------------------------------------------------------------------
+
+def test_legacy_transform_emits_answer_summary():
+    from app import _transform_to_legacy_format
+    hotdog_output = {
+        "sections": [{
+            "section_id": "s1", "section_name": "General", "description": "",
+            "questions": [
+                {"question_id": "Q1", "question_text": "Name?", "has_answer": True,
+                 "primary_answer": {"text": "Alpha <PDF pg 2>", "pages": [2],
+                                    "confidence": 0.9, "footnote": "",
+                                    "summary": "The project is Alpha."}},
+                {"question_id": "Q2", "question_text": "Deadline?", "has_answer": False,
+                 "primary_answer": None},
+            ],
+        }],
+    }
+    legacy = _transform_to_legacy_format(hotdog_output)
+    q1, q2 = legacy["sections"][0]["questions"]
+    assert q1["answer_summary"] == "The project is Alpha."
+    assert q2["answer_summary"] is None
+    # Column order contract: summary sits between answer and page_citations
+    keys = list(q1.keys())
+    assert keys.index("answer") < keys.index("answer_summary") < keys.index("page_citations")
+
+
+def test_browser_format_includes_summary():
+    from datetime import datetime
+    from services.hotdog.output_compiler import OutputCompiler
+    from services.hotdog.models import AnalysisResult
+    config, _, acc = _fixture()
+    acc["Q1"][0].summary = "The project is Alpha Plant."
+    result = AnalysisResult(
+        document_name="doc.pdf", total_pages=3, pages_analyzed=3,
+        questions=acc, footnotes=[], metadata={},
+        started_at=datetime.now(), completed_at=datetime.now(),
+        total_tokens=1, estimated_cost=0.0,
+    )
+    browser = OutputCompiler().format_for_browser(result, config)
+    q1 = browser["sections"][0]["questions"][0]
+    assert q1["primary_answer"]["summary"] == "The project is Alpha Plant."

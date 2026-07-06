@@ -504,11 +504,14 @@ def _transform_to_legacy_format(hotdog_output: dict) -> dict:
             has_answer = q.get('has_answer', primary_answer is not None)
             if primary_answer and has_answer:
                 legacy_question['answer'] = primary_answer.get('text', '')
+                # L6.5 distilled summary — sits between answer and page_citations
+                legacy_question['answer_summary'] = primary_answer.get('summary') or None
                 legacy_question['page_citations'] = primary_answer.get('pages', [])
                 legacy_question['confidence'] = primary_answer.get('confidence', 0.0)
                 legacy_question['footnote'] = primary_answer.get('footnote', '')  # Include footnote
             else:
                 legacy_question['answer'] = None
+                legacy_question['answer_summary'] = None
                 legacy_question['page_citations'] = []
                 legacy_question['confidence'] = 0.0
                 legacy_question['footnote'] = None
