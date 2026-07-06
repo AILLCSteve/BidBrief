@@ -3232,11 +3232,16 @@ def generate_question_set():
     if request.content_type and 'multipart' in request.content_type:
         user_input = request.form.get('user_input', '').strip()
         uploaded_file = request.files.get('file')
+        # context_file is the analyzer/bid document itself — ALWAYS scanned for
+        # domain grounding, independent of and in addition to `file`. It exists so
+        # a questions-source upload never displaces the document context.
+        context_file = request.files.get('context_file')
         high_power = request.form.get('high_power', '').strip().lower() in ('true', '1', 'yes')
     else:
         data = request.get_json() or {}
         user_input = data.get('user_input', '').strip()
         uploaded_file = None
+        context_file = None
         high_power = bool(data.get('high_power', False))
 
     if not user_input:
@@ -3260,56 +3265,85 @@ def generate_question_set():
         source_kind = 'context'
         source_intent = (data.get('source_intent', '') or '').strip()
 
-    # Extract document context if a file was provided
-    doc_context = ''
-    doc_context_note = ''
-    if uploaded_file:
+    # Extract text from any uploaded files. Two independent slots may arrive and
+    # are used TOGETHER (bug 2026-07-06: a PDF questions-source used to displace
+    # the analyzer document, so the doc was never scanned):
+    #   * `file`         — framed by source_kind: 'questions_source' = derive the
+    #                      questions FROM it; 'context' = domain grounding.
+    #   * `context_file` — the bid/analyzer document itself, ALWAYS grounding.
+    def _read_upload(f):
+        """Return extracted text for an uploaded file (PDF via the doc-context
+        extractor, otherwise UTF-8 text). '' on any failure or absence."""
+        if not f:
+            return ''
         try:
-            fname = (uploaded_file.filename or '').lower()
+            fname = (f.filename or '').lower()
             if fname.endswith('.pdf'):
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                    uploaded_file.save(tmp.name)
+                    f.save(tmp.name)
                     tmp_path = tmp.name
-                doc_context = _extract_doc_context(tmp_path)
                 try:
-                    os.unlink(tmp_path)
-                except Exception:
-                    pass
-            else:
-                # Non-PDF questions source (txt, csv, email, notes): read as text.
-                raw = uploaded_file.read()
-                try:
-                    doc_context = raw.decode('utf-8', errors='ignore')[:6000]
-                except Exception:
-                    doc_context = ''
-            if doc_context:
-                if source_kind == 'questions_source':
-                    doc_context_note = (
-                        "\n\nSOURCE MATERIAL TO DERIVE QUESTIONS FROM:\n"
-                        "The user uploaded the material below as the basis for the questions. It may be an "
-                        "email or email thread, meeting notes, an industry standard, a syllabus, a plain list of "
-                        "questions, or similar. Intelligently determine what it is and derive document-analysis "
-                        "questions that let an AI compare a TARGET document against it. Preserve any explicit "
-                        "questions in it word-for-word; convert everything else into document-analysis questions.\n\n"
-                        f"{doc_context}"
-                    )
-                else:
-                    doc_context_note = (
-                        "\n\nDOCUMENT CONTEXT (extracted from title page, TOC, glossary, appendix):\n"
-                        "Use this to better understand the document's domain and infer appropriate question sections "
-                        "and terminology. Do NOT generate questions about the document structure itself — "
-                        "use it only to inform relevance and domain language.\n\n"
-                        f"{doc_context}"
-                    )
-                logger.info(f'🗂️ Doc context extracted: {len(doc_context)} chars (source_kind={source_kind}) for question generation')
+                    return _extract_doc_context(tmp_path) or ''
+                finally:
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+            raw = f.read()
+            return raw.decode('utf-8', errors='ignore')[:6000]
         except Exception as e:
-            logger.warning(f'Could not extract doc context: {e}')
+            logger.warning(f'Could not extract upload text: {e}')
+            return ''
+
+    primary_text = _read_upload(uploaded_file)
+    # The `file` slot is questions-source material only when framed that way;
+    # otherwise it is grounding context (the legacy single-file 'context' path).
+    questions_source_text = primary_text if source_kind == 'questions_source' else ''
+    grounding_parts = []
+    if source_kind != 'questions_source' and primary_text:
+        grounding_parts.append(primary_text)
+    context_file_text = _read_upload(context_file)
+    if context_file_text:
+        grounding_parts.append(context_file_text)
+    grounding_text = '\n\n'.join(grounding_parts)
+
+    # Assemble the prompt blocks — BOTH may be present at once.
+    doc_context_note = ''
+    if questions_source_text:
+        doc_context_note += (
+            "\n\nSOURCE MATERIAL TO DERIVE QUESTIONS FROM:\n"
+            "The user uploaded the material below as the basis for the questions. It may be an "
+            "email or email thread, meeting notes, an industry standard, a syllabus, a plain list of "
+            "questions, or similar. Intelligently determine what it is and derive document-analysis "
+            "questions that let an AI compare a TARGET document against it. Preserve any explicit "
+            "questions in it word-for-word; convert everything else into document-analysis questions.\n\n"
+            f"{questions_source_text}"
+        )
+    if grounding_text:
+        doc_context_note += (
+            "\n\nDOCUMENT CONTEXT (extracted from title page, TOC, glossary, appendix):\n"
+            "Use this to better understand the document's domain and infer appropriate question sections "
+            "and terminology. Do NOT generate questions about the document structure itself — "
+            "use it only to inform relevance and domain language. Every generated question must be "
+            "relevant to and answerable from a document like this.\n\n"
+            f"{grounding_text}"
+        )
+    if questions_source_text or grounding_text:
+        logger.info(
+            f'🗂️ Q-gen material: questions_source={len(questions_source_text)} chars, '
+            f'grounding={len(grounding_text)} chars (source_kind={source_kind})')
 
     # ---- Stage 1: Persona Architect — dynamic expert panel built from the
-    # actual material + user input (HOTDOG pattern). Non-fatal on failure. ----
+    # actual material + user input (HOTDOG pattern). Non-fatal on failure.
+    # Feed BOTH the questions-source material and the document grounding. ----
+    architect_material = questions_source_text or grounding_text
+    architect_extra = ''
+    if questions_source_text and grounding_text:
+        architect_extra = f"TARGET DOCUMENT CONTEXT (extracts):\n{grounding_text[:5000]}"
     generation_personas, document_reading = _build_persona_panel(
         http_requests, api_key, gen_model, user_input,
-        source_intent=source_intent, doc_context=doc_context)
+        source_intent=source_intent, doc_context=architect_material,
+        extra_signals=architect_extra)
 
     system_prompt = (
         "You are a master expert question architect and specialist in creating structured question sets "

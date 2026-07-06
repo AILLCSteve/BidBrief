@@ -198,6 +198,67 @@ def test_generate_questions_source_frames_derivation(client, monkeypatch):
     assert 'uptime standard' in captured['system'].lower()
 
 
+def test_generate_questions_source_and_context_file_both_used(client, monkeypatch):
+    """A questions-source file AND a separate context_file (the analyzer/bid
+    document) are BOTH incorporated: the derive-from block frames the questions
+    source, and the document-context grounding block carries the context_file —
+    so a questions source never displaces the analyzer document (bug 2026-07-06).
+    Both also reach the Persona Architect."""
+    monkeypatch.setenv('OPENAI_API_KEY', 'sk-test')
+    _login(client, 'tok-user', 'user@test.local', 'user')
+
+    calls = []
+    payloads = [
+        ('{"panel": [{"name": "Sewer Rehab Spec Analyst", "expertise": "CIPP", '
+         '"focus": "liners"}], "document_reading": "A CIPP rehab RFP"}'),
+        ('{"sections": [{"section_id": "s1", "section_name": "S1", '
+         '"section_description": "d", "section_summary": "why", '
+         '"questions": [{"id": "Q1", "text": "t", "required": false, '
+         '"expected_type": "string", "enabled": true}]}]}'),
+    ]
+
+    class _FakeResp:
+        def __init__(self, content):
+            self._content = content
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'choices': [{'message': {'content': self._content}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        return _FakeResp(payloads[min(len(calls) - 1, len(payloads) - 1)])
+
+    import requests as _requests
+    from io import BytesIO
+    monkeypatch.setattr(_requests, 'post', fake_post)
+
+    resp = client.post(
+        '/api/config/questions/generate',
+        data={'user_input': 'derive questions', 'source_kind': 'questions_source',
+              'file': (BytesIO(b'Compare vendor SLA against our uptime standard.'), 'notes.txt'),
+              'context_file': (BytesIO(b'Bidder must line 4200 linear feet of sewer main.'),
+                               'bid_spec.txt')},
+        content_type='multipart/form-data')
+    assert resp.status_code == 200
+
+    # Generation system prompt (calls[1] = generation, calls[0] = architect).
+    gen_system = calls[1]['messages'][0]['content']
+    # Questions-source derivation block present, with its material.
+    assert 'derive questions from' in gen_system.lower()
+    assert 'uptime standard' in gen_system.lower()
+    # Document-context grounding block present, with the context_file's material.
+    assert 'document context' in gen_system.lower()
+    assert '4200 linear feet' in gen_system.lower()
+
+    # Both materials reached the Persona Architect too.
+    architect_user = calls[0]['messages'][1]['content'].lower()
+    assert 'uptime standard' in architect_user
+    assert '4200 linear feet' in architect_user
+
+
 def test_high_power_smart_analysis_403_for_plain_user(client):
     _login(client, 'tok-user', 'user@test.local', 'user')
     resp = client.post('/api/smart-analysis/sess_doesnotexist',
