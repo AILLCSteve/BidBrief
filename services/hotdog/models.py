@@ -128,6 +128,9 @@ class Answer:
     footnote: str = ""  # Contextual footnote with PDF page + section ref + bidding context
     windows: List[int] = field(default_factory=list)  # All windows that contributed
     merge_count: int = 0  # How many times merged
+    # Layer 6.5 (AnswerSummarizer): 1-3 sentence distilled answer synthesized
+    # from the full appended quote pile. Empty until that layer runs.
+    summary: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
