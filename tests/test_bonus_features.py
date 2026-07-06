@@ -250,3 +250,99 @@ def test_preflight_rejects_bad_focus(client):
     assert resp.status_code in (400, 503)
     if resp.status_code == 400:
         assert 'research_focus' in resp.get_json()['error']
+
+
+def test_generate_builds_dynamic_persona_panel(client, monkeypatch):
+    """Two-stage generation: a Persona Architect derives a bespoke expert panel
+    from the document/user input, the panel generates the set, and every
+    section carries a section_summary rationale. source_intent threads into
+    both prompts."""
+    monkeypatch.setenv('OPENAI_API_KEY', 'sk-test')
+    _login(client, 'tok-user', 'user@test.local', 'user')
+
+    calls = []
+    payloads = [
+        # Call 1: persona architect
+        ('{"panel": [{"name": "CIPP Rehab Standards Analyst", '
+         '"expertise": "Trenchless rehab specs", "focus": "materials"}], '
+         '"document_reading": "A sewer rehab RFP"}'),
+        # Call 2: generation with rationale
+        ('{"sections": [{"section_id": "s1", "section_name": "Liner Materials", '
+         '"section_description": "d", '
+         '"section_summary": "Created because the doc centers on CIPP liner specs.", '
+         '"questions": [{"id": "Q1", "text": "t", "required": false, '
+         '"expected_type": "string", "enabled": true}]}]}'),
+    ]
+
+    class _FakeResp:
+        def __init__(self, content):
+            self._content = content
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'choices': [{'message': {'content': self._content}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        return _FakeResp(payloads[min(len(calls) - 1, len(payloads) - 1)])
+
+    import requests as _requests
+    monkeypatch.setattr(_requests, 'post', fake_post)
+
+    resp = client.post('/api/config/questions/generate',
+                       json={'user_input': 'sewer lining bid questions',
+                             'source_intent': 'derive questions from this rehab standard'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    # Two calls: architect then generation
+    assert len(calls) == 2
+    # source_intent reached both prompts
+    assert 'rehab standard' in calls[0]['messages'][1]['content']
+    joined_gen = calls[1]['messages'][0]['content'] + calls[1]['messages'][1]['content']
+    assert 'rehab standard' in joined_gen
+    # The bespoke panel steers generation and is returned to the client
+    assert 'CIPP Rehab Standards Analyst' in calls[1]['messages'][0]['content']
+    assert data['generation_personas'][0]['name'] == 'CIPP Rehab Standards Analyst'
+    # Every section carries its rationale
+    assert data['config']['sections'][0]['section_summary'].startswith('Created because')
+
+
+def test_generate_architect_failure_falls_back(client, monkeypatch):
+    """If the persona-architect stage fails, generation still succeeds without
+    personas (never 500 on a cosmetics stage)."""
+    monkeypatch.setenv('OPENAI_API_KEY', 'sk-test')
+    _login(client, 'tok-user', 'user@test.local', 'user')
+
+    calls = []
+
+    class _FakeResp:
+        def __init__(self, content):
+            self._content = content
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'choices': [{'message': {'content': self._content}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        if len(calls) == 1:
+            raise RuntimeError('architect down')
+        return _FakeResp(
+            '{"sections": [{"section_id": "s1", "section_name": "S1", '
+            '"section_description": "d", "questions": [{"id": "Q1", "text": "t", '
+            '"required": false, "expected_type": "string", "enabled": true}]}]}')
+
+    import requests as _requests
+    monkeypatch.setattr(_requests, 'post', fake_post)
+
+    resp = client.post('/api/config/questions/generate',
+                       json={'user_input': 'test questions'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['generation_personas'] == []
+    assert len(data['config']['sections']) == 1

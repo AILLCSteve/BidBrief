@@ -3127,6 +3127,92 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000) -> str:
         return ''
 
 
+def _build_persona_panel(http_requests, api_key, gen_model, user_input,
+                         source_intent='', doc_context='', extra_signals=''):
+    """
+    Stage 1 of question generation: the Persona Architect.
+
+    Reasons over the ACTUAL uploaded material + the user's input/intent and
+    designs a bespoke panel of 3-6 experts (HOTDOG pattern: personas derived
+    from the content itself — section headers, standards, terminology — never
+    stock roles). Returns (panel:list, document_reading:str); any failure
+    returns ([], '') so generation degrades gracefully to single-stage.
+    """
+    from services.ai_models import chat_payload, default_effort
+    try:
+        architect_system = (
+            "You are the Persona Architect for BidBrief's AI question-set generator. "
+            "Your ONLY job: read the user's request and the provided source material, reason about "
+            "what domains of expertise this SPECIFIC material demands, and design a panel of 3-6 "
+            "expert personas custom-built for it.\n\n"
+            "HARD RULES:\n"
+            "1. NEVER produce generic personas ('Project Manager', 'QA Expert', 'Analyst'). Every "
+            "persona must be derived from the specific domains, section headers, named standards, "
+            "terminology, and jurisdictional/technical details actually present in the material and "
+            "the user's stated intent. Infer beyond the literal text where reasoning supports it.\n"
+            "2. Each persona: a precise professional identity (name their niche, not a job title), "
+            "2-3 sentences of expertise grounded in what you saw, and the focus they will own.\n"
+            "3. Also return document_reading: 1-2 sentences on what the material actually is.\n"
+            'Return ONLY JSON: {"panel": [{"name": "...", "expertise": "...", "focus": "..."}], '
+            '"document_reading": "..."}'
+        )
+        user_parts = [f"USER REQUEST:\n{user_input}"]
+        if source_intent:
+            user_parts.append(f"USER'S INTENT FOR THE ATTACHED MATERIAL:\n{source_intent}")
+        if doc_context:
+            user_parts.append(f"SOURCE MATERIAL (extracts):\n{doc_context[:5000]}")
+        if extra_signals:
+            user_parts.append(extra_signals)
+
+        resp = http_requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json=chat_payload(
+                gen_model,
+                [
+                    {'role': 'system', 'content': architect_system},
+                    {'role': 'user', 'content': '\n\n'.join(user_parts)},
+                ],
+                max_output_tokens=1500,
+                temperature=0.4,
+                reasoning_effort=default_effort(True),
+            ),
+            timeout=90,
+        )
+        resp.raise_for_status()
+        raw = resp.json()['choices'][0]['message']['content'].strip()
+        if raw.startswith('```'):
+            raw = raw.split('```')[1]
+            if raw.startswith('json'):
+                raw = raw[4:]
+        parsed = json.loads(raw)
+        panel = [p for p in parsed.get('panel', [])
+                 if isinstance(p, dict) and p.get('name')][:6]
+        reading = str(parsed.get('document_reading', '') or '')
+        if panel:
+            logger.info(f"🎭 Persona Architect panel: {[p['name'] for p in panel]}")
+        return panel, reading
+    except Exception as e:
+        logger.warning(f'Persona Architect stage failed (falling back to single-stage): {e}')
+        return [], ''
+
+
+def _persona_panel_block(panel, document_reading):
+    """Render the architect's panel as a system-prompt block for generation."""
+    if not panel:
+        return ''
+    lines = ["\n\nYOUR EXPERT PANEL (custom-built for THIS material — write as this panel):"]
+    if document_reading:
+        lines.append(f"Material read: {document_reading}")
+    for p in panel:
+        lines.append(f"- {p.get('name')}: {p.get('expertise', '')} Focus: {p.get('focus', '')}")
+    lines.append(
+        "Each expert contributes the sections in their specialty; section content must reflect "
+        "that expert's depth. Layer their perspectives — do not flatten them into one generic voice."
+    )
+    return '\n'.join(lines)
+
+
 @app.route('/api/config/questions/generate', methods=['POST'])
 @require_auth
 def generate_question_set():
@@ -3165,10 +3251,14 @@ def generate_question_set():
 
     # source_kind swaps the prompt framing: 'context' (default) vs
     # 'questions_source' (derive questions FROM the uploaded material).
+    # source_intent is the user's one-line description of what the attached
+    # material should shape — it feeds the Persona Architect and rationale.
     if request.content_type and 'multipart' in request.content_type:
         source_kind = request.form.get('source_kind', 'context').strip().lower()
+        source_intent = request.form.get('source_intent', '').strip()
     else:
         source_kind = 'context'
+        source_intent = (data.get('source_intent', '') or '').strip()
 
     # Extract document context if a file was provided
     doc_context = ''
@@ -3215,6 +3305,12 @@ def generate_question_set():
         except Exception as e:
             logger.warning(f'Could not extract doc context: {e}')
 
+    # ---- Stage 1: Persona Architect — dynamic expert panel built from the
+    # actual material + user input (HOTDOG pattern). Non-fatal on failure. ----
+    generation_personas, document_reading = _build_persona_panel(
+        http_requests, api_key, gen_model, user_input,
+        source_intent=source_intent, doc_context=doc_context)
+
     system_prompt = (
         "You are a master expert question architect and specialist in creating structured question sets "
         "for BidBrief, an AI document analysis platform.\n\n"
@@ -3257,11 +3353,21 @@ def generate_question_set():
         "     (e.g., 'Commercial Terms — Pricing' and 'Commercial Terms — Payment & Retention').\n"
         "   - Never cluster questions arbitrarily just to stay under 10. Sections must be semantically coherent.\n"
         "   - Section names must be specific and descriptive — not generic labels like 'General' or 'Other'.\n\n"
+        "8. Each section MUST also include \"section_summary\": 1-2 plain sentences explaining WHY this "
+        "section was created, grounded in the source material and the user's request "
+        "(e.g. 'Created because the RFP's Part 4 details bonding and insurance thresholds the bidder "
+        "must satisfy.'). Reference what in the document/user input motivated it — never boilerplate.\n\n"
         "Output format:\n"
         '{"sections": [{"section_id": "...", "section_name": "...", "section_description": "...", '
+        '"section_summary": "...", '
         '"questions": [{"id": "Q1", "text": "...", "required": true, "expected_type": "string", "enabled": true}]}]}'
+        + _persona_panel_block(generation_personas, document_reading)
         + doc_context_note
     )
+
+    gen_user_input = user_input
+    if source_intent:
+        gen_user_input += f"\n\nUSER'S INTENT FOR THE ATTACHED MATERIAL:\n{source_intent}"
 
     try:
         from services.ai_models import chat_payload, default_effort
@@ -3272,7 +3378,7 @@ def generate_question_set():
                 gen_model,
                 [
                     {'role': 'system', 'content': system_prompt},
-                    {'role': 'user', 'content': user_input}
+                    {'role': 'user', 'content': gen_user_input}
                 ],
                 max_output_tokens=6000,
                 temperature=0.3,
@@ -3293,14 +3399,18 @@ def generate_question_set():
         sections = parsed.get('sections', [])
         total_questions = sum(len(s.get('questions', [])) for s in sections)
 
-        logger.info(f'🤖 AI generated question set: {len(sections)} sections, {total_questions} questions')
+        logger.info(f'🤖 AI generated question set: {len(sections)} sections, {total_questions} questions '
+                    f'(personas: {len(generation_personas)})')
         return jsonify({
             'success': True,
             'config': {
                 'sections': sections,
                 'totalQuestions': total_questions,
                 'version': '1.0'
-            }
+            },
+            # The bespoke expert panel that authored this set (may be []).
+            'generation_personas': generation_personas,
+            'document_reading': document_reading
         })
 
     except json.JSONDecodeError as e:
@@ -3329,6 +3439,7 @@ def generate_additional_questions():
     user_input = (data or {}).get('user_input', '').strip()
     existing_sections = (data or {}).get('existing_sections', [])
     high_power = bool((data or {}).get('high_power', False))
+    source_intent = ((data or {}).get('source_intent', '') or '').strip()
 
     if not user_input:
         return jsonify({'success': False, 'error': 'user_input is required'}), 400
@@ -3353,6 +3464,13 @@ def generate_additional_questions():
                 except ValueError:
                     pass
 
+    # Same dynamic-persona layering as initial generation: the panel is
+    # re-derived from the user's context + what the set already covers.
+    generation_personas, document_reading = _build_persona_panel(
+        http_requests, api_key, gen_model, user_input,
+        source_intent=source_intent,
+        extra_signals=f"SECTIONS THE SET ALREADY COVERS: {existing_summary}")
+
     system_prompt = (
         "You are a master expert question architect specializing in document analysis question sets. "
         "The user already has a question set based on their input. Your job is to suggest ADDITIONAL "
@@ -3362,12 +3480,16 @@ def generate_additional_questions():
         "2. Do NOT repeat any questions that already exist in the set.\n"
         "3. Questions must be directly relevant and useful for the user's domain/context.\n"
         "4. Start question IDs from Q{next_id} (continue the existing sequence).\n"
-        "5. Return ONLY valid JSON — no markdown fences, no commentary.\n\n"
+        "5. Return ONLY valid JSON — no markdown fences, no commentary.\n"
+        "6. Each section MUST include \"section_summary\": 1-2 sentences on why it was added, "
+        "grounded in the user's context and the gaps in the existing set.\n\n"
         f"Existing sections already covered: {existing_summary}\n"
         f"Start new question IDs from Q{max_q_num + 1}.\n\n"
         "Output format:\n"
         '{"additional_sections": [{"section_id": "...", "section_name": "...", "section_description": "...", '
+        '"section_summary": "...", '
         '"questions": [{"id": "Q...", "text": "...", "required": false, "expected_type": "string", "enabled": true}]}]}'
+        + _persona_panel_block(generation_personas, document_reading)
     )
 
     try:
@@ -3398,8 +3520,10 @@ def generate_additional_questions():
         parsed = json.loads(raw)
         additional = parsed.get('additional_sections', [])
 
-        logger.info(f'🤖 AI generated {len(additional)} additional sections')
-        return jsonify({'success': True, 'additional_sections': additional})
+        logger.info(f'🤖 AI generated {len(additional)} additional sections '
+                    f'(personas: {len(generation_personas)})')
+        return jsonify({'success': True, 'additional_sections': additional,
+                        'generation_personas': generation_personas})
 
     except json.JSONDecodeError as e:
         logger.error(f'AI additional generation: JSON parse error: {e}')
