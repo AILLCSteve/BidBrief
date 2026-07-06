@@ -3153,32 +3153,62 @@ def generate_question_set():
     if not user_input:
         return jsonify({'success': False, 'error': 'user_input is required'}), 400
 
-    gen_model, hp_error = _resolve_high_power_request(high_power)
-    if hp_error:
-        return hp_error
+    # Question generation is ALWAYS high-power for every user (product decision
+    # 2026-07-05): no entitlement gate, no client flag needed. `high_power` from
+    # the request is retained only for logging/telemetry below.
+    from services.ai_models import high_power_model
+    high_power = True
+    gen_model = high_power_model()
+
+    # source_kind swaps the prompt framing: 'context' (default) vs
+    # 'questions_source' (derive questions FROM the uploaded material).
+    if request.content_type and 'multipart' in request.content_type:
+        source_kind = request.form.get('source_kind', 'context').strip().lower()
+    else:
+        source_kind = 'context'
 
     # Extract document context if a file was provided
     doc_context = ''
     doc_context_note = ''
     if uploaded_file:
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                uploaded_file.save(tmp.name)
-                tmp_path = tmp.name
-            doc_context = _extract_doc_context(tmp_path)
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
+            fname = (uploaded_file.filename or '').lower()
+            if fname.endswith('.pdf'):
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                    uploaded_file.save(tmp.name)
+                    tmp_path = tmp.name
+                doc_context = _extract_doc_context(tmp_path)
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+            else:
+                # Non-PDF questions source (txt, csv, email, notes): read as text.
+                raw = uploaded_file.read()
+                try:
+                    doc_context = raw.decode('utf-8', errors='ignore')[:6000]
+                except Exception:
+                    doc_context = ''
             if doc_context:
-                doc_context_note = (
-                    "\n\nDOCUMENT CONTEXT (extracted from title page, TOC, glossary, appendix):\n"
-                    "Use this to better understand the document's domain and infer appropriate question sections "
-                    "and terminology. Do NOT generate questions about the document structure itself — "
-                    "use it only to inform relevance and domain language.\n\n"
-                    f"{doc_context}"
-                )
-                logger.info(f'🗂️ Doc context extracted: {len(doc_context)} chars for question generation')
+                if source_kind == 'questions_source':
+                    doc_context_note = (
+                        "\n\nSOURCE MATERIAL TO DERIVE QUESTIONS FROM:\n"
+                        "The user uploaded the material below as the basis for the questions. It may be an "
+                        "email or email thread, meeting notes, an industry standard, a syllabus, a plain list of "
+                        "questions, or similar. Intelligently determine what it is and derive document-analysis "
+                        "questions that let an AI compare a TARGET document against it. Preserve any explicit "
+                        "questions in it word-for-word; convert everything else into document-analysis questions.\n\n"
+                        f"{doc_context}"
+                    )
+                else:
+                    doc_context_note = (
+                        "\n\nDOCUMENT CONTEXT (extracted from title page, TOC, glossary, appendix):\n"
+                        "Use this to better understand the document's domain and infer appropriate question sections "
+                        "and terminology. Do NOT generate questions about the document structure itself — "
+                        "use it only to inform relevance and domain language.\n\n"
+                        f"{doc_context}"
+                    )
+                logger.info(f'🗂️ Doc context extracted: {len(doc_context)} chars (source_kind={source_kind}) for question generation')
         except Exception as e:
             logger.warning(f'Could not extract doc context: {e}')
 
@@ -3300,9 +3330,11 @@ def generate_additional_questions():
     if not user_input:
         return jsonify({'success': False, 'error': 'user_input is required'}), 400
 
-    gen_model, hp_error = _resolve_high_power_request(high_power)
-    if hp_error:
-        return hp_error
+    # Additional question generation is ALWAYS high-power for every user
+    # (product decision 2026-07-05): no entitlement gate.
+    from services.ai_models import high_power_model
+    high_power = True
+    gen_model = high_power_model()
 
     existing_summary = ', '.join(s.get('section_name', '') for s in existing_sections) if existing_sections else 'none'
     existing_q_texts = [q.get('text', '') for s in existing_sections for q in s.get('questions', [])]

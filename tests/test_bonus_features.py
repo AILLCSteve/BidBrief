@@ -129,12 +129,73 @@ def test_high_power_analyze_passes_gate_for_bonus_user(client):
     assert resp.status_code == 404
 
 
-def test_high_power_question_gen_403_for_plain_user(client, monkeypatch):
+def test_question_gen_always_high_power_for_plain_user(client, monkeypatch):
+    """Question generation is high-power for EVERY user — no entitlement gate,
+    no 403 (product decision 2026-07-05)."""
     monkeypatch.setenv('OPENAI_API_KEY', 'sk-test')
     _login(client, 'tok-user', 'user@test.local', 'user')
+
+    captured = {}
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'choices': [{'message': {'content':
+                '{"sections": [{"section_id": "s1", "section_name": "S1", '
+                '"section_description": "d", "questions": [{"id": "Q1", "text": "t", '
+                '"required": false, "expected_type": "string", "enabled": true}]}]}'}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured['model'] = json['model']
+        return _FakeResp()
+
+    import requests as _requests
+    monkeypatch.setattr(_requests, 'post', fake_post)
+
     resp = client.post('/api/config/questions/generate',
-                       json={'user_input': 'test questions', 'high_power': True})
-    assert resp.status_code == 403
+                       json={'user_input': 'test questions'})
+    assert resp.status_code == 200
+
+    from services.ai_models import high_power_model
+    assert captured['model'] == high_power_model()
+
+
+def test_generate_questions_source_frames_derivation(client, monkeypatch):
+    """A questions-source upload frames the prompt to DERIVE questions from the
+    material, and non-PDF text is read and injected."""
+    monkeypatch.setenv('OPENAI_API_KEY', 'sk-test')
+    _login(client, 'tok-user', 'user@test.local', 'user')
+
+    captured = {}
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'choices': [{'message': {'content':
+                '{"sections": [{"section_id": "s1", "section_name": "S1", '
+                '"section_description": "d", "questions": [{"id": "Q1", "text": "t", '
+                '"required": false, "expected_type": "string", "enabled": true}]}]}'}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured['system'] = json['messages'][0]['content']
+        return _FakeResp()
+
+    import requests as _requests
+    from io import BytesIO
+    monkeypatch.setattr(_requests, 'post', fake_post)
+
+    resp = client.post(
+        '/api/config/questions/generate',
+        data={'user_input': 'derive questions', 'source_kind': 'questions_source',
+              'file': (BytesIO(b'Compare vendor SLA against our uptime standard.'), 'notes.txt')},
+        content_type='multipart/form-data')
+    assert resp.status_code == 200
+    assert 'derive' in captured['system'].lower()
+    assert 'uptime standard' in captured['system'].lower()
 
 
 def test_high_power_smart_analysis_403_for_plain_user(client):
