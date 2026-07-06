@@ -955,3 +955,24 @@ The following changes were made after the digest was originally generated. The f
 *Δ Updated: 2026-03-25 (session 2) — v3.1–v3.3: admin SA panel, question hub uniformity, AI question section cap, PDF cover title fix (§12.7–12.9, §11.8)*
 *Δ Updated: 2026-07-04 — GPT-5 tiers, High Power, Bonus Features, Dynamic Intelligence engine, scraper research focus (§12.10)*
 *Δ Updated: 2026-07-05 — question gen always high-power (no gate) + questions-source ingestion / source_kind (§12.11)*
+
+---
+
+## Δ 2026-07-06 — L6.5 Answer Summarizer, fail-fast section filter, persona-architect Q-gen (commits bb55fd9..fdde163)
+
+1. **Layer 6.5 — AnswerSummarizer** (`services/hotdog/answer_summarizer.py`): between L4 accumulation
+   and L6 compilation (BID_SPEC classic + v2; BestPrep skips — L7 synthesis is its equivalent), the
+   section's L2 expert persona distills each answered question's appended quote pile into a 1-3 sentence
+   `Answer.summary`. One JSON call per section; non-fatal per section; `only_question_ids` re-runs it for
+   second-pass answers. Events: `layer_6_5_start/complete/failed`, `summary_section_start/complete/failed`.
+   Surfaces: legacy payload `answer_summary` (between `answer` and `page_citations`), OutputCompiler
+   browser/Excel formats, excel_dashboard Detailed Results + By Section ("Answer Summary" column after
+   Answer), index.html unitary table/modals/CSV/HTML report.
+2. **enabled_sections filter** extracted to module-level `apply_enabled_sections(config, enabled_sections)`
+   in `orchestrator.py` — raises ValueError on empty/unknown-only selections, emits `sections_filtered`
+   event {requested, matched, dropped}. Tests: `tests/test_section_filter.py`.
+3. **Q-gen is two-stage** (`/api/config/questions/generate` + `/generate-additional`): Stage 1
+   `_build_persona_panel()` (Persona Architect) derives a bespoke 3-6 expert panel from the uploaded
+   material + `source_intent` (new optional field: user's one-line intent for the attachment); Stage 2
+   generates with the panel embedded and REQUIRES per-section `section_summary` rationale. Response adds
+   `generation_personas` + `document_reading`. Architect failure → single-stage fallback, never 500.
