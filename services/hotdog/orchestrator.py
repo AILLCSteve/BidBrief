@@ -56,6 +56,45 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+def apply_enabled_sections(config: ParsedConfig, enabled_sections: Optional[List[str]]) -> ParsedConfig:
+    """
+    Filter a ParsedConfig down to the client-selected sections.
+
+    Extracted from analyze_document so the filter is unit-testable in isolation
+    (regression guard: deselected sections must NEVER reach expert generation).
+
+    - None → passthrough (analyze everything).
+    - Unknown ids alongside known ones are dropped (stale client selections).
+    - Empty list or unknown-only ids → ValueError: proceeding would either
+      analyze nothing or silently analyze everything — both are client-visible
+      bugs that must fail loudly instead.
+    """
+    if enabled_sections is None:
+        return config
+
+    original_section_count = len(config.sections)
+    original_question_count = config.total_questions
+
+    config.sections = [s for s in config.sections if s.id in enabled_sections]
+
+    if not config.sections:
+        raise ValueError(
+            f"enabled_sections matched no sections — ids sent: {enabled_sections}; "
+            f"available: {[s.id for s in list(config.section_map.values())]}"
+        )
+
+    # Rebuild maps based on filtered sections
+    config.section_map = {s.id: s for s in config.sections}
+    config.question_map = {}
+    for section in config.sections:
+        for question in section.questions:
+            config.question_map[question.id] = question
+
+    logger.info(f"  🔍 Filtered to {config.total_sections}/{original_section_count} enabled sections")
+    logger.info(f"  🔍 Analyzing {config.total_questions}/{original_question_count} questions")
+    return config
+
+
 class HotdogOrchestrator:
     """
     Main orchestrator for HOTDOG AI document analysis.
@@ -279,24 +318,19 @@ class HotdogOrchestrator:
 
             config = self.layer1_config.load_from_json(config_file)
 
-            # FILTER CONFIG: Only include enabled sections if specified
+            # FILTER CONFIG: Only include enabled sections if specified.
+            # Extracted + fail-fast (see apply_enabled_sections) so deselected
+            # sections can never silently leak into expert generation.
             if enabled_sections is not None:
-                original_section_count = len(config.sections)
-                original_question_count = config.total_questions
-
-                # Filter to only enabled sections
-                config.sections = [s for s in config.sections if s.id in enabled_sections]
-
-                # Rebuild maps based on filtered sections
-                config.section_map = {s.id: s for s in config.sections}
-                config.question_map = {}
-                for section in config.sections:
-                    for question in section.questions:
-                        config.question_map[question.id] = question
-
-                # Log filtering (properties auto-compute from filtered data)
-                logger.info(f"  🔍 Filtered to {config.total_sections}/{original_section_count} enabled sections")
-                logger.info(f"  🔍 Analyzing {config.total_questions}/{original_question_count} questions")
+                requested = list(enabled_sections)
+                available_ids = [s.id for s in config.sections]
+                config = apply_enabled_sections(config, enabled_sections)
+                matched = [s.id for s in config.sections]
+                self._emit_progress('sections_filtered', {
+                    'requested': requested,
+                    'matched': matched,
+                    'dropped': [i for i in available_ids if i not in matched],
+                })
 
             logger.info(f"  ✅ Loaded {config.total_questions} questions in {config.total_sections} sections")
             self._emit_progress('config_loaded', {
