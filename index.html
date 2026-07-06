@@ -1933,13 +1933,14 @@ function downloadJSON(data, filename) {
 }
 
 function downloadCSV(data) {
-    let csv = 'Section,#,Question,Answer,PDF Pages\n';
+    let csv = 'Section,#,Question,Answer,Answer Summary,PDF Pages\n';
 
     data.sections.forEach(section => {
         section.questions.forEach((q, index) => {
             const answer = q.answer ? q.answer.replace(/"/g, '""') : 'Not found';
+            const summary = q.answer_summary ? q.answer_summary.replace(/"/g, '""') : '';
             const pages = q.page_citations ? q.page_citations.join(';') : '';
-            csv += `"${section.section_name}","${index + 1}","${q.question}","${answer}","${pages}"\n`;
+            csv += `"${section.section_name}","${index + 1}","${q.question}","${answer}","${summary}","${pages}"\n`;
         });
     });
 
@@ -2000,6 +2001,7 @@ function exportHTML(data) {
                 <th>#</th>
                 <th>Question</th>
                 <th>Answer</th>
+                <th>Answer Summary</th>
                 <th>PDF Pages</th>
             </tr>
         </thead>
@@ -2013,6 +2015,7 @@ function exportHTML(data) {
                 <td>${index + 1}</td>
                 <td>${q.question}</td>
                 <td>${q.answer || 'Not found in document'}</td>
+                <td>${q.answer_summary || ''}</td>
                 <td>${q.page_citations ? q.page_citations.join(', ') : ''}</td>
             </tr>`;
         });
@@ -2426,6 +2429,7 @@ function updateUnitaryTableWithNewAnswers(newAnswers, stage = 'classic') {
             } else {
                 // Bid/Spec mode: Replace behavior (existing)
                 q.answer = answer.answer_text;
+                q.answer_summary = answer.answer_summary || q.answer_summary || null;
                 q.pages = answer.pages;
                 q.footnote = answer.footnote;
             }
@@ -2497,6 +2501,7 @@ function updateUnitaryTableAsFinal(result, isPartial) {
                     // Bid/Spec mode: Standard replace behavior
                     existing.status = q.answer ? 'found' : 'pending';
                     existing.answer = q.answer || null;
+                    existing.answer_summary = q.answer_summary || null;
                     existing.pages = q.page_citations || [];
                     existing.footnote = q.footnote || null;
                 }
@@ -2591,6 +2596,7 @@ function renderUnitaryTable() {
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 50px;">#</th>
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Question</th>
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Answer</th>
+                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 220px;">Answer Summary</th>
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 100px;">PDF Pages</th>
                             <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 80px;">Footnote</th>
                         </tr>
@@ -2646,6 +2652,7 @@ function renderUnitaryTable() {
                     <td style="padding: 10px; border: 1px solid #ddd;">
                         ${answerContent}
                     </td>
+                    <td style="padding: 10px; border: 1px solid #ddd; font-style: ${q.answer_summary ? 'normal' : 'italic'}; color: ${q.answer_summary ? '#1f2937' : '#999'};">${isPending ? '-' : (q.answer_summary || '-')}</td>
                     <td style="padding: 10px; border: 1px solid #ddd;">${isPending ? '-' : q.pages.join(', ')}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${q.footnote ? '✓' : '-'}</td>
                 </tr>
@@ -2676,9 +2683,9 @@ function updateUnitaryTableRows(questionIds) {
 
             row.style.background = rowColor;
 
-            // Update cells (skip section and number, update question/answer/pages/footnote)
+            // Update cells (skip section and number, update question/answer/summary/pages/footnote)
             const cells = row.cells;
-            if (cells.length >= 6) {
+            if (cells.length >= 7) {
                 if (isPending) {
                     cells[3].innerHTML = '<span style="color: #999; font-style: italic;">Analyzing...</span>';
                     cells[3].style.cursor = 'default';
@@ -2697,8 +2704,11 @@ function updateUnitaryTableRows(questionIds) {
                 }
                 cells[3].style.color = isPending ? '#999' : '';
                 cells[3].style.fontStyle = isPending ? 'italic' : '';
-                cells[4].innerHTML = isPending ? '-' : q.pages.join(', ');
-                cells[5].innerHTML = q.footnote ? '✓' : '-';
+                cells[4].innerHTML = isPending ? '-' : (q.answer_summary || '-');
+                cells[4].style.fontStyle = q.answer_summary ? 'normal' : 'italic';
+                cells[4].style.color = q.answer_summary ? '#1f2937' : '#999';
+                cells[5].innerHTML = isPending ? '-' : q.pages.join(', ');
+                cells[6].innerHTML = q.footnote ? '✓' : '-';
             }
         }
     });
@@ -3478,10 +3488,16 @@ async function generateAIQuestions() {
     try {
         let resp;
         if (currentFile) {
+            // Ask for a one-line description of what the doc should shape —
+            // it feeds the Persona Architect and per-section rationale.
+            const sourceIntent = (window.prompt(
+                'In one short line: what should this file be used for when creating the question set?\n' +
+                '(e.g. "derive questions from this inspection standard") — leave blank to skip.', '') || '').trim();
             // Send file alongside user input so backend can extract doc context
             const formData = new FormData();
             formData.append('user_input', input);
             formData.append('file', currentFile);
+            if (sourceIntent) formData.append('source_intent', sourceIntent);
             resp = await fetch('/api/config/questions/generate', {
                 method: 'POST',
                 body: formData
@@ -3519,14 +3535,25 @@ async function generateAIQuestions() {
         const qCount = questionConfig.sections.reduce((s, sec) => s + sec.questions.length, 0);
         const sCount = questionConfig.sections.length;
 
-        // Build inline preview of generated sections/questions
+        // Build inline preview of generated sections/questions.
+        // The bespoke expert panel (Persona Architect) leads the preview.
         let previewHtml = '';
+        if (data.generation_personas && data.generation_personas.length) {
+            previewHtml += `
+                <div style="margin-bottom: 10px; padding: 8px 12px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px;">
+                    <strong style="color: #3730a3; font-size: 12px;">Built by your expert panel:</strong>
+                    <span style="color: #4338ca; font-size: 12px;">
+                        ${data.generation_personas.map(p => p.name).join(' · ')}
+                    </span>
+                </div>`;
+        }
         questionConfig.sections.forEach(sec => {
             previewHtml += `
                 <div style="margin-bottom: 10px; border: 1px solid #d1fae5; border-radius: 6px; overflow: hidden;">
                     <div style="background: #ecfdf5; padding: 8px 12px; border-bottom: 1px solid #d1fae5;">
                         <strong style="color: #065f46; font-size: 13px;">${sec.section_name}</strong>
                         <span style="color: #6b7280; font-size: 11px; margin-left: 8px;">${sec.questions.length} question${sec.questions.length !== 1 ? 's' : ''}</span>
+                        ${sec.section_summary ? `<div style="color: #047857; font-size: 12px; font-style: italic; margin-top: 4px;">${sec.section_summary}</div>` : ''}
                     </div>
                     <ul style="margin: 0; padding: 8px 12px 8px 28px; list-style: disc;">
                         ${sec.questions.map(q => `<li style="color: #222; font-size: 13px; margin-bottom: 3px;">${q.text}</li>`).join('')}
@@ -3752,6 +3779,14 @@ function openAnswerDetailModal(questionId) {
                 ${answerHtml}
             </div>
         </div>
+
+        ${q.answer_summary ? `
+        <div style="margin-bottom: 15px;">
+            <div style="font-size: 1.1em; color: #1E3A8A; margin-bottom: 10px;"><strong>Answer Summary:</strong></div>
+            <div style="padding: 15px; background: #eef2ff; border-radius: 6px; border-left: 3px solid #5B7FCC;">
+                ${q.answer_summary}
+            </div>
+        </div>` : ''}
 
         ${footnoteHtml}
 
@@ -3983,6 +4018,7 @@ function renderFullViewDetailedTab() {
                     <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 150px;">Section</th>
                     <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 220px;">Question</th>
                     <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Answer</th>
+                    <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 220px;">Answer Summary</th>
                     <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 100px;">Pages</th>
                     ${currentAnalysisMode === 'bestprep' ? '<th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 70px;">Frags</th>' : ''}
                     <th style="padding: 12px; text-align: left; border: 1px solid #ddd; width: 60px;">Status</th>
@@ -4003,6 +4039,7 @@ function renderFullViewDetailedTab() {
                 <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.section_name}</td>
                 <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.question_text}</td>
                 <td style="padding: 10px; border: 1px solid #e5e7eb; max-width: 400px; word-wrap: break-word;">${hasAnswer ? q.answer : '<em style="color: #999;">Not found</em>'}</td>
+                <td style="padding: 10px; border: 1px solid #e5e7eb; word-wrap: break-word;">${q.answer_summary || '<em style="color: #999;">-</em>'}</td>
                 <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #1E3A8A; text-align: center;">${pages}</td>
                 ${currentAnalysisMode === 'bestprep' ? `<td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;"><span style="background: ${fragCount > 1 ? '#ff9800' : '#e0e0e0'}; color: ${fragCount > 1 ? 'white' : '#666'}; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${fragCount}</span></td>` : ''}
                 <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center; background: ${hasAnswer ? '#d4edda' : '#f8d7da'}; color: ${hasAnswer ? '#155724' : '#721c24'}; font-weight: 600;">${hasAnswer ? 'Yes' : 'No'}</td>
@@ -4048,6 +4085,7 @@ function renderFullViewBySectionTab() {
                             <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb; width: 40px;">#</th>
                             <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb;">Question</th>
                             <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb;">Answer</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb; width: 200px;">Answer Summary</th>
                             <th style="padding: 10px; text-align: left; border: 1px solid #e5e7eb; width: 100px;">Pages</th>
                             <th style="padding: 10px; text-align: center; border: 1px solid #e5e7eb; width: 60px;">Status</th>
                         </tr>
@@ -4064,6 +4102,7 @@ function renderFullViewBySectionTab() {
                     <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center;">${idx + 1}</td>
                     <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.question_text}</td>
                     <td style="padding: 10px; border: 1px solid #e5e7eb;">${hasAnswer ? q.answer : '<em style="color: #999;">Not found</em>'}</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">${q.answer_summary || '<em style="color: #999;">-</em>'}</td>
                     <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: 600; color: #1E3A8A; text-align: center;">${pages}</td>
                     <td style="padding: 10px; border: 1px solid #e5e7eb; text-align: center; background: ${hasAnswer ? '#d4edda' : '#f8d7da'}; color: ${hasAnswer ? '#155724' : '#721c24'}; font-weight: 600;">${hasAnswer ? 'Yes' : 'No'}</td>
                 </tr>
