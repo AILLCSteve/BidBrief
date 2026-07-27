@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- btools.ai "b-planet" mark - geometry twin of Sources/DesignSystem/BToolsLogo.swift
+       Brand tokens: ice #9DC1FF, periwinkle #5B7FCC, navy #1E3A8A, space #060B1E
+       Uncomment the rect for the dark-background variant. -->
+  <!-- <rect width="512" height="512" fill="#060B1E" rx="96"/> -->
+
+  <defs>
+    <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5B7FCC" stop-opacity="0.25"/>
+      <stop offset="0.5" stop-color="#5B7FCC"/>
+      <stop offset="1" stop-color="#5B7FCC" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Orbital ring (far pass, behind the glyph) -->
+  <g transform="rotate(-14 287 338)">
+    <ellipse cx="287" cy="338" rx="254" ry="75" fill="none"
+             stroke="url(#ringGrad)" stroke-width="25"/>
+  </g>
+
+  <!-- Stem (ascender of the lowercase b) -->
+  <rect x="124.5" y="36" width="59" height="420" rx="29.5" fill="#9DC1FF"/>
+
+  <!-- Bowl (the planet) -->
+  <circle cx="287" cy="338" r="103.5" fill="none" stroke="#9DC1FF" stroke-width="59"/>
+
+  <!-- Ring near pass (crosses in front of the bowl) -->
+  <g transform="rotate(-14 287 338)">
+    <path d="M 33 338 A 254 75 0 0 0 530 320" fill="none"
+          stroke="#5B7FCC" stroke-width="25" stroke-linecap="round"/>
+  </g>
+
+  <!-- The .ai spark (moon on the ring's ascending side) -->
+  <circle cx="512" cy="259" r="18" fill="#5B7FCC" transform="translate(-62 0)"/>
+</svg>
