@@ -73,6 +73,16 @@ def test_extracted_js_modules_are_served_and_own_their_functions(client, filenam
         assert needle in body, f'{needle!r} missing from {filename}'
 
 
+@pytest.mark.parametrize('path,needle', [
+    ('/shared/assets/css/bb-theme.css', '--bb-glow-ice: #45B4F2'),
+    ('/shared/assets/js/bb-ui.js', 'BB.ui ='),
+])
+def test_design_system_assets_served(client, path, needle):
+    resp = client.get(path)
+    assert resp.status_code == 200, f'{path} not served'
+    assert needle in resp.data.decode('utf-8')
+
+
 def test_index_html_has_no_inline_application_script(client):
     """All JS lives in files. Inline <script> blocks hide code from review,
     caching, and the module split - the page may only reference sources."""
