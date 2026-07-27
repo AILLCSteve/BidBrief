@@ -46,4 +46,13 @@ function loadModules(relPaths, overrides = {}) {
   return { BB: ctx.BB || ctx.window.BB, win: ctx };
 }
 
-module.exports = { loadModules, ROOT };
+/**
+ * Objects built inside the vm have that realm's prototypes, which makes
+ * assert.deepStrictEqual fail on structurally identical values. Normalise
+ * anything crossing the boundary before comparing it.
+ */
+function plain(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+module.exports = { loadModules, plain, ROOT };
