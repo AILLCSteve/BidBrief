@@ -61,6 +61,12 @@ MODULE_OWNERSHIP = {
     'bb-analyze.js': ['BB.analyze =', 'buildAnalyzePayload'],
     'bb-progress.js': ['BB.progress =', 'phaseTrack'],
     'bb-results.js': ['BB.results =', 'answer_summary'],
+    'bb-scraper.js': ['BB.scraper =', '/api/scraper/research'],
+    'bb-admin.js': ['BB.admin =', 'entriesFor'],
+    'bb-settings.js': ['BB.settings =', '/auth/logout'],
+    'bb-questionhub.js': ['BB.questionHub =', 'buildSaveBody'],
+    'bb-qgen.js': ['BB.qgen =', 'context_file'],
+    'bb-libraries.js': ['BB.libraries =', 'seedStarterOnce'],
 }
 
 
@@ -112,6 +118,24 @@ def test_shell_no_longer_ships_the_old_light_navbar(client):
     headers = _auth(client)
     html = client.get('/', headers=headers).data.decode('utf-8')
     assert 'mpt-navbar' not in html, 'the legacy light-theme navbar must be gone'
+
+
+def test_no_light_theme_leftovers_in_the_shipped_shell(client):
+    """The overhaul is only done when the old palette is gone from the shell."""
+    headers = _auth(client)
+    html = client.get('/', headers=headers).data.decode('utf-8')
+    for stale in ('#5B7FCC', '#1E3A8A', 'rgba(255, 255, 255, 0.95)'):
+        assert stale not in html, f'legacy light-theme value {stale} still in index.html'
+
+
+def test_every_script_the_shell_references_is_served(client):
+    """A 404 on one module silently breaks a whole screen in the browser."""
+    headers = _auth(client)
+    html = client.get('/', headers=headers).data.decode('utf-8')
+    srcs = [s for s in re.findall(r'<script[^>]*\bsrc="([^"]+)"', html) if s.startswith('/')]
+    assert len(srcs) >= 10, f'expected the full module set, found {len(srcs)}'
+    for src in srcs:
+        assert client.get(src).status_code == 200, f'{src} is not served'
 
 
 def test_starter_question_set_is_served_and_well_formed(client):
