@@ -95,3 +95,29 @@ def test_index_html_has_no_inline_application_script(client):
     inline = re.findall(r'<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>', html, re.S)
     meaningful = [b for b in inline if len(b.strip()) > 0]
     assert meaningful == [], f'{len(meaningful)} inline script block(s) remain in index.html'
+
+
+def test_shell_has_the_four_ios_pages_and_a_tab_bar(client):
+    headers = _auth(client)
+    html = client.get('/', headers=headers).data.decode('utf-8')
+    for page in ('bb-page-analyze', 'bb-page-questions', 'bb-page-admin', 'bb-page-settings'):
+        assert f'id="{page}"' in html, f'missing page container {page}'
+    assert 'id="bb-tabbar"' in html
+    assert 'id="bb-orb"' in html
+    assert '/shared/assets/css/bb-theme.css' in html
+    assert '/shared/assets/js/bb-boot.js' in html
+
+
+def test_shell_no_longer_ships_the_old_light_navbar(client):
+    headers = _auth(client)
+    html = client.get('/', headers=headers).data.decode('utf-8')
+    assert 'mpt-navbar' not in html, 'the legacy light-theme navbar must be gone'
+
+
+def test_every_stylesheet_the_shell_references_is_served(client):
+    headers = _auth(client)
+    html = client.get('/', headers=headers).data.decode('utf-8')
+    hrefs = re.findall(r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"', html)
+    assert hrefs, 'no stylesheets linked'
+    for href in hrefs:
+        assert client.get(href).status_code == 200, f'{href} is not served'
