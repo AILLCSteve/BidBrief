@@ -976,3 +976,46 @@ The following changes were made after the digest was originally generated. The f
    material + `source_intent` (new optional field: user's one-line intent for the attachment); Stage 2
    generates with the panel embedded and REQUIRES per-section `section_summary` rationale. Response adds
    `generation_personas` + `document_reading`. Architect failure → single-stage fallback, never 500.
+
+---
+
+## Δ 2026-07-26 — Web front-end rebuilt to iOS parity (2.2.0)
+
+The web client (`index.html`, `login.html`) was rebuilt so its visual language and information
+architecture match the BidBrief iOS app 2.1.3. **No backend behaviour changed** — the only `app.py`
+edit is the `/health` version string (`2.0.0` → `2.2.0`). Full map: `docs/WEB_FRONTEND.md`.
+
+1. **Structure.** The 5,514-line single-file app is gone. `index.html` is now a ~55-line shell (orb
+   layer, four page containers, tab bar, banner + modal hosts) and all CSS/JS lives under
+   `shared/assets/` served by the existing `/shared/<path:filename>` route. No bundler, no framework,
+   and the dead `cdn.sheetjs.com` script was removed (every Excel export is server-side).
+2. **Design system** (`css/bb-theme.css`, `css/bb-orb.css`): the iOS `BBTheme` palette verbatim, glass
+   cards, glow/ghost/hub buttons, stage headers, eyebrows, back chips, segmented controls, iOS-style
+   switches, and the suspended planet with per-tab parallax drift and a deterministic starfield. All
+   animation is disabled under `prefers-reduced-motion`.
+3. **Information architecture**: a floating capsule bottom tab bar — Analyze / Questions /
+   Admin·Bonus / Settings — replacing the old two-tab navbar. `BB.state` (`js/bb-state.js`) mirrors the
+   iOS `AppModels`, including the confirmed-question-set gate and the 2.1.3 cue rules (a fresh upload
+   cues Questions; confirming a set clears `needsQuestionChoice` so the cue advances to Analyze).
+4. **Analyze**: upload orb → configure (question-choice card, guardrails, **Start Analysis directly
+   below the guardrails and above the sections**, disabled until a set is confirmed) → progress →
+   results. Section toggles are WYSIWYG: the explicit checked list is always sent.
+5. **Progress**: `js/bb-status.js` is a transcription of iOS `AnalysisPhase`/`AnalysisStatus` — the
+   12%→90% window band, key-details staying under it, `analysis_complete` not terminal. Rendered as a
+   progress orb ring + five-step phase track, with a Live Activity popup (friendly narration for
+   everyone, raw event stream for admins only).
+6. **Results**: staged overview → sections → key details → document intelligence → improve
+   (second-pass / deep-RAG multi-select) → exports → table view. `answer_summary` renders between the
+   answer and the page citations everywhere, including CSV and the HTML report.
+7. **Question Hub** reaches full 2.1.x parity: Create/Add first and glowing, Libraries (localStorage
+   snapshots + a one-time Starter Set seed from the iOS `DefaultQuestionSet.json`), and a Current
+   Question Set disclosure that reads "No set currently loaded" until the user chooses. The Create
+   screen gained the **Questions Source** slot, an inline `source_intent` field (replacing
+   `window.prompt`), Replace/Merge with an automatic library snapshot, the expert-panel card, and
+   per-section rationale on suggestions. Generation now sends the analyzer document ALWAYS — as `file`
+   with `source_kind=context`, or as `context_file` beside a PDF questions-source (the 2.1.1/2.1.2
+   contract the web client never implemented).
+8. **Testing**: `tests/test_web_ui.py` (30 served-structure/invariant tests, incl. a PNG-alpha check so
+   a white-backed logo cannot ship again) and `tests/js/*.test.js` (85 dependency-free `node --test`
+   unit tests over the pure logic). Suite: **106 passed**. A Playwright walkthrough of login → upload →
+   hub → results → admin → settings at 1280px and 390px reports no console errors.
