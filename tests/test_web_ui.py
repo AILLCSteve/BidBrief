@@ -1,4 +1,4 @@
-"""Structural tests for the BidBrief web front-end (2.2.0 iOS-parity shell).
+"""Structural tests for the BidBrief web front-end (2.3.0 iOS-parity shell).
 
 These do not render the page; they assert the served bytes contain the
 structures the front-end depends on, so a broken asset path or a dropped
@@ -38,10 +38,10 @@ def _auth(client, role='user', username='webtester'):
         return {'Cookie': f'bidbrief_auth={token}'}
 
 
-def test_health_reports_2_2_0(client):
+def test_health_reports_2_3_0(client):
     resp = client.get('/health')
     assert resp.status_code == 200
-    assert resp.get_json()['version'] == '2.2.0'
+    assert resp.get_json()['version'] == '2.3.0'
 
 
 @pytest.mark.parametrize('name', [
@@ -80,11 +80,12 @@ MODULE_OWNERSHIP = {
     'bb-progress.js': ['BB.progress =', 'phaseTrack'],
     'bb-results.js': ['BB.results =', 'answer_summary'],
     'bb-scraper.js': ['BB.scraper =', '/api/scraper/research'],
-    'bb-admin.js': ['BB.admin =', 'entriesFor'],
+    'bb-admin.js': ['BB.admin =', 'entriesFor', '/api/admin/beta', 'betaSummaryText'],
     'bb-settings.js': ['BB.settings =', '/auth/logout'],
     'bb-questionhub.js': ['BB.questionHub =', 'buildSaveBody'],
     'bb-qgen.js': ['BB.qgen =', 'context_file'],
     'bb-libraries.js': ['BB.libraries =', 'seedStarterOnce'],
+    'bb-login.js': ['BB.login =', '/auth/beta-login', '/api/beta/status'],
 }
 
 
@@ -174,6 +175,17 @@ def test_login_page_wears_the_orb_and_the_btools_lockup(client):
     # The form contract the backend depends on must survive the restyle.
     assert 'action="/auth/login"' in html and 'method="POST"' in html
     assert 'name="username"' in html and 'name="password"' in html
+
+
+def test_login_page_carries_the_beta_path(client):
+    """The button ships in the markup but starts hidden; bb-login.js reveals it
+    only when /api/beta/status says free beta is open."""
+    html = client.get('/login').data.decode('utf-8')
+    assert 'id="betaAccess"' in html and 'hidden' in html
+    assert 'id="betaButton"' in html
+    assert 'Free Beta Testing' in html
+    # The terms modal needs a host on this page.
+    assert 'id="bb-modal-host"' in html
 
 
 def test_login_page_drops_the_old_white_card(client):

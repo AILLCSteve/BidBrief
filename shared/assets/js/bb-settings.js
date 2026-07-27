@@ -5,7 +5,7 @@
   var BB = window.BB = window.BB || {};
   var ui = BB.ui;
 
-  var VERSION = '2.2.0';
+  var VERSION = '2.3.0';
 
   function render() {
     var host = ui.qs('#bb-page-settings');
@@ -17,11 +17,16 @@
 
       ui.card('Account', [
         row('Signed in as', session.username || '—'),
-        row('Role', session.isAdmin ? 'Admin' : (session.hasPremium ? 'Premium' : 'User')),
+        row('Role', accountKind(session)),
         ui.el('a', {
           class: 'bb-btn-ghost bb-danger', href: '/auth/logout', style: 'margin-top:12px'
         }, 'Sign Out')
       ]),
+
+      session.isBeta ? ui.card('Free Beta', [
+        row('Documents left', betaRemainingText(session.beta)),
+        ui.el('p', { class: 'bb-body', style: 'margin-top:10px' }, betaNotice(session.beta))
+      ]) : null,
 
       ui.card('About', [
         row('Version', VERSION),
@@ -47,5 +52,31 @@
     ]);
   }
 
-  BB.settings = { render: render, VERSION: VERSION };
+  function accountKind(session) {
+    if (session.isAdmin) return 'Admin';
+    if (session.isBeta) return 'Free Beta';
+    return session.hasPremium ? 'Premium' : 'User';
+  }
+
+  /** "2 of 5" - pure, unit tested. */
+  function betaRemainingText(beta) {
+    if (!beta) return '—';
+    return (beta.docs_remaining || 0) + ' of ' + (beta.doc_limit || 0);
+  }
+
+  function betaNotice(beta) {
+    var left = beta ? (beta.docs_remaining || 0) : 0;
+    if (left > 0) {
+      return 'Free beta access is available for a limited time. When the beta ends, or once ' +
+             'your free documents are used, a subscription is required to continue using ' +
+             'BidBrief and access full functionality.';
+    }
+    return 'You have used every document in your free beta. Subscribe to keep analyzing ' +
+           'documents and unlock full functionality.';
+  }
+
+  BB.settings = {
+    render: render, VERSION: VERSION,
+    accountKind: accountKind, betaRemainingText: betaRemainingText, betaNotice: betaNotice
+  };
 })(typeof window !== 'undefined' ? window : this);

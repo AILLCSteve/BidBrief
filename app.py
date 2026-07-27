@@ -38,6 +38,7 @@ from werkzeug.utils import secure_filename
 
 # Import HOTDOG orchestrator
 from services.hotdog import HotdogOrchestrator
+from services.beta_access import BetaAccess, is_beta_username, serialize_tester
 # Excel dashboard import moved to lazy load (only when endpoint is called)
 # This prevents app crash if openpyxl isn't installed
 import asyncio
@@ -329,6 +330,16 @@ active_sessions = {}
 # session dashboard (/api/admin/sessions) or the bonus-feature admin routes.
 bonus_feature_users = set()
 
+# Free Beta Testing: an admin-flippable switch plus the ephemeral tester registry.
+# Boot state comes from BETA_LOGIN_ENABLED so a deploy restores intent (every dict
+# in this process is wiped on restart). Beta testers are ORDINARY users with a
+# document quota — never admin, never premium. See services/beta_access.py.
+beta_access = BetaAccess()
+logger.info(
+    f"🧪 Free Beta Testing: {'ENABLED' if beta_access.enabled else 'disabled'} at boot "
+    f"(doc limit {beta_access.default_doc_limit})"
+)
+
 # Log loaded users on startup
 logger.info("="*60)
 logger.info("AUTHORIZED USERS LOADED:")
@@ -619,6 +630,26 @@ def _session_has_premium(session) -> bool:
     return session.get('username') in bonus_feature_users
 
 
+def _beta_quota_exhausted(username: str):
+    """The free-beta wall. 402 Payment Required is the honest status here: the
+    request is authenticated and well-formed, it just needs a subscription."""
+    tester = beta_access.get(username) or {}
+    limit = tester.get('doc_limit', beta_access.default_doc_limit)
+    logger.info(f"🧪 Beta quota exhausted for {username} ({limit} documents)")
+    audit_log('beta_quota_exhausted', username, {'doc_limit': limit})
+    return jsonify({
+        'success': False,
+        'error': (
+            f'Your free beta includes {limit} document'
+            f"{'s' if limit != 1 else ''}, and you have used them all. "
+            'Subscribe to keep analyzing documents with BidBrief.'
+        ),
+        'beta_quota_exhausted': True,
+        'doc_limit': limit,
+        'docs_remaining': 0
+    }), 402
+
+
 def _resolve_high_power_request(requested: bool):
     """
     Validate a `high_power: true` request against the caller's entitlements.
@@ -720,16 +751,8 @@ def form_login():
         return redirect('/login?error=invalid')
 
     # Create session token
-    token = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=24)
     user_role = AUTHORIZED_USERS[username].get('role', 'user')
-
-    active_sessions[token] = {
-        'username': username,
-        'name': AUTHORIZED_USERS[username]['name'],
-        'role': user_role,
-        'expires_at': expires_at
-    }
+    token = _issue_session(username, AUTHORIZED_USERS[username]['name'], user_role)
 
     logger.info(f"Form login successful for: {username} (role: {user_role})")
 
@@ -737,7 +760,26 @@ def form_login():
     audit_log('login', username, {'role': user_role})
 
     # Create response with auth cookie
-    response = make_response(redirect('/'))
+    return _set_auth_cookie(make_response(redirect('/')), token)
+
+
+def _issue_session(username, name, role, is_beta=False):
+    """Mint a session token for an authenticated identity. Single source of truth
+    for what a session record contains — form login, API login and beta login all
+    go through here so the shape can never drift between them."""
+    token = secrets.token_urlsafe(32)
+    active_sessions[token] = {
+        'username': username,
+        'name': name,
+        'role': role,
+        'is_beta': bool(is_beta),
+        'expires_at': datetime.now() + timedelta(hours=24)
+    }
+    return token
+
+
+def _set_auth_cookie(response, token):
+    """Attach the bidbrief_auth cookie with the app's standard policy."""
     response.set_cookie(
         'bidbrief_auth',
         token,
@@ -747,6 +789,53 @@ def form_login():
         max_age=24 * 60 * 60  # 24 hours
     )
     return response
+
+
+@app.route('/api/beta/status', methods=['GET'])
+def beta_status():
+    """Public: does the login page show the free-beta button, and on what terms?
+
+    Deliberately unauthenticated (the login page is pre-auth) and deliberately
+    thin — it exposes the switch and the quota, never the tester registry.
+    """
+    return jsonify({
+        'success': True,
+        'enabled': beta_access.enabled,
+        'doc_limit': beta_access.default_doc_limit
+    })
+
+
+@app.route('/auth/beta-login', methods=['POST'])
+def beta_login():
+    """Start a free beta session under a freshly minted ephemeral identity.
+
+    Every caller gets their OWN username. Analyses are owner-scoped by username,
+    so a shared beta account would let any tester read any other tester's
+    results — this is the control that prevents that.
+    """
+    if not beta_access.enabled:
+        logger.warning("Beta login attempted while free beta access is disabled")
+        audit_log('beta_login_denied', None, {'reason': 'disabled'})
+        return jsonify({
+            'success': False,
+            'error': 'Free beta access is not available right now.'
+        }), 403
+
+    tester = beta_access.mint()
+    token = _issue_session(tester['username'], tester['name'], 'user', is_beta=True)
+
+    logger.info(f"🧪 Beta session started: {tester['username']} (limit {tester['doc_limit']} docs)")
+    audit_log('beta_login', tester['username'], {'doc_limit': tester['doc_limit']})
+
+    response = jsonify({
+        'success': True,
+        'username': tester['username'],
+        'name': tester['name'],
+        'doc_limit': tester['doc_limit'],
+        'docs_remaining': tester['doc_limit'],
+        'redirect': '/'
+    })
+    return _set_auth_cookie(response, token)
 
 
 @app.route('/auth/logout')
@@ -776,7 +865,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.2.0'
+        'version': '2.3.0'
     })
 
 @app.route('/pics/<path:filename>')
@@ -816,16 +905,8 @@ def authenticate():
         logger.warning(f"  Expected hash: {expected_hash[:20]}...")
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
-    token = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=24)
     user_role = AUTHORIZED_USERS[username].get('role', 'user')
-
-    active_sessions[token] = {
-        'username': username,
-        'name': AUTHORIZED_USERS[username]['name'],
-        'role': user_role,
-        'expires_at': expires_at
-    }
+    token = _issue_session(username, AUTHORIZED_USERS[username]['name'], user_role)
 
     return jsonify({
         'success': True,
@@ -861,14 +942,28 @@ def get_user_info():
     if not session:
         return jsonify({'success': False, 'error': 'Not authenticated'}), 401
 
-    return jsonify({
+    username = session.get('username', 'unknown')
+    info = {
         'success': True,
-        'username': session.get('username', 'unknown'),
+        'username': username,
         'role': session.get('role', 'user'),
         'is_admin': session.get('role') == 'admin',
-        'bonus_features': session.get('username') in bonus_feature_users,
-        'premium': _session_has_premium(session)
-    })
+        'bonus_features': username in bonus_feature_users,
+        'premium': _session_has_premium(session),
+        'is_beta': bool(session.get('is_beta'))
+    }
+
+    # Beta testers get their live quota so the client can show what's left and
+    # explain the wall before they hit it.
+    tester = beta_access.get(username) if info['is_beta'] else None
+    if tester:
+        info['beta'] = {
+            'doc_limit': tester['doc_limit'],
+            'docs_used': tester['docs_used'],
+            'docs_remaining': max(0, tester['doc_limit'] - tester['docs_used'])
+        }
+
+    return jsonify(info)
 
 
 # API KEY
@@ -1097,11 +1192,28 @@ def get_events(session_id):
 # ============================================================================
 
 @app.route('/api/analyze', methods=['POST'])
+@require_auth
 def analyze_document():
-    """Start HOTDOG AI analysis in background thread. Uses cryptographically secure session IDs."""
+    """Start HOTDOG AI analysis in background thread. Uses cryptographically secure session IDs.
+
+    Authentication is REQUIRED. Without it an anonymous caller starts an analysis
+    with owner=None, which (a) bypasses the free-beta document quota entirely and
+    (b) produces an unowned session that _is_authorized_for_session lets anyone
+    read. /api/upload has always required auth; this route must match it.
+    """
 
     # Get request data
     data = request.json
+
+    # Resolve the caller once, up front: both the beta quota wall and the
+    # session owner depend on it.
+    username, role = _current_user_info()
+
+    # Free beta quota — checked before any other validation so an exhausted
+    # tester gets the paywall message rather than an unrelated error.
+    if is_beta_username(username) and beta_access.remaining(username) == 0:
+        return _beta_quota_exhausted(username)
+
     upload_id = data.get('upload_id')
     pdf_filename = data.get('pdf_filename', 'Unknown.pdf')  # Original filename for display
     context_guardrails = data.get('context_guardrails', '')
@@ -1137,7 +1249,6 @@ def analyze_document():
 
     # Ownership enforcement for uploads: if upload has owner, only that owner or admin may start analysis
     upload_owner = upload_info.get('owner')
-    username, role = _current_user_info()
     if upload_owner and not (role == 'admin' or username == upload_owner):
         logger.warning(f"Unauthorized analysis start attempt by {username} for upload {upload_id[:8]}... owned by {upload_owner}")
         return jsonify({'success': False, 'error': 'Unauthorized: upload ownership mismatch'}), 403
@@ -1406,6 +1517,16 @@ def analyze_document():
     # race condition where early polls arrive before thread has inited the orchestrator.
     owner = username if username else None
 
+    # Claim the beta document now that the request is fully validated: a malformed
+    # or unauthorized request must never cost a tester one of their free documents.
+    # consume_document is atomic, so two concurrent starts can't both take the last one.
+    beta_remaining = None
+    if is_beta_username(owner):
+        allowed, beta_remaining = beta_access.consume_document(owner)
+        if not allowed:
+            return _beta_quota_exhausted(owner)
+        logger.info(f"🧪 Beta document consumed by {owner} — {beta_remaining} remaining")
+
     # Pre-extract doc context while PDF is still on disk. Stored here so Smart Analysis
     # can use it later even if the PDF temp file has been cleaned up by then.
     _preextracted_doc_context = ''
@@ -1435,11 +1556,14 @@ def analyze_document():
     logger.info(f"Analysis thread started: {session_id}")
 
     # Return immediately (don't wait for analysis)
-    return jsonify({
+    payload = {
         'success': True,
         'session_id': session_id,
         'message': 'Analysis started in background'
-    })
+    }
+    if beta_remaining is not None:
+        payload['docs_remaining'] = beta_remaining
+    return jsonify(payload)
 
 
 # ============================================================================
@@ -2508,6 +2632,211 @@ def set_bonus_features():
     return jsonify({'success': True, 'email': email, 'bonus_features': email in bonus_feature_users})
 
 
+def format_session_info(session_id, session_data, status):
+    """Shape one analysis for any admin view.
+
+    Module-level (not nested in the route) so /api/admin/sessions and the beta
+    tester dashboard render identical rows — the iOS AdminSessionInfo decoder
+    reads exactly these keys, so one formatter means one contract.
+    """
+    try:
+        info = {
+            'session_id': session_id,
+            'status': status,
+            # Do not expose internal file paths; show filename and owner only
+            'pdf_path': '[REDACTED]',
+            'pdf_filename': session_data.get('pdf_filename', 'Unknown.pdf'),
+            'owner': session_data.get('owner', None),
+            'config_path': session_data.get('config_path', 'N/A'),
+            'mode': session_data.get('mode', 'bid_spec'),  # Include analysis mode for export routing
+        }
+
+        # Add timestamp if available
+        if 'completed_at' in session_data:
+            info['completed_at'] = session_data['completed_at'].isoformat()
+        if 'stopped_at' in session_data:
+            info['stopped_at'] = session_data['stopped_at'].isoformat()
+        if 'started_at' in session_data:
+            info['started_at'] = session_data['started_at'].isoformat()
+
+        # Add result statistics if available (with error handling)
+        if 'result' in session_data:
+            result = session_data['result']
+            # Check if result has the expected attributes (it's a dataclass)
+            info['questions_answered'] = getattr(result, 'questions_answered', 'N/A')
+            info['total_pages'] = getattr(result, 'total_pages', 'N/A')
+            info['total_tokens'] = getattr(result, 'total_tokens', 'N/A')
+            info['processing_time'] = getattr(result, 'processing_time_seconds', 'N/A')
+
+        return info
+    except Exception as e:
+        # Log the error but still return basic info
+        logger.error(f"Error formatting session {session_id}: {e}", exc_info=True)
+        return {
+            'session_id': session_id,
+            'status': f'error_{status}',
+            'pdf_path': 'Error formatting',
+            'config_path': 'Error formatting',
+            'error': str(e)
+        }
+
+
+def _snapshot_sessions_by_bucket():
+    """Atomic snapshot of every analysis dict, grouped by lifecycle bucket.
+
+    Touches timestamps so viewing sessions in an admin panel keeps them alive.
+    """
+    with session_lock:
+        all_session_ids = (
+            list(active_analyses.keys()) +
+            list(completed_analyses.keys()) +
+            list(partial_analyses.keys()) +
+            list(analysis_results.keys())
+        )
+        for sid in all_session_ids:
+            session_timestamps[sid] = datetime.now()
+
+        return {
+            'active': [format_session_info(sid, data, 'active')
+                       for sid, data in active_analyses.items()],
+            'completed': [format_session_info(sid, data, 'completed')
+                          for sid, data in completed_analyses.items()],
+            'partial': [format_session_info(sid, data, 'partial')
+                        for sid, data in partial_analyses.items()],
+            'legacy': [format_session_info(sid, data, 'legacy_completed')
+                       for sid, data in analysis_results.items()],
+        }
+
+
+# ---- Free Beta Testing administration ---------------------------------------
+
+def _revoke_sessions_for(username: str) -> int:
+    """Drop every live auth session belonging to a username. Returns the count."""
+    tokens = [t for t, s in active_sessions.items() if s.get('username') == username]
+    for token in tokens:
+        active_sessions.pop(token, None)
+    return len(tokens)
+
+
+def _beta_dashboard_payload():
+    """The whole beta picture in one response: the switch, and every tester with
+    their quota and their analyses. One round trip keeps the admin panel simple."""
+    buckets = _snapshot_sessions_by_bucket()
+    by_owner = {}
+    for rows in buckets.values():
+        for row in rows:
+            owner = row.get('owner')
+            if owner:
+                by_owner.setdefault(owner, []).append(row)
+
+    live_sessions = {}
+    for session in active_sessions.values():
+        name = session.get('username')
+        if name:
+            live_sessions[name] = live_sessions.get(name, 0) + 1
+
+    testers = []
+    for record in beta_access.all():
+        name = record['username']
+        tester = serialize_tester(record, by_owner.get(name, []))
+        tester['signed_in'] = live_sessions.get(name, 0) > 0
+        testers.append(tester)
+
+    return {
+        'success': True,
+        'enabled': beta_access.enabled,
+        'default_doc_limit': beta_access.default_doc_limit,
+        'testers': testers,
+        'summary': {
+            'tester_count': len(testers),
+            'signed_in_count': sum(1 for t in testers if t['signed_in']),
+            'docs_used': sum(t['docs_used'] for t in testers),
+            'exhausted_count': sum(1 for t in testers if t['exhausted']),
+        }
+    }
+
+
+@app.route('/api/admin/beta', methods=['GET'])
+@require_admin
+def get_beta_admin():
+    """Admin-only: the free-beta switch, every ephemeral tester, and their sessions."""
+    return jsonify(_beta_dashboard_payload())
+
+
+@app.route('/api/admin/beta', methods=['POST'])
+@require_admin
+def set_beta_enabled():
+    """Admin-only: turn the login page's free-beta button on or off, live."""
+    data = request.get_json(silent=True) or {}
+    if 'enabled' not in data:
+        return jsonify({'success': False, 'error': 'enabled is required'}), 400
+
+    enabled = beta_access.set_enabled(bool(data.get('enabled')))
+    admin_user, _ = _current_user_info()
+    audit_log('beta_access_change', admin_user, {'enabled': enabled})
+    logger.info(f"🧪 Free Beta Testing {'ENABLED' if enabled else 'DISABLED'} by {admin_user}")
+    return jsonify({'success': True, 'enabled': enabled})
+
+
+@app.route('/api/admin/beta/testers/<username>', methods=['POST'])
+@require_admin
+def update_beta_tester(username):
+    """Admin-only: extend a tester's trial.
+
+    Body takes exactly one of:
+      {'reset': true}         zero the counter — a fresh trial at the same quota
+      {'grant': 5}            add documents on top of the current quota
+      {'doc_limit': 20}       set the quota outright
+    """
+    data = request.get_json(silent=True) or {}
+
+    if data.get('reset'):
+        record, action = beta_access.reset_usage(username), 'reset'
+    elif 'grant' in data:
+        try:
+            grant = int(data['grant'])
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'grant must be a number'}), 400
+        record, action = beta_access.grant_documents(username, grant), f'grant:{grant}'
+    elif 'doc_limit' in data:
+        try:
+            limit = int(data['doc_limit'])
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'doc_limit must be a number'}), 400
+        if limit < 0:
+            return jsonify({'success': False, 'error': 'doc_limit cannot be negative'}), 400
+        record, action = beta_access.set_doc_limit(username, limit), f'doc_limit:{limit}'
+    else:
+        return jsonify({'success': False, 'error': 'reset, grant or doc_limit is required'}), 400
+
+    if not record:
+        return jsonify({'success': False, 'error': 'Unknown beta tester'}), 404
+
+    admin_user, _ = _current_user_info()
+    audit_log('beta_tester_update', admin_user, {'target': username, 'action': action})
+    logger.info(f"🧪 Beta tester {username} updated by {admin_user} ({action})")
+    return jsonify({'success': True, 'tester': serialize_tester(record)})
+
+
+@app.route('/api/admin/beta/testers/<username>', methods=['DELETE'])
+@require_admin
+def delete_beta_tester(username):
+    """Admin-only: delete a tester and sign them out immediately.
+
+    Their analyses are deliberately left in server memory — deleting the identity
+    must not destroy work you may still want to inspect in the dashboard.
+    """
+    record = beta_access.delete(username)
+    if not record:
+        return jsonify({'success': False, 'error': 'Unknown beta tester'}), 404
+
+    revoked = _revoke_sessions_for(username)
+    admin_user, _ = _current_user_info()
+    audit_log('beta_tester_delete', admin_user, {'target': username, 'sessions_revoked': revoked})
+    logger.info(f"🧪 Beta tester {username} deleted by {admin_user} ({revoked} session(s) revoked)")
+    return jsonify({'success': True, 'username': username, 'sessions_revoked': revoked})
+
+
 @app.route('/api/admin/sessions', methods=['GET'])
 @require_admin
 def get_all_sessions():
@@ -2524,93 +2853,9 @@ def get_all_sessions():
     logger.info(f"Session timestamps keys: {list(session_timestamps.keys())}")
     logger.info("="*60)
 
-    def format_session_info(session_id, session_data, status):
-        """Helper to format session data for admin view"""
-        try:
-            info = {
-                'session_id': session_id,
-                'status': status,
-                # Do not expose internal file paths; show filename and owner only
-                'pdf_path': '[REDACTED]',
-                'pdf_filename': session_data.get('pdf_filename', 'Unknown.pdf'),
-                'owner': session_data.get('owner', None),
-                'config_path': session_data.get('config_path', 'N/A'),
-                'mode': session_data.get('mode', 'bid_spec'),  # Include analysis mode for export routing
-            }
-
-            # Add timestamp if available
-            if 'completed_at' in session_data:
-                info['completed_at'] = session_data['completed_at'].isoformat()
-            if 'stopped_at' in session_data:
-                info['stopped_at'] = session_data['stopped_at'].isoformat()
-            if 'started_at' in session_data:
-                info['started_at'] = session_data['started_at'].isoformat()
-
-            # Add result statistics if available (with error handling)
-            if 'result' in session_data:
-                result = session_data['result']
-                # Check if result has the expected attributes (it's a dataclass)
-                info['questions_answered'] = getattr(result, 'questions_answered', 'N/A')
-                info['total_pages'] = getattr(result, 'total_pages', 'N/A')
-                info['total_tokens'] = getattr(result, 'total_tokens', 'N/A')
-                info['processing_time'] = getattr(result, 'processing_time_seconds', 'N/A')
-
-            return info
-        except Exception as e:
-            # Log the error but still return basic info
-            logger.error(f"Error formatting session {session_id}: {e}", exc_info=True)
-            return {
-                'session_id': session_id,
-                'status': f'error_{status}',
-                'pdf_path': 'Error formatting',
-                'config_path': 'Error formatting',
-                'error': str(e)
-            }
-
     # CRITICAL: Atomic snapshot of all session dicts with lock
     # Prevents race conditions where sessions appear/disappear during iteration
-    with session_lock:
-        # Touch all session timestamps to keep them alive when admin views them
-        all_session_ids = (
-            list(active_analyses.keys()) +
-            list(completed_analyses.keys()) +
-            list(partial_analyses.keys()) +
-            list(analysis_results.keys())
-        )
-        for sid in all_session_ids:
-            session_timestamps[sid] = datetime.now()
-
-        # ENHANCED DIAGNOSTIC: Log what we see INSIDE the lock
-        logger.info("🔍 INSIDE LOCK:")
-        logger.info(f"🔍   Module ID: {MODULE_LOAD_ID} | PID: {os.getpid()} | Uptime: {time.time() - MODULE_LOAD_TIME:.1f}s")
-        logger.info(f"🔍   Active keys: {list(active_analyses.keys())}")
-        logger.info(f"🔍   Completed keys: {list(completed_analyses.keys())}")
-        logger.info(f"🔍   Partial keys: {list(partial_analyses.keys())}")
-        logger.info(f"🔍   Legacy keys: {list(analysis_results.keys())}")
-        logger.info(f"🔍   Timestamps keys: {list(session_timestamps.keys())}")
-        logger.info(f"🔍   Dict memory IDs - completed={id(completed_analyses)}, partial={id(partial_analyses)}")
-        logger.info(f"🔍   Thread: {threading.current_thread().name}")
-        logger.info(f"🔍   Total session IDs collected: {len(all_session_ids)}")
-
-        # Gather all sessions (single atomic snapshot)
-        sessions = {
-            'active': [
-                format_session_info(sid, data, 'active')
-                for sid, data in active_analyses.items()
-            ],
-            'completed': [
-                format_session_info(sid, data, 'completed')
-                for sid, data in completed_analyses.items()
-            ],
-            'partial': [
-                format_session_info(sid, data, 'partial')
-                for sid, data in partial_analyses.items()
-            ],
-            'legacy': [
-                format_session_info(sid, data, 'legacy_completed')
-                for sid, data in analysis_results.items()
-            ]
-        }
+    sessions = _snapshot_sessions_by_bucket()
 
     # Summary counts (can be done outside lock using snapshot)
     summary = {

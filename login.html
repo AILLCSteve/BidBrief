@@ -47,12 +47,25 @@
                 <button type="submit" class="bb-btn-glow bb-pulses">Sign In</button>
             </form>
 
+            <!-- Revealed only when GET /api/beta/status reports the switch is on. -->
+            <div id="betaAccess" class="bb-beta-access" hidden>
+                <div class="bb-or"><span>or</span></div>
+                <button type="button" id="betaButton" class="bb-btn-ghost bb-beta-btn">
+                    <span class="bb-beta-spark">✦</span>
+                    Free Beta Testing
+                </button>
+                <p class="bb-beta-note">No account needed · Limited time</p>
+            </div>
+
             <footer>
                 Powered by <a href="https://additionalintel.com" target="_blank" rel="noopener">Additional Intelligence LLC</a><br>
                 Patent Pending
             </footer>
         </div>
     </div>
+
+    <div id="bb-modal-host"></div>
+    <div id="bb-banner-host"></div>
 
     <script src="/shared/assets/js/bb-ui.js"></script>
     <script src="/shared/assets/js/bb-orb.js"></script>

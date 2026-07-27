@@ -1019,3 +1019,31 @@ edit is the `/health` version string (`2.0.0` → `2.2.0`). Full map: `docs/WEB_
    a white-backed logo cannot ship again) and `tests/js/*.test.js` (85 dependency-free `node --test`
    unit tests over the pure logic). Suite: **106 passed**. A Playwright walkthrough of login → upload →
    hub → results → admin → settings at 1280px and 390px reports no console errors.
+
+---
+
+## Δ 2026-07-27 — Free Beta Testing + an /api/analyze auth fix (2.3.0)
+
+A one-click free trial on the web sign-in page, an admin panel to run it, and a per-tester
+document quota. **iOS untouched.** Full detail: `HANDOFF.md` § 2.3.0, `docs/WEB_FRONTEND.md`
+(invariants 9–12).
+
+1. **`services/beta_access.py` (NEW)** — owns the free-beta switch and the ephemeral tester
+   registry. In-memory, lock-guarded (analyses run on background threads), hands out dict copies.
+   Boot state from `BETA_LOGIN_ENABLED`, quota from `BETA_DOC_LIMIT` (default 5).
+2. **Ephemeral identities, never a shared account.** Each `/auth/beta-login` mints `beta-<hex>`.
+   Analyses are owner-scoped by username (`_is_authorized_for_session`), so one shared beta
+   account would make every tester's results readable by every other tester.
+3. **New routes**: `GET /api/beta/status` (public), `POST /auth/beta-login`,
+   `GET|POST /api/admin/beta`, `POST|DELETE /api/admin/beta/testers/<username>`.
+   `/api/user/info` gained `is_beta` + a live `beta` quota block.
+4. **Quota** is enforced in `/api/analyze` — pre-checked for a clean 402 paywall, then claimed
+   atomically at session pre-registration so invalid requests cost nothing.
+5. **SECURITY: `/api/analyze` gained `@require_auth`.** It had none. Anonymous callers created
+   analyses with `owner=None` — bypassing the quota and producing unowned sessions readable by
+   anyone. A wider audit found 44 unguarded `/api/*` routes; most rely on per-session ownership
+   checks, but the question-config group (already noted as a backend gap) remains genuinely open.
+6. **Refactors**: `_issue_session` + `_set_auth_cookie` unify session creation across form/API/beta
+   login; `format_session_info` + `_snapshot_sessions_by_bucket` lifted to module scope so the beta
+   dashboard and `/api/admin/sessions` serve identical session rows (the shape iOS decodes).
+7. `/health` → **2.3.0**. Suite: **130 passed** (was 106); JS: **97 passed** (was 85).

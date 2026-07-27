@@ -104,6 +104,9 @@
     s.isAdmin = !!data.is_admin;
     s.hasPremium = !!(data.is_admin || data.premium ||
       (data.bonus_features && data.bonus_features.length));
+    // Free beta testers carry a live document quota; everyone else has none.
+    s.isBeta = !!data.is_beta;
+    s.beta = data.beta || null;
     return s;
   }
 

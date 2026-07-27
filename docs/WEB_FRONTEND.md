@@ -1,4 +1,4 @@
-# BidBrief Web Front-End (2.2.0)
+# BidBrief Web Front-End (2.3.0)
 
 The web app was rebuilt in 2.2.0 to match the BidBrief iOS app's visual language
 and information architecture. This is the map of what owns what, and the
@@ -45,7 +45,8 @@ index.html
 | `js/bb-questionhub.js` | `BB.questionHub` — hub menu, sections, questions, question edit, libraries stage, load/save |
 | `js/bb-qgen.js` | `BB.qgen` — the Create / Add Question Set screen and `buildGeneratePayload` |
 | `js/bb-libraries.js` | `BB.libraries` — localStorage snapshots + the one-time Starter Set seed |
-| `js/bb-admin.js` | `BB.admin` — admin/bonus hub and the Bonus Features manager |
+| `js/bb-admin.js` | `BB.admin` — admin/bonus hub, the Bonus Features manager, and the Free Beta manager (switch, testers, quotas, per-tester sessions) |
+| `js/bb-login.js` | `BB.login` — the sign-in page: orb mount, `?error=` copy, and the Free Beta Testing button + terms modal |
 | `js/bb-settings.js` | `BB.settings` |
 | `js/bb-scraper.js` | `BB.scraper` — CityScraper on glass |
 | `js/bb-boot.js` | Registers the pages and starts the shell. The only entry point. |
@@ -96,7 +97,19 @@ or the cue sticks on Questions forever.
    paint a white box over the planet; use the `*-transparent.png` twins. A test
    asserts the PNG colour type.
 9. **Bonus users never see the sessions dashboard.** `BB.admin.entriesFor`
-   gives non-admin premium users CityScraper only.
+   gives non-admin premium users CityScraper only. The same rule covers the Free
+   Beta manager — it can lift quotas and delete testers, so it is admin-only.
+10. **Every beta login mints its own identity.** `/auth/beta-login` creates a new
+    `beta-<hex>` user per click. Analyses are owner-scoped by username, so a
+    shared beta account would let any tester read any other tester's results.
+11. **`/api/analyze` requires authentication.** Without it a caller starts an
+    analysis with `owner=None`, which bypasses the beta document quota AND
+    produces an unowned session that `_is_authorized_for_session` lets anyone
+    read. Never remove that decorator.
+12. **The beta switch has an env-var floor.** `BETA_LOGIN_ENABLED` sets the boot
+    state; the admin toggle overrides it in memory. Everything in this process is
+    wiped on a Render deploy, so the env var is what survives — if free beta must
+    stay open across deploys, it has to be set there, not just toggled in the UI.
 
 ## Tests
 

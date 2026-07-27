@@ -1,7 +1,59 @@
 # HANDOFF — BidBrief (Flask backend + web front-end)
 
-> Updated: 2026-07-26 — **2.2.0: the web front-end was rebuilt to BidBrief iOS UX parity.
-> Shipped to production (`master` → Render), `/health` reports 2.2.0.**
+> Updated: 2026-07-27 — **2.3.0: Free Beta Testing — a one-click trial login on the web sign-in
+> page, an admin panel to run it, and a 5-document quota per tester. iOS untouched this round.**
+
+## 2.3.0 — Free Beta Testing (this round)
+
+Front-end map + invariants: **`docs/WEB_FRONTEND.md`** (invariants 9–12 are new).
+
+**The shape of it.** A "Free Beta Testing" button appears on `/login` only while the switch is on.
+It opens a terms modal ("free while the beta is open · N documents · 24 hours · a subscription is
+required afterwards"), and one click starts a session. **Each click mints its own ephemeral
+identity** (`beta-<hex>`) — never a shared account, because analyses are owner-scoped by username
+and a shared login would let any tester read any other tester's results. Beta testers are ordinary
+users: no admin, no premium, no High Power, no BestPrep, no CityScraper.
+
+1. **`services/beta_access.py` (new)** — the switch and the tester registry, both in memory, all
+   mutations under a lock (analyses run on background threads). Boot state comes from
+   `BETA_LOGIN_ENABLED`; quota from `BETA_DOC_LIMIT` (default 5). Hands out dict *copies*, never
+   live records.
+2. **Endpoints** — `GET /api/beta/status` (public, drives the button), `POST /auth/beta-login`,
+   `GET|POST /api/admin/beta`, `POST /api/admin/beta/testers/<username>` (`reset` | `grant` |
+   `doc_limit`), `DELETE /api/admin/beta/testers/<username>` (also revokes their live sessions;
+   their analyses are deliberately kept).
+3. **Quota enforcement** in `/api/analyze`: checked up front so an exhausted tester gets the
+   paywall rather than an unrelated error, then claimed atomically at session pre-registration —
+   so a malformed or unauthorized request never costs a tester a free document. The wall is
+   **402** with `beta_quota_exhausted: true`.
+4. **SECURITY FIX — `/api/analyze` now requires auth.** It had no `@require_auth` (unlike
+   `/api/upload`). An anonymous caller started analyses with `owner=None`, which bypassed the
+   quota entirely *and* produced unowned sessions that `_is_authorized_for_session` lets anyone
+   read. Found by a test written for the quota. **Do not remove that decorator.**
+5. **Admin panel** (`Admin → Free Beta Testing`): the on/off switch, a population summary, and a
+   card per tester — quota meter, signed-in state, timestamps, **their sessions** (filename,
+   status, answers/pages, View results, Excel) and **+5 documents / Reset usage / Delete**.
+   Session rows are built by the same `format_session_info` that `/api/admin/sessions` uses, so
+   the admin panel and the iOS dashboard can never drift.
+6. **BUG FIX — the Bonus Features manager was broken.** `bb-admin.js` posted `{username: …}` while
+   the API expects `{email: …}`, and read `user.premium`/`user.has_bonus` while the API returns
+   `bonus_features` — so every toggle rendered off and every grant 400'd. Now matches the API.
+7. **Refactors**: `_issue_session` / `_set_auth_cookie` are now the single source of truth for
+   session shape and cookie policy (form login, API login and beta login all use them);
+   `format_session_info` and `_snapshot_sessions_by_bucket` were lifted out of the
+   `/api/admin/sessions` route body so the beta dashboard reuses them.
+
+**Verified:** `pytest -q` → **130 passed**; `node --test tests/js/*.test.js` → **97 passed**;
+and a real Chromium pass over the whole flow (button → modal → session → Settings quota → admin
+panel → +5 → reset → delete → tester's next call 401s → switch off hides the button and 403s the
+route), desktop and 390px mobile, **zero console errors**.
+
+**Operational note:** the switch lives in memory. A Render deploy resets it to `BETA_LOGIN_ENABLED`.
+To keep free beta open across deploys, set that env var on Render — toggling in the UI is not enough.
+Turning the switch off stops *new* beta logins; testers already signed in keep their session until
+it expires (delete them individually to cut them off now).
+
+> Previous round (2.2.0) below.
 
 ## Current state
 

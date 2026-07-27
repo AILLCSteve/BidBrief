@@ -28,7 +28,10 @@
   var listeners = [];
 
   var state = {
-    session: { username: '', role: 'user', isAdmin: false, hasPremium: false },
+    session: {
+      username: '', role: 'user', isAdmin: false, hasPremium: false,
+      isBeta: false, beta: null
+    },
 
     navigation: { selectedTab: 'analyze' },
 
