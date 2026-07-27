@@ -31,12 +31,15 @@
   animation: bb-orb-breathe 3.4s ease-in-out infinite;
 }
 
+/* Engraved into the planet's upper face: small and dim enough that screen
+   content always reads over it (the iOS proportion is phone-width; a desktop
+   viewport needs a smaller mark or it fights the foreground). */
 .bb-orb-mark {
-  width: calc(var(--bb-orb-size) * .34); height: auto;
+  width: calc(var(--bb-orb-size) * .15); height: auto;
   left: var(--bb-orb-x);
-  top: calc(var(--bb-orb-y) - var(--bb-orb-size) * .10);
+  top: calc(var(--bb-orb-y) - var(--bb-orb-size) * .30);
   transform: translate(-50%, -50%);
-  opacity: .88; filter: drop-shadow(0 0 22px rgba(69, 180, 242, .55));
+  opacity: .45; filter: drop-shadow(0 0 18px rgba(69, 180, 242, .45));
   pointer-events: none;
 }
 

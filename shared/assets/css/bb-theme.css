@@ -116,9 +116,22 @@ a { color: var(--bb-glow-ice); }
 }
 .bb-hub-btn .bb-hub-icon {
   flex: 0 0 44px; height: 44px; border-radius: 50%;
-  display: grid; place-items: center; font-size: 20px;
+  display: grid; place-items: center; font-size: 19px;
   color: var(--bb-glow-ice); background: rgba(16, 64, 144, 0.6);
   border: 1px solid rgba(69, 180, 242, 0.45);
+}
+
+/* Emoji glyphs stand in for SF Symbols. Desaturating them keeps the palette
+   to the brand blues instead of dropping full-colour stickers on the glass. */
+.bb-hub-btn .bb-hub-icon,
+.bb-tab .bb-tab-icon,
+.bb-feed-icon,
+.bb-phase-dot {
+  filter: grayscale(1) brightness(1.75) contrast(.9);
+}
+.bb-tab.bb-active .bb-tab-icon,
+.bb-tab.bb-nudged .bb-tab-icon {
+  filter: grayscale(1) brightness(2.2);
 }
 .bb-hub-btn .bb-hub-text { display: flex; flex-direction: column; gap: 3px; }
 .bb-hub-btn .bb-hub-title { font-size: 16px; font-weight: 600; }

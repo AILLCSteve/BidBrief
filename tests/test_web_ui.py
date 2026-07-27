@@ -45,14 +45,32 @@ def test_health_reports_2_2_0(client):
 
 
 @pytest.mark.parametrize('name', [
-    'btools-titlelogo-nobg.png',
-    'btools-iconlogo-nobg.png',
+    'btools-titlelogo-transparent.png',
+    'btools-iconlogo-transparent.png',
     'btools-logo.svg',
 ])
 def test_brand_assets_are_served(client, name):
     resp = client.get(f'/pics/brand/{name}')
     assert resp.status_code == 200, f'{name} not served'
     assert len(resp.data) > 200, f'{name} looks empty'
+
+
+def _png_colour_type(data):
+    """Byte 25 of a PNG is the IHDR colour type; 6 == RGBA, 2 == RGB."""
+    assert data[:8] == b'\x89PNG\r\n\x1a\n', 'not a PNG'
+    return data[25]
+
+
+@pytest.mark.parametrize('page', ['/', '/login'])
+def test_pages_use_the_truly_transparent_logos(client, page):
+    """The "nobg" masters are white-backed RGB - using them paints a white box
+    over the planet. Only the alpha-keyed twins may be referenced."""
+    headers = _auth(client) if page == '/' else {}
+    html = client.get(page, headers=headers).data.decode('utf-8')
+    assert '-nobg.png' not in html, 'a white-backed logo is referenced'
+    for src in re.findall(r'src="(/pics/brand/[^"]+\.png)"', html):
+        data = client.get(src).data
+        assert _png_colour_type(data) == 6, f'{src} has no alpha channel (white box)'
 
 
 MODULE_OWNERSHIP = {
@@ -151,7 +169,7 @@ def test_starter_question_set_is_served_and_well_formed(client):
 def test_login_page_wears_the_orb_and_the_btools_lockup(client):
     html = client.get('/login').data.decode('utf-8')
     assert 'bb-orb-host' in html, 'the login page must sit on the planet field'
-    assert '/pics/brand/btools-titlelogo-nobg.png' in html, 'btools lockup missing'
+    assert '/pics/brand/btools-titlelogo-transparent.png' in html, 'btools lockup missing'
     assert '/shared/assets/css/bb-theme.css' in html
     # The form contract the backend depends on must survive the restyle.
     assert 'action="/auth/login"' in html and 'method="POST"' in html
