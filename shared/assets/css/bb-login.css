@@ -1,0 +1,33 @@
+/* Login page - a single glass card suspended over the planet field. */
+.bb-login-wrap {
+  min-height: 100vh; display: grid; place-items: center; padding: 24px;
+}
+.bb-login-card { width: 100%; max-width: 420px; text-align: center; padding: 32px 28px; }
+.bb-login-card .bb-lockup { height: 40px; width: auto; margin-bottom: 18px; }
+.bb-login-card h1 {
+  font-size: 32px; font-weight: 700; letter-spacing: -0.5px;
+  text-shadow: 0 0 18px rgba(94, 134, 208, .55);
+}
+.bb-login-card .bb-sub { color: var(--bb-text-secondary); font-size: 14px; margin-top: 6px; }
+.bb-login-card form {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 26px; text-align: left;
+}
+.bb-login-card .bb-eyebrow { margin: 10px 0 4px; }
+.bb-login-card .bb-btn-glow { margin-top: 20px; }
+.bb-login-card .bb-error {
+  display: none; padding: 10px 14px; border-radius: 12px; font-size: 13px;
+  background: rgba(220, 38, 38, .16); border: 1px solid rgba(220, 38, 38, .45);
+  color: #fff; text-align: center;
+}
+.bb-login-card .bb-error.show { display: block; }
+.bb-login-card footer {
+  margin-top: 26px; padding-top: 18px; font-size: 12px; line-height: 1.7;
+  color: var(--bb-text-tertiary); border-top: 1px solid var(--bb-glass-stroke);
+}
+.bb-login-card footer a { color: var(--bb-glow-ice); text-decoration: none; }
+.bb-login-card footer a:hover { text-decoration: underline; }
+
+@media (max-width: 480px) {
+  .bb-login-card { padding: 26px 20px; }
+  .bb-login-card h1 { font-size: 27px; }
+}

@@ -1,0 +1,90 @@
+/* The suspended planet. Fixed behind everything; --bb-drift (page units, set by
+   BB.orb.setDrift) slides the planet and its lighting when the tab changes. */
+.bb-orb-host {
+  position: fixed; inset: 0; z-index: -1; overflow: hidden;
+  --bb-drift: 0;
+  --bb-orb-size: min(100vw, 760px);
+  --bb-orb-x: calc(50% - var(--bb-drift) * 12vw);
+  --bb-orb-y: 30vh;
+  background: radial-gradient(circle at 50% 20%, var(--bb-space-navy) 0%, var(--bb-space-deep) 85%);
+}
+.bb-orb-host > * { position: absolute; transition: left .45s ease, transform .45s ease; }
+
+.bb-orb-stars { inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+.bb-orb-halo {
+  width: calc(var(--bb-orb-size) * 1.3); height: calc(var(--bb-orb-size) * 1.3);
+  left: var(--bb-orb-x); top: var(--bb-orb-y); transform: translate(-50%, -50%);
+  border-radius: 50%; background: var(--bb-periwinkle);
+  filter: blur(70px); opacity: .33;
+  animation: bb-orb-breathe 3.4s ease-in-out infinite;
+}
+
+.bb-orb-planet {
+  width: var(--bb-orb-size); height: var(--bb-orb-size);
+  left: var(--bb-orb-x); top: var(--bb-orb-y); transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at calc(34% - var(--bb-drift) * 8%) 26%,
+    var(--bb-glow-ice) 4%, var(--bb-periwinkle) 34%, var(--bb-brand-navy) 62%, #050C24 100%);
+  box-shadow: 0 0 45px rgba(94, 134, 208, .45),
+              inset 2px 2px 0 -1px rgba(69, 180, 242, .9);
+  animation: bb-orb-breathe 3.4s ease-in-out infinite;
+}
+
+/* Engraved into the planet's upper face: small and dim enough that screen
+   content always reads over it (the iOS proportion is phone-width; a desktop
+   viewport needs a smaller mark or it fights the foreground). */
+.bb-orb-mark {
+  width: calc(var(--bb-orb-size) * .15); height: auto;
+  left: var(--bb-orb-x);
+  top: calc(var(--bb-orb-y) - var(--bb-orb-size) * .30);
+  transform: translate(-50%, -50%);
+  opacity: .45; filter: drop-shadow(0 0 18px rgba(69, 180, 242, .45));
+  pointer-events: none;
+}
+
+.bb-orb-gleam {
+  width: calc(var(--bb-orb-size) * .5); height: calc(var(--bb-orb-size) * .34);
+  left: calc(var(--bb-orb-x) - var(--bb-orb-size) * .17 - var(--bb-drift) * 18px);
+  top: calc(var(--bb-orb-y) - var(--bb-orb-size) * .24);
+  transform: translate(-50%, -50%);
+  border-radius: 50%; filter: blur(14px);
+  background: radial-gradient(circle, rgba(255,255,255,.55) 0%, transparent 70%);
+}
+
+.bb-orb-ring {
+  width: calc(var(--bb-orb-size) * 1.5); height: calc(var(--bb-orb-size) * .44);
+  left: var(--bb-orb-x);
+  top: calc(var(--bb-orb-y) + var(--bb-orb-size) * .06);
+  transform: translate(-50%, -50%) rotate(-14deg);
+  border-radius: 50%; opacity: .75;
+  border: 1.6px solid rgba(69, 180, 242, .40);
+  box-shadow: 0 0 18px rgba(69, 180, 242, .18);
+}
+
+.bb-orb-moon {
+  width: 26px; height: 26px; border-radius: 50%; opacity: .85;
+  left: calc(86% + var(--bb-drift) * 12px); top: 66vh;
+  background: radial-gradient(circle at 35% 30%,
+    rgba(255,255,255,.6) 0%, rgba(94,134,208,.3) 45%, transparent 75%);
+}
+
+/* Legibility scrims: gentle at the top (titles), stronger at the bottom. */
+.bb-orb-scrim-top {
+  inset: 0 0 auto 0; height: 30vh; width: 100%;
+  background: linear-gradient(to bottom, rgba(5,14,36,.55), transparent);
+}
+.bb-orb-scrim-bottom {
+  inset: auto 0 0 0; height: 58vh; width: 100%;
+  background: linear-gradient(to bottom, transparent, rgba(5,14,36,.72));
+}
+
+@keyframes bb-orb-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.02); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bb-orb-halo, .bb-orb-planet { animation: none; }
+  .bb-orb-host > * { transition: none; }
+}

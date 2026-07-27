@@ -1,0 +1,126 @@
+{
+  "version": "starter-1.0",
+  "config_name": "BidBrief Starter Set",
+  "sections": [
+    {"section_id": "scope_deliverables", "section_name": "Scope of Work & Deliverables", "description": "What the document requires be delivered and to what standard.", "questions": [
+      {"id": "Q1", "text": "What overall scope of work does the document define?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q2", "text": "What specific deliverables or work products does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q3", "text": "What quantities, dimensions, or measurable units of work does the document specify?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q4", "text": "What materials, equipment, or products does the document require be furnished?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q5", "text": "What work does the document explicitly exclude from scope?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q6", "text": "What performance standards or specifications must the deliverables meet?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q7", "text": "What site or location conditions does the document describe for the work?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q8", "text": "What testing, inspection, or acceptance criteria does the document define for the deliverables?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q9", "text": "What warranties or guarantees on the work does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q10", "text": "What phasing or sequencing of the work does the document specify?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "schedule_milestones", "section_name": "Project Schedule & Milestones", "description": "Timing, deadlines, and schedule obligations.", "questions": [
+      {"id": "Q11", "text": "What overall project duration or completion deadline does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q12", "text": "What key milestones or interim deadlines does the document define?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q13", "text": "What start date or notice-to-proceed terms does the document specify?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q14", "text": "What does the document say about liquidated damages for late completion?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q15", "text": "What does the document specify about schedule submittals or updates?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q16", "text": "What working-hour, shift, or calendar restrictions does the document impose?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q17", "text": "What conditions for time extensions does the document allow?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q18", "text": "What does the document require regarding substantial versus final completion?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q19", "text": "What sequencing or coordination constraints with other parties does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q20", "text": "What does the document specify about early completion or acceleration?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "pricing_payment", "section_name": "Pricing, Payment & Financial Terms", "description": "How the work is priced and paid.", "questions": [
+      {"id": "Q21", "text": "What pricing structure (lump sum, unit price, time and materials) does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q22", "text": "What line items or bid schedule does the document require pricing for?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q23", "text": "What does the document specify about the payment schedule or progress payments?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q24", "text": "What retention or retainage terms does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q25", "text": "What does the document say about invoicing requirements and timing?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q26", "text": "What allowances, contingencies, or alternates does the document include?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q27", "text": "What does the document specify about change-order pricing and markups?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q28", "text": "What taxes, fees, or price adjustments does the document address?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q29", "text": "What conditions for final payment or release does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q30", "text": "What does the document state about price validity or the bid firmness period?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "bonds_insurance", "section_name": "Bonding, Insurance & Financial Security", "description": "Required sureties and coverages.", "questions": [
+      {"id": "Q31", "text": "What bid bond or bid security does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q32", "text": "What performance bond does the document require, and in what amount?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q33", "text": "What payment bond does the document require, and in what amount?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q34", "text": "What general liability insurance limits does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q35", "text": "What workers' compensation or employer's liability coverage does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q36", "text": "What automobile or equipment insurance does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q37", "text": "What additional-insured or endorsement requirements does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q38", "text": "What certificate-of-insurance submission requirements does the document define?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q39", "text": "What surety qualifications or ratings does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q40", "text": "What other financial guarantees or letters of credit does the document require?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "qualifications_experience", "section_name": "Contractor Qualifications & Experience", "description": "Who is eligible to perform the work.", "questions": [
+      {"id": "Q41", "text": "What minimum experience or years in business does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q42", "text": "What licenses or certifications does the document require the contractor hold?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q43", "text": "What comparable past-project references does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q44", "text": "What key personnel qualifications does the document specify?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q45", "text": "What financial-capacity or bonding-capacity thresholds does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q46", "text": "What does the document require regarding subcontractor qualifications?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q47", "text": "What safety-record or experience-modification-rate requirements does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q48", "text": "What equipment or facility capabilities does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q49", "text": "What does the document specify about prequalification or prior approval?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q50", "text": "What disqualifying conditions or debarment provisions does the document list?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "compliance_regulatory", "section_name": "Compliance, Permits & Regulatory Requirements", "description": "Legal and regulatory obligations.", "questions": [
+      {"id": "Q51", "text": "What permits or approvals does the document require be obtained?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q52", "text": "What codes, standards, or specifications must the work comply with?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q53", "text": "What prevailing-wage or labor requirements does the document impose?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q54", "text": "What environmental compliance requirements does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q55", "text": "What does the document require regarding minority, women, or disadvantaged business participation?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q56", "text": "What safety regulations (such as OSHA) does the document require compliance with?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q57", "text": "What does the document specify about which party bears permit costs?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q58", "text": "What licensing or registration with the jurisdiction does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q59", "text": "What reporting or certified-payroll requirements does the document impose?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q60", "text": "What does the document state about compliance audits or the right to inspect?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "submission_requirements", "section_name": "Submission & Proposal Requirements", "description": "How to respond and by when.", "questions": [
+      {"id": "Q61", "text": "What submission deadline and time does the document set?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q62", "text": "What submission format and delivery method does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q63", "text": "What forms or attachments must be included in the submission?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q64", "text": "What does the document require regarding the number of copies or electronic submission?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q65", "text": "What does the document specify about proposal organization or page limits?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q66", "text": "What pre-bid meeting or site-visit requirements does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q67", "text": "What does the document require for questions, clarifications, or addenda acknowledgment?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q68", "text": "What does the document say about late, incomplete, or nonconforming submissions?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q69", "text": "What signature, notarization, or authorization does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q70", "text": "What does the document specify about proposal withdrawal or modification?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "evaluation_award", "section_name": "Evaluation & Award Criteria", "description": "How responses are scored and selected.", "questions": [
+      {"id": "Q71", "text": "What evaluation criteria and their weighting does the document define?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q72", "text": "What does the document state about lowest-price versus best-value selection?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q73", "text": "What scoring method or rating system does the document describe?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q74", "text": "What does the document specify about interviews, presentations, or demonstrations?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q75", "text": "What does the document say about the award timeline or notification?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q76", "text": "What does the document state about the right to reject any or all proposals?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q77", "text": "What does the document specify about negotiations after submission?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q78", "text": "What does the document say about protest or appeal procedures?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q79", "text": "What responsibility or responsiveness determinations does the document describe?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q80", "text": "What does the document state about tie-breaking or preferences?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "contract_terms", "section_name": "Contract Terms, Conditions & Legal", "description": "The binding legal terms.", "questions": [
+      {"id": "Q81", "text": "What contract form or agreement type does the document reference?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q82", "text": "What termination-for-cause or termination-for-convenience provisions does the document include?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q83", "text": "What indemnification obligations does the document impose?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q84", "text": "What dispute-resolution or governing-law provisions does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q85", "text": "What does the document specify about assignment or subcontracting consent?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q86", "text": "What confidentiality or data-handling provisions does the document include?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q87", "text": "What intellectual-property or ownership-of-work terms does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q88", "text": "What does the document specify about warranties and remedies?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q89", "text": "What force-majeure or excusable-delay provisions does the document include?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q90", "text": "What compliance representations or certifications must be signed?", "required": false, "expected_type": "string", "enabled": true}
+    ]},
+    {"section_id": "risk_safety", "section_name": "Risk, Safety & Liability", "description": "Hazards, safety, and risk allocation.", "questions": [
+      {"id": "Q91", "text": "What safety program or plan does the document require?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q92", "text": "What site-specific hazards or conditions does the document identify?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q93", "text": "What does the document require regarding traffic control or public safety?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q94", "text": "What does the document specify about damage to existing utilities or property?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q95", "text": "What limitation-of-liability provisions does the document include?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q96", "text": "What does the document require regarding incident reporting?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q97", "text": "What environmental or hazardous-materials handling does the document address?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q98", "text": "What does the document specify about security or site access control?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q99", "text": "What contingency or emergency-response requirements does the document state?", "required": false, "expected_type": "string", "enabled": true},
+      {"id": "Q100", "text": "What risk-allocation or differing-site-conditions clauses does the document include?", "required": false, "expected_type": "string", "enabled": true}
+    ]}
+  ]
+}
