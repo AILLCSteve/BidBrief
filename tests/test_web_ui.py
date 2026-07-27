@@ -148,6 +148,22 @@ def test_starter_question_set_is_served_and_well_formed(client):
     assert first['questions'], 'starter sections must carry questions'
 
 
+def test_login_page_wears_the_orb_and_the_btools_lockup(client):
+    html = client.get('/login').data.decode('utf-8')
+    assert 'bb-orb-host' in html, 'the login page must sit on the planet field'
+    assert '/pics/brand/btools-titlelogo-nobg.png' in html, 'btools lockup missing'
+    assert '/shared/assets/css/bb-theme.css' in html
+    # The form contract the backend depends on must survive the restyle.
+    assert 'action="/auth/login"' in html and 'method="POST"' in html
+    assert 'name="username"' in html and 'name="password"' in html
+
+
+def test_login_page_drops_the_old_white_card(client):
+    html = client.get('/login').data.decode('utf-8')
+    assert 'rgba(255, 255, 255, 0.95)' not in html
+    assert '/pics/AILLCLogo.png' not in html
+
+
 def test_every_stylesheet_the_shell_references_is_served(client):
     headers = _auth(client)
     html = client.get('/', headers=headers).data.decode('utf-8')
