@@ -76,6 +76,8 @@ def test_extracted_js_modules_are_served_and_own_their_functions(client, filenam
 @pytest.mark.parametrize('path,needle', [
     ('/shared/assets/css/bb-theme.css', '--bb-glow-ice: #45B4F2'),
     ('/shared/assets/js/bb-ui.js', 'BB.ui ='),
+    ('/shared/assets/css/bb-orb.css', '.bb-orb-planet'),
+    ('/shared/assets/js/bb-orb.js', 'starPoints'),
 ])
 def test_design_system_assets_served(client, path, needle):
     resp = client.get(path)
