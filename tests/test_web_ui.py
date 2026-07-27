@@ -55,17 +55,17 @@ def test_brand_assets_are_served(client, name):
     assert len(resp.data) > 200, f'{name} looks empty'
 
 
-LEGACY_MODULES = {
-    'bb-engine.js': ['function startAnalysis', 'function handleEvent', 'function pollForEvents'],
-    'legacy-results.js': ['function renderUnitaryTable', 'function runSecondPassOnSelected'],
-    'legacy-questions.js': ['function renderQuestionManager', 'function generateAIQuestions'],
-    'legacy-modals.js': ['function openAnswerDetailModal', 'function switchFullViewTab'],
-    'bb-scraper.js': ['function startCityScraperResearch', 'function updateCSProgress'],
+MODULE_OWNERSHIP = {
+    'bb-engine.js': ['BB.engine =', 'startPolling', 'fetchResults'],
+    'bb-status.js': ['BB.status =', 'WINDOW_BAND_SPAN'],
+    'bb-analyze.js': ['BB.analyze =', 'buildAnalyzePayload'],
+    'bb-progress.js': ['BB.progress =', 'phaseTrack'],
+    'bb-results.js': ['BB.results =', 'answer_summary'],
 }
 
 
-@pytest.mark.parametrize('filename,needles', sorted(LEGACY_MODULES.items()))
-def test_extracted_js_modules_are_served_and_own_their_functions(client, filename, needles):
+@pytest.mark.parametrize('filename,needles', sorted(MODULE_OWNERSHIP.items()))
+def test_js_modules_are_served_and_own_their_responsibilities(client, filename, needles):
     resp = client.get(f'/shared/assets/js/{filename}')
     assert resp.status_code == 200, f'{filename} not served'
     body = resp.data.decode('utf-8')
