@@ -146,6 +146,28 @@
     ]);
   }
 
+  /* ---- Modal ------------------------------------------------------------
+     One host, one modal at a time. Callers pass fully-built children
+     (usually a .bb-modal-head plus a .bb-modal-body). */
+  function modalOpen(children, opts) {
+    var host = qs('#bb-modal-host');
+    if (!host) return null;
+    var card = el('div', { class: 'bb-modal-card' }, children);
+    var overlay = el('div', {
+      class: 'bb-modal bb-open',
+      onclick: function (e) { if (e.target === overlay && !(opts && opts.sticky)) modalClose(); }
+    }, [card]);
+    fill(host, overlay);
+    return card;
+  }
+
+  function modalClose() {
+    var host = qs('#bb-modal-host');
+    if (host) host.innerHTML = '';
+  }
+
+  BB.modal = { open: modalOpen, close: modalClose };
+
   BB.ui = {
     escapeHtml: escapeHtml, raw: raw, html: html,
     formatFileSize: formatFileSize,
