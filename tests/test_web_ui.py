@@ -114,6 +114,16 @@ def test_shell_no_longer_ships_the_old_light_navbar(client):
     assert 'mpt-navbar' not in html, 'the legacy light-theme navbar must be gone'
 
 
+def test_starter_question_set_is_served_and_well_formed(client):
+    resp = client.get('/shared/assets/data/starter-question-set.json')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert isinstance(data.get('sections'), list) and data['sections'], 'starter set is empty'
+    first = data['sections'][0]
+    assert 'section_id' in first and 'section_name' in first and 'questions' in first
+    assert first['questions'], 'starter sections must carry questions'
+
+
 def test_every_stylesheet_the_shell_references_is_served(client):
     headers = _auth(client)
     html = client.get('/', headers=headers).data.decode('utf-8')
