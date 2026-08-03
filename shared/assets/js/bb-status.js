@@ -46,6 +46,34 @@
         advance('preparing', 0.05, 'Scanning the document'); break;
       case 'prescan_complete': case 'document_ingested': case 'layer_0_start':
         advance('preparing', 0.07, 'Reading the PDF'); break;
+      /* Layer 0.5 - the opt-in vision pass runs before windows exist, so it
+         must stay comfortably under the 12% window band. */
+      case 'visual_scan_start': {
+        var vc = (p.candidate_pages || []).length;
+        advance('preparing', 0.06, vc
+          ? ('Reading drawings, maps & imagery on ' + vc + ' page' + (vc === 1 ? '' : 's'))
+          : 'Checking for drawings, maps & imagery');
+        break;
+      }
+      case 'visual_page_complete': {
+        var vDone = num(p.scanned), vTotal = num(p.total_candidates);
+        if (vDone != null && vTotal) {
+          advance('preparing', 0.06 + 0.05 * vDone / vTotal,
+            'Visual analysis - page ' + (p.page != null ? p.page : '?') +
+            ' (' + vDone + ' of ' + vTotal + ')');
+        }
+        break;
+      }
+      case 'visual_scan_complete': {
+        var vf = num(p.findings_count);
+        advance('preparing', 0.11, vf
+          ? ('Visual intelligence captured from ' + vf + ' page' + (vf === 1 ? '' : 's'))
+          : 'Visual scan finished');
+        break;
+      }
+      case 'visual_scan_failed':
+        advance('preparing', 0.11, 'Visual scan skipped - continuing with text analysis'); break;
+
       case 'layer_1_start':
         advance('preparing', 0.08, 'Mapping the document structure'); break;
       case 'layer_2_start':

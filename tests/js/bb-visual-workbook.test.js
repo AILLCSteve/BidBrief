@@ -1,0 +1,177 @@
+'use strict';
+/* 2.4.0 — Visual Intelligence flag + the results workbook + the in-app
+   admin session dashboard. Pure-logic coverage of the new surface. */
+const test = require('node:test');
+const assert = require('node:assert');
+const { loadModules, plain } = require('./_harness');
+
+const ANALYZE_MODULES = [
+  'shared/assets/js/bb-ui.js',
+  'shared/assets/js/bb-state.js',
+  'shared/assets/js/bb-orb.js',
+  'shared/assets/js/bb-status.js',
+  'shared/assets/js/bb-shell.js',
+  'shared/assets/js/bb-analyze.js',
+];
+
+const RESULTS_MODULES = [
+  'shared/assets/js/bb-ui.js',
+  'shared/assets/js/bb-state.js',
+  'shared/assets/js/bb-results.js',
+];
+
+const ADMIN_MODULES = [
+  'shared/assets/js/bb-ui.js', 'shared/assets/js/bb-state.js',
+  'shared/assets/js/bb-orb.js', 'shared/assets/js/bb-shell.js',
+  'shared/assets/js/bb-scraper.js', 'shared/assets/js/bb-admin.js',
+];
+
+// ---- the /api/analyze flag --------------------------------------------------
+
+test('visual analysis toggle rides the analyze payload as enable_visual_analysis', () => {
+  const { BB } = loadModules(ANALYZE_MODULES);
+  BB.state.questionHub.config = { sections: [{ section_id: 's1', questions: [] }] };
+  BB.state.analysis.visualAnalysis = true;
+  const body = plain(BB.analyze.buildAnalyzePayload(BB.state, 'up-1', 'plans.pdf'));
+  assert.strictEqual(body.enable_visual_analysis, true);
+});
+
+test('visual analysis is OFF by default - the standard pipeline is untouched', () => {
+  const { BB } = loadModules(ANALYZE_MODULES);
+  BB.state.questionHub.config = { sections: [{ section_id: 's1', questions: [] }] };
+  const body = plain(BB.analyze.buildAnalyzePayload(BB.state, 'up-1', 'plans.pdf'));
+  assert.strictEqual(body.enable_visual_analysis, false);
+});
+
+test('reset clears the visual toggle with the rest of the analysis state', () => {
+  const { BB } = loadModules(ANALYZE_MODULES);
+  BB.state.analysis.visualAnalysis = true;
+  BB.state.reset();
+  assert.strictEqual(BB.state.analysis.visualAnalysis, false);
+});
+
+// ---- the results workbook ---------------------------------------------------
+
+const PAYLOAD = {
+  document_name: 'Spec.pdf',
+  total_pages: 12,
+  sections: [{
+    section_id: 'a', section_name: 'General',
+    questions: [
+      { question_id: 'q1', question: 'Name?', answer: 'Oak St CIPP', confidence: 0.9,
+        page_citations: [1], answer_summary: 'Oak Street project.' },
+      { question_id: 'q2', question: 'Bond?', answer: null, confidence: 0, page_citations: [] },
+    ],
+  }],
+  footnotes: ['Page 1: "Oak St CIPP"'],
+};
+
+test('sheet tabs mirror the Excel workbook - core sheets always, extras when earned', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const core = plain(BB.results.sheetList(PAYLOAD)).map((s) => s.id);
+  assert.deepStrictEqual(core, ['summary', 'detailed', 'bySection', 'footnotes']);
+
+  const rich = plain(BB.results.sheetList(Object.assign({}, PAYLOAD, {
+    dynamic_tables: [{ title: 'T', columns: [], rows: [] }],
+    visual_findings: [{ page: 3, kind: 'drawing', description: 'd' }],
+  }))).map((s) => s.id);
+  assert.deepStrictEqual(rich,
+    ['summary', 'detailed', 'bySection', 'intelligence', 'visual', 'footnotes']);
+});
+
+test('executive summary rows mirror the Excel statistics block', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const rows = plain(BB.results.execSummaryRows(PAYLOAD));
+  const byLabel = Object.fromEntries(rows);
+  assert.strictEqual(byLabel['Total Questions'], '2');
+  assert.strictEqual(byLabel['Questions Answered'], '1');
+  assert.strictEqual(byLabel['Answer Rate'], '50%');
+  assert.strictEqual(byLabel['Average Confidence'], '90%');
+  assert.ok(byLabel['Analysis Date']);
+});
+
+test('key details rows use the Excel display names, order and citation stripping', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const rows = plain(BB.results.keyDetailRows({
+    warranty: '2 years <PDF pg 44>',
+    project_name: 'Oak St CIPP',
+    zzz_custom: 'thing',
+    owner: 'City of Oakton',
+  }));
+  assert.deepStrictEqual(rows, [
+    ['Project Name', 'Oak St CIPP'],
+    ['Owner/Agency', 'City of Oakton'],
+    ['Warranty', '2 years'],
+    ['Zzz Custom', 'thing'],
+  ]);
+});
+
+test('key details drop not-found placeholders and merge same-label values', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const rows = plain(BB.results.keyDetailRows({
+    bid_bond: '5%', performance_bond: '100%', engineer: 'Not found',
+  }));
+  assert.deepStrictEqual(rows, [['Bonding', '5%; 100%']]);
+});
+
+test('statusOf distinguishes found from missing exactly like the Excel Status column', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  assert.strictEqual(BB.results.statusOf({ answer: 'yes' }), 'found');
+  assert.strictEqual(BB.results.statusOf({ answer: '   ' }), 'missing');
+  assert.strictEqual(BB.results.statusOf({}), 'missing');
+});
+
+// ---- the in-app admin session dashboard --------------------------------------
+
+test('exportUrlFor routes bestprep sessions to the bestprep Excel endpoint', () => {
+  const { BB } = loadModules(ADMIN_MODULES);
+  assert.strictEqual(
+    BB.admin.exportUrlFor({ session_id: 'sess_1', mode: 'bestprep' }),
+    '/api/export/bestprep-excel/sess_1');
+  assert.strictEqual(
+    BB.admin.exportUrlFor({ session_id: 'sess_2', mode: 'bid_spec' }),
+    '/api/export/excel-dashboard/sess_2');
+  assert.strictEqual(
+    BB.admin.exportUrlFor({ session_id: 'sess_3' }),
+    '/api/export/excel-dashboard/sess_3',
+    'missing mode defaults to the bid/spec dashboard export');
+});
+
+test('sessionGroups keeps lifecycle order and drops empty buckets', () => {
+  const { BB } = loadModules(ADMIN_MODULES);
+  const groups = plain(BB.admin.sessionGroups({
+    active: [], completed: [{ session_id: 'a' }],
+    partial: [{ session_id: 'b' }], legacy: [],
+  }));
+  assert.deepStrictEqual(groups.map((g) => g.key), ['completed', 'partial']);
+});
+
+test('sessionsSummaryText reads like the dashboard header', () => {
+  const { BB } = loadModules(ADMIN_MODULES);
+  assert.strictEqual(
+    BB.admin.sessionsSummaryText({
+      total_sessions: 3, active_count: 1, completed_count: 2, partial_count: 0,
+    }),
+    '3 total  ·  1 active  ·  2 completed  ·  0 partial');
+});
+
+// ---- visual events in the progress story --------------------------------------
+
+test('visual scan events narrate under the 12% window band and never outrank it', () => {
+  const { BB } = loadModules(['shared/assets/js/bb-status.js']);
+  const status = BB.status.fromEvents([
+    { event: 'analysis_started', payload: {} },
+    { event: 'visual_scan_start', payload: { candidate_pages: [3, 7] } },
+    { event: 'visual_page_complete', payload: { page: 3, scanned: 1, total_candidates: 2 } },
+    { event: 'visual_scan_complete', payload: { findings_count: 2 } },
+  ]);
+  assert.strictEqual(status.phase, 'preparing');
+  assert.ok(status.fraction <= 0.12, 'visual scan must stay under the window band');
+  assert.match(status.detail, /Visual intelligence captured from 2 pages/);
+});
+
+test('a failed visual scan reads as skipped, not as an analysis error', () => {
+  const { BB } = loadModules(['shared/assets/js/bb-status.js']);
+  const line = BB.status.friendlyLine({ event: 'visual_scan_failed', payload: {} });
+  assert.match(line, /skipped/i);
+});

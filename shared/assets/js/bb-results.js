@@ -1,13 +1,18 @@
-/* Results - staged like the iOS ResultsView: an overview of glowing entry
-   points, each fading into a focused layer with a back chip. The full-width
-   Table view is the one web-only stage (a desktop screen earns it).
-   Ports Sources/Features/Analyze/ResultsView.swift. */
+/* Results — the Excel workbook, on glass.
+
+   2.4.0: the results screen presents the SAME multi-sheet depth as the Excel
+   export (Executive Summary / Detailed Results / By Section / Document
+   Intelligence / Visual Intelligence / Footnotes) as a workbook tab strip in
+   the bb design system. Improve Results and Exports & Smart Analysis remain
+   their own focused layers. Ports services/excel_dashboard.py sheet-for-sheet;
+   the public helpers (summarize/flatten/...) are consumed by bb-admin.js. */
 (function (window) {
   'use strict';
   var BB = window.BB = window.BB || {};
   var ui = BB.ui;
 
-  var path = [];                 /* stage stack; empty = overview */
+  var path = [];                 /* stage stack; empty = the workbook */
+  var activeSheet = null;        /* current workbook tab id */
   var liveAnswers = {};          /* question_id -> answer streamed during analysis */
 
   function results() { return BB.state.analysis.results || { sections: [] }; }
@@ -27,6 +32,8 @@
     return (c === 'high' || c === 'medium') ? c : 'low';
   }
 
+  function statusOf(q) { return isAnswered(q) ? 'found' : 'missing'; }
+
   function allQuestions(payload) {
     return ((payload && payload.sections) || []).reduce(function (acc, sec) {
       return acc.concat(sec.questions || []);
@@ -45,7 +52,7 @@
     };
   }
 
-  /** Every question with its section name - the table view and CSV. */
+  /** Every question with its section name - tables, CSV, admin modal. */
   function flatten(payload) {
     var rows = [];
     ((payload && payload.sections) || []).forEach(function (sec) {
@@ -59,6 +66,101 @@
     });
     return rows;
   }
+
+  function visualFindings(payload) {
+    return (payload && payload.visual_findings) || [];
+  }
+
+  function dynamicTables(payload) {
+    return (payload && (payload.dynamic_tables || payload.dynamicTables)) || [];
+  }
+
+  function hasKeyDetails(payload) {
+    var kr = payload.key_requirements || BB.state.analysis.keyRequirements;
+    return !!(kr && Object.keys(kr).length);
+  }
+
+  // ---- Workbook shape (pure - unit tested) --------------------------------
+
+  /** The sheet tabs this payload earns, in workbook order. */
+  function sheetList(payload) {
+    var sheets = [
+      { id: 'summary', label: 'Executive Summary' },
+      { id: 'detailed', label: 'Detailed Results' },
+      { id: 'bySection', label: 'By Section' }
+    ];
+    if (dynamicTables(payload).length) {
+      sheets.push({ id: 'intelligence', label: 'Document Intelligence' });
+    }
+    if (visualFindings(payload).length) {
+      sheets.push({ id: 'visual', label: 'Visual Intelligence' });
+    }
+    sheets.push({ id: 'footnotes', label: 'Footnotes' });
+    return sheets;
+  }
+
+  /** Executive Summary statistics rows - mirrors the Excel sheet exactly. */
+  function execSummaryRows(payload) {
+    var questions = allQuestions(payload);
+    var answered = questions.filter(isAnswered).length;
+    var total = questions.length;
+    var confs = questions.map(function (q) { return Number(q.confidence) || 0; })
+      .filter(function (c) { return c > 0; });
+    var avg = confs.length
+      ? Math.round(confs.reduce(function (a, b) { return a + b; }, 0) / confs.length * 100) + '%'
+      : 'N/A';
+    return [
+      ['Total Questions', String(total)],
+      ['Questions Answered', String(answered)],
+      ['Answer Rate', total ? Math.round(answered / total * 100) + '%' : '—'],
+      ['Average Confidence', avg],
+      ['Analysis Date', new Date().toLocaleDateString()]
+    ];
+  }
+
+  /* Key Document Details - the Excel display-name mapping + preferred order. */
+  var KEY_LABELS = {
+    project_name: 'Project Name', owner: 'Owner/Agency', engineer: 'Engineer',
+    location: 'Location', bid_deadline: 'Bid Deadline', completion_date: 'Timeline',
+    scope: 'Scope', linear_feet: 'Scope', payment_terms: 'Payment',
+    warranty: 'Warranty', liquidated_damages: 'Liquidated Damages',
+    bid_bond: 'Bonding', performance_bond: 'Bonding',
+    certifications: 'Certifications', insurance: 'Insurance'
+  };
+  var KEY_ORDER = ['Project Name', 'Owner/Agency', 'Engineer', 'Location', 'Timeline',
+    'Scope', 'Bid Deadline', 'Payment', 'Warranty', 'Liquidated Damages',
+    'Bonding', 'Certifications', 'Insurance'];
+
+  function cleanDetailValue(value) {
+    if (value && typeof value === 'object') value = JSON.stringify(value);
+    return String(value == null ? '' : value)
+      .replace(/<PDF pg[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  function keyDetailRows(kr) {
+    var byLabel = {};
+    Object.keys(kr || {}).forEach(function (key) {
+      var value = cleanDetailValue(kr[key]);
+      if (!value || /^(not found|n\/a|not specified)$/i.test(value)) return;
+      var label = KEY_LABELS[key] ||
+        key.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+      if (byLabel[label] && byLabel[label].indexOf(value) < 0) {
+        byLabel[label] += '; ' + value;
+      } else if (!byLabel[label]) {
+        byLabel[label] = value;
+      }
+    });
+    var rows = [];
+    KEY_ORDER.forEach(function (label) {
+      if (byLabel[label]) { rows.push([label, byLabel[label]]); delete byLabel[label]; }
+    });
+    Object.keys(byLabel).sort().forEach(function (label) {
+      rows.push([label, byLabel[label]]);
+    });
+    return rows;
+  }
+
+  // ---- CSV / live ingest ---------------------------------------------------
 
   function csvCell(value) {
     return '"' + String(value == null ? '' : value).replace(/"/g, '""') + '"';
@@ -89,7 +191,7 @@
     });
   }
 
-  // ---- Navigation ---------------------------------------------------------
+  // ---- Navigation ----------------------------------------------------------
 
   function push(stage, arg) { path.push({ stage: stage, arg: arg }); render(); }
   function back() { path.pop(); render(); }
@@ -99,16 +201,11 @@
     host = host || ui.qs('#bb-page-analyze');
     if (!host) return;
     var here = top();
-    if (!here) return renderOverview(host);
+    if (!here) return renderWorkbook(host);
     switch (here.stage) {
-      case 'sections':      return renderSections(host);
-      case 'sectionDetail': return renderSectionDetail(host, here.arg);
-      case 'keyDetails':    return renderKeyDetails(host);
-      case 'intelligence':  return renderIntelligence(host);
-      case 'improve':       return renderImprove(host);
-      case 'actions':       return renderActions(host);
-      case 'table':         return renderTable(host);
-      default:              return renderOverview(host);
+      case 'improve': return renderImprove(host);
+      case 'actions': return renderActions(host);
+      default:        return renderWorkbook(host);
     }
   }
 
@@ -121,15 +218,20 @@
     ];
   }
 
-  // ---- Overview -----------------------------------------------------------
+  // ---- The workbook --------------------------------------------------------
 
-  function renderOverview(host) {
+  function renderWorkbook(host) {
     var payload = results();
     var s = summarize(payload);
+    var sheets = sheetList(payload);
+    if (!activeSheet || !sheets.some(function (t) { return t.id === activeSheet; })) {
+      activeSheet = sheets[0].id;
+    }
+
     var children = [];
 
     children.push(ui.el('div', { class: 'bb-center' }, [
-      ui.el('span', { class: 'bb-eyebrow' }, 'Results'),
+      ui.el('span', { class: 'bb-eyebrow' }, 'Analysis Report'),
       ui.el('h1', { style: 'font-size:24px;font-weight:700;text-shadow:0 0 14px rgba(94,134,208,.55)' },
         payload.document_name || BB.state.analysis.filename || 'Results')
     ]));
@@ -137,7 +239,7 @@
     if (BB.state.analysis.isPartial) {
       children.push(ui.card(null, [
         ui.el('p', { class: 'bb-body' },
-          'These are partial results - the analysis was stopped before it finished.')
+          '⚠ Partial results - the analysis was stopped before it finished.')
       ]));
     }
 
@@ -151,26 +253,23 @@
       ])
     ]));
 
+    /* The workbook: sheet tabs + the active sheet, one glass card. */
+    var tabs = ui.el('div', { class: 'bb-sheet-tabs', role: 'tablist' },
+      sheets.map(function (tab) {
+        return ui.el('button', {
+          class: 'bb-sheet-tab' + (tab.id === activeSheet ? ' bb-active' : ''),
+          type: 'button', role: 'tab',
+          'aria-selected': tab.id === activeSheet ? 'true' : 'false',
+          onclick: function () { activeSheet = tab.id; render(); }
+        }, tab.label);
+      }));
+
+    children.push(ui.el('div', { class: 'bb-glass-card bb-workbook' }, [
+      tabs,
+      ui.el('div', { class: 'bb-sheet-body' }, sheetBody(activeSheet, payload))
+    ]));
+
     var hubs = [];
-    hubs.push(ui.hubButton({
-      title: 'Sections', icon: '🗂',
-      subtitle: (payload.sections || []).length + ' sections of answers',
-      onClick: function () { push('sections'); }
-    }));
-    if (hasKeyDetails(payload)) {
-      hubs.push(ui.hubButton({
-        title: 'Key Details', icon: '⭐',
-        subtitle: "The document's essential facts",
-        onClick: function () { push('keyDetails'); }
-      }));
-    }
-    if (dynamicTables(payload).length) {
-      hubs.push(ui.hubButton({
-        title: 'Document Intelligence', icon: '🧠',
-        subtitle: dynamicTables(payload).length + ' dynamic tables built for this document',
-        onClick: function () { push('intelligence'); }
-      }));
-    }
     if (s.unanswered.length) {
       hubs.push(ui.hubButton({
         title: 'Improve Results', icon: '🪄',
@@ -179,20 +278,15 @@
       }));
     }
     hubs.push(ui.hubButton({
-      title: 'Table View', icon: '▦',
-      subtitle: 'Every question and answer in one table',
-      onClick: function () { push('table'); }
-    }));
-    hubs.push(ui.hubButton({
       title: 'Exports & Analysis', icon: '⬆',
-      subtitle: 'Excel dashboard, CSV, HTML, Smart Analysis',
+      subtitle: 'Excel workbook, CSV, HTML, Smart Analysis',
       onClick: function () { push('actions'); }
     }));
     children.push(ui.el('div', { class: 'bb-stack' }, hubs));
 
     children.push(ui.el('button', {
       class: 'bb-btn-ghost bb-danger', type: 'button',
-      onclick: function () { path = []; BB.analyze.reset(); }
+      onclick: function () { path = []; activeSheet = null; BB.analyze.reset(); }
     }, 'New Analysis'));
 
     ui.fill(host, children);
@@ -205,146 +299,243 @@
     ]);
   }
 
-  function hasKeyDetails(payload) {
-    var kr = payload.key_requirements || BB.state.analysis.keyRequirements;
-    return !!((kr && Object.keys(kr).length) || (payload.footnotes || []).length);
-  }
-
-  function dynamicTables(payload) {
-    return payload.dynamic_tables || payload.dynamicTables || [];
-  }
-
-  // ---- Sections -----------------------------------------------------------
-
-  function renderSections(host) {
-    var payload = results();
-    var rows = (payload.sections || []).map(function (section) {
-      var answered = (section.questions || []).filter(isAnswered).length;
-      return ui.el('button', {
-        class: 'bb-list-row', type: 'button',
-        onclick: function () { push('sectionDetail', section.section_id); }
-      }, [
-        ui.el('span', {}, [
-          ui.el('span', { class: 'bb-list-title' }, section.section_name),
-          ui.el('span', { class: 'bb-list-sub', style: 'display:block' },
-            answered + '/' + (section.questions || []).length + ' answered')
-        ]),
-        ui.el('span', { class: 'bb-list-chevron' }, '›')
-      ]);
-    });
-    ui.fill(host, chrome('Sections').concat([ui.card(null, rows)]));
-  }
-
-  function renderSectionDetail(host, sectionId) {
-    var payload = results();
-    var section = (payload.sections || []).filter(function (s) {
-      return s.section_id === sectionId;
-    })[0];
-    if (!section) return renderSections(host);
-
-    var answered = (section.questions || []).filter(isAnswered).length;
-    var cards = (section.questions || []).map(function (q) {
-      return ui.card(null, [questionBlock(q)]);
-    });
-    ui.fill(host, chrome(section.section_name,
-      answered + ' of ' + (section.questions || []).length + ' answered').concat(cards));
-  }
-
-  /** One question: text, answer, the L6.5 summary, then confidence + pages. */
-  function questionBlock(q) {
-    var parts = [ui.el('div', { class: 'bb-question-text' }, q.question || q.text || '')];
-
-    if (isAnswered(q)) {
-      var answer = ui.el('div', { class: 'bb-question-answer bb-clamped' }, q.answer);
-      answer.addEventListener('click', function () {
-        answer.classList.toggle('bb-clamped');
-      });
-      parts.push(answer);
-
-      var summary = answerSummaryOf(q);
-      if (summary) {
-        parts.push(ui.el('div', { class: 'bb-answer-summary' }, [
-          ui.el('span', { class: 'bb-answer-summary-label' }, 'Answer Summary'),
-          ui.el('span', {}, summary)
-        ]));
-      }
-
-      var meta = [ui.el('span', { class: 'bb-pill bb-pill-' + confidenceOf(q) }, confidenceOf(q))];
-      if ((q.page_citations || []).length) {
-        meta.push(ui.el('span', { class: 'bb-pages' }, 'p. ' + q.page_citations.join(', ')));
-      }
-      parts.push(ui.el('div', { class: 'bb-row' }, meta));
-
-      if (q.footnote) {
-        parts.push(ui.el('div', { class: 'bb-caption' }, q.footnote));
-      }
-    } else {
-      parts.push(ui.el('div', { class: 'bb-question-missing' }, 'Not found in document'));
+  function sheetBody(id, payload) {
+    switch (id) {
+      case 'summary':      return sheetSummary(payload);
+      case 'detailed':     return sheetDetailed(payload);
+      case 'bySection':    return sheetBySection(payload);
+      case 'intelligence': return sheetIntelligence(payload);
+      case 'visual':       return sheetVisual(payload);
+      case 'footnotes':    return sheetFootnotes(payload);
+      default:             return [];
     }
-
-    return ui.el('div', { class: 'bb-question' }, parts);
   }
 
-  // ---- Key details --------------------------------------------------------
+  // ---- Sheet 1: Executive Summary -----------------------------------------
 
-  function renderKeyDetails(host) {
-    var payload = results();
+  function kvTable(rows) {
+    return ui.el('div', { class: 'bb-table-wrap' }, [
+      ui.el('table', { class: 'bb-table bb-kv-table' }, [
+        ui.el('tbody', {}, rows.map(function (pair) {
+          return ui.el('tr', {}, [
+            ui.el('td', { class: 'bb-td-strong' }, pair[0]),
+            ui.el('td', {}, pair[1])
+          ]);
+        }))
+      ])
+    ]);
+  }
+
+  function sheetSummary(payload) {
+    var blocks = [
+      sectionBand('Analysis Statistics'),
+      kvTable(execSummaryRows(payload))
+    ];
     var kr = payload.key_requirements || BB.state.analysis.keyRequirements || {};
-    var children = chrome('Key Details');
-
-    var factRows = Object.keys(kr).sort().map(function (key) {
-      var value = kr[key];
-      if (value && typeof value === 'object') value = JSON.stringify(value);
-      return ui.el('div', { style: 'margin-bottom:10px' }, [
-        ui.el('div', { class: 'bb-caption' },
-          key.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); })),
-        ui.el('div', {}, String(value == null ? '' : value))
-      ]);
-    });
-    if (factRows.length) children.push(ui.card('Document Facts', factRows));
-
-    var footnotes = payload.footnotes || [];
-    if (footnotes.length) {
-      children.push(ui.card('Footnotes', footnotes.map(function (f) {
-        return ui.el('div', { class: 'bb-body', style: 'margin-bottom:6px' }, String(f));
-      })));
+    var details = keyDetailRows(kr);
+    blocks.push(sectionBand('Key Document Details'));
+    if (details.length) {
+      blocks.push(kvTable(details));
+    } else {
+      blocks.push(ui.el('p', { class: 'bb-caption' },
+        'Key project details will appear here when extracted from the analysis.'));
     }
-    ui.fill(host, children);
+    var vis = visualFindings(payload);
+    if (vis.length) {
+      blocks.push(sectionBand('Visual Intelligence'));
+      blocks.push(ui.el('p', { class: 'bb-body' },
+        vis.length + ' drawing/map/imagery page' + (vis.length === 1 ? '' : 's') +
+        ' deep-processed with AI vision - see the Visual Intelligence sheet.'));
+    }
+    return blocks;
   }
 
-  // ---- Document intelligence ---------------------------------------------
+  function sectionBand(text) {
+    return ui.el('div', { class: 'bb-section-band' }, text);
+  }
 
-  function renderIntelligence(host) {
-    var payload = results();
-    var children = chrome('Document Intelligence',
-      'Tables the AI chose for this specific document');
+  // ---- Sheet 2: Detailed Results ------------------------------------------
 
-    if (payload.intelligence_focus) {
-      children.push(ui.el('p', { class: 'bb-caption-lit bb-center' }, payload.intelligence_focus));
+  function expandableAnswer(q) {
+    if (!isAnswered(q)) {
+      return ui.el('span', { class: 'bb-td-pending' }, 'Not found in document');
     }
+    var cell = ui.el('span', { class: 'bb-answer-cell bb-clamped' }, q.answer);
+    cell.addEventListener('click', function () { cell.classList.toggle('bb-clamped'); });
+    return cell;
+  }
 
-    dynamicTables(payload).forEach(function (table) {
-      var columns = table.columns || (table.rows && table.rows[0] ? Object.keys(table.rows[0]) : []);
-      children.push(ui.card(table.title || table.name || 'Table', [
-        table.description ? ui.el('p', { class: 'bb-body', style: 'margin-bottom:10px' }, table.description) : null,
-        ui.el('div', { class: 'bb-table-wrap' }, [
-          ui.el('table', { class: 'bb-table' }, [
-            ui.el('thead', {}, [ui.el('tr', {}, columns.map(function (c) {
-              return ui.el('th', {}, String(c));
-            }))]),
-            ui.el('tbody', {}, (table.rows || []).map(function (row) {
-              return ui.el('tr', {}, columns.map(function (c) {
-                return ui.el('td', {}, String(row[c] == null ? '' : row[c]));
-              }));
-            }))
-          ])
+  function statusPill(q) {
+    var found = isAnswered(q);
+    return ui.el('span', {
+      class: 'bb-status-pill ' + (found ? 'bb-status-found' : 'bb-status-missing')
+    }, found ? 'Found' : 'Not Found');
+  }
+
+  function sheetDetailed(payload) {
+    var rows = flatten(payload);
+    var body = ui.el('tbody', {}, rows.map(function (q, index) {
+      return ui.el('tr', {}, [
+        ui.el('td', { class: 'bb-td-center' }, String(index + 1)),
+        ui.el('td', {}, q.section_name || ''),
+        ui.el('td', { class: 'bb-td-strong' }, q.question || ''),
+        ui.el('td', {}, [expandableAnswer(q)]),
+        ui.el('td', {}, answerSummaryOf(q) || '-'),
+        ui.el('td', { class: 'bb-td-center' }, (q.page_citations || []).join(', ') || '-'),
+        ui.el('td', { class: 'bb-td-center' }, q.footnote ? '✓' : '-'),
+        ui.el('td', { class: 'bb-td-center' }, [statusPill(q)])
+      ]);
+    }));
+    return [
+      ui.el('p', { class: 'bb-caption', style: 'margin-bottom:10px' },
+        rows.length + ' questions - tap an answer to expand it.'),
+      ui.el('div', { class: 'bb-table-wrap' }, [
+        ui.el('table', { class: 'bb-table' }, [
+          ui.el('thead', {}, [ui.el('tr', {},
+            ['#', 'Section', 'Question', 'Answer', 'Answer Summary', 'PDF Pages', 'FN', 'Status']
+              .map(function (h) { return ui.el('th', {}, h); }))]),
+          body
+        ])
+      ])
+    ];
+  }
+
+  // ---- Sheet 3: By Section --------------------------------------------------
+
+  function sheetBySection(payload) {
+    var blocks = [];
+    (payload.sections || []).forEach(function (section) {
+      var questions = section.questions || [];
+      var answered = questions.filter(isAnswered).length;
+      var rate = questions.length ? Math.round(answered / questions.length * 100) : 0;
+      blocks.push(sectionBand(
+        (section.section_name || 'Section').toUpperCase() +
+        '  (' + answered + '/' + questions.length + ' answered - ' + rate + '%)'));
+      blocks.push(ui.el('div', { class: 'bb-table-wrap' }, [
+        ui.el('table', { class: 'bb-table' }, [
+          ui.el('thead', {}, [ui.el('tr', {},
+            ['#', 'Question', 'Answer', 'Answer Summary', 'PDF Pages', 'Status']
+              .map(function (h) { return ui.el('th', {}, h); }))]),
+          ui.el('tbody', {}, questions.map(function (q, index) {
+            return ui.el('tr', {}, [
+              ui.el('td', { class: 'bb-td-center' }, String(index + 1)),
+              ui.el('td', { class: 'bb-td-strong' }, q.question || ''),
+              ui.el('td', {}, [expandableAnswer(q)]),
+              ui.el('td', {}, answerSummaryOf(q) || '-'),
+              ui.el('td', { class: 'bb-td-center' }, (q.page_citations || []).join(', ') || '-'),
+              ui.el('td', { class: 'bb-td-center' }, [
+                ui.el('span', {
+                  class: 'bb-status-mark ' +
+                    (isAnswered(q) ? 'bb-status-found' : 'bb-status-missing')
+                }, isAnswered(q) ? '✓' : '✗')
+              ])
+            ]);
+          }))
         ])
       ]));
     });
-    ui.fill(host, children);
+    return blocks;
   }
 
-  // ---- Improve ------------------------------------------------------------
+  // ---- Sheet: Document Intelligence ----------------------------------------
+
+  function sheetIntelligence(payload) {
+    var blocks = [];
+    if (payload.intelligence_focus) {
+      blocks.push(ui.el('p', { class: 'bb-caption-lit' }, payload.intelligence_focus));
+    }
+    dynamicTables(payload).forEach(function (table) {
+      var columns = table.columns || [];
+      var keys, labels;
+      if (columns.length && typeof columns[0] === 'object') {
+        keys = columns.map(function (c) { return c.key; });
+        labels = columns.map(function (c) { return c.label || c.key; });
+      } else if (columns.length) {
+        keys = labels = columns;
+      } else {
+        keys = labels = (table.rows && table.rows[0]) ? Object.keys(table.rows[0]) : [];
+      }
+      blocks.push(sectionBand(table.title || table.name || 'Table'));
+      if (table.why_relevant || table.description) {
+        blocks.push(ui.el('p', { class: 'bb-caption', style: 'margin-bottom:8px' },
+          table.why_relevant || table.description));
+      }
+      blocks.push(ui.el('div', { class: 'bb-table-wrap' }, [
+        ui.el('table', { class: 'bb-table' }, [
+          ui.el('thead', {}, [ui.el('tr', {}, labels.map(function (c) {
+            return ui.el('th', {}, String(c));
+          }))]),
+          ui.el('tbody', {}, (table.rows || []).map(function (row) {
+            return ui.el('tr', {}, keys.map(function (k) {
+              return ui.el('td', {}, String(row[k] == null ? '' : row[k]));
+            }));
+          }))
+        ])
+      ]));
+      (table.insights || []).forEach(function (insight) {
+        blocks.push(ui.el('p', { class: 'bb-caption' }, '💡 ' + insight));
+      });
+    });
+    return blocks;
+  }
+
+  // ---- Sheet: Visual Intelligence -------------------------------------------
+
+  function sheetVisual(payload) {
+    var findings = visualFindings(payload);
+    var blocks = [
+      ui.el('p', { class: 'bb-caption', style: 'margin-bottom:10px' },
+        findings.length + ' visual-heavy page' + (findings.length === 1 ? '' : 's') +
+        ' deep-processed with AI vision, on top of the standard text analysis.')
+    ];
+    findings.forEach(function (f) {
+      var parts = [
+        ui.el('div', { class: 'bb-row' }, [
+          ui.el('span', { class: 'bb-pill bb-pill-medium' },
+            String(f.kind || 'visual').toUpperCase()),
+          ui.el('span', { class: 'bb-pages' }, 'p. ' + f.page),
+          f.title ? ui.el('span', { class: 'bb-list-title' }, f.title) : null
+        ])
+      ];
+      if (f.description) {
+        parts.push(ui.el('p', { class: 'bb-body', style: 'margin-top:6px' }, f.description));
+      }
+      if (f.extracted_text) {
+        parts.push(ui.el('div', { class: 'bb-visual-extract' }, f.extracted_text));
+      }
+      if ((f.key_facts || []).length) {
+        parts.push(ui.el('ul', { class: 'bb-visual-facts' }, f.key_facts.map(function (fact) {
+          return ui.el('li', {}, String(fact));
+        })));
+      }
+      blocks.push(ui.el('div', { class: 'bb-visual-finding' }, parts));
+    });
+    return blocks;
+  }
+
+  // ---- Sheet: Footnotes ------------------------------------------------------
+
+  function sheetFootnotes(payload) {
+    var footnotes = payload.footnotes || [];
+    if (!footnotes.length) {
+      return [ui.el('p', { class: 'bb-caption' }, 'No footnotes were compiled for this analysis.')];
+    }
+    return [ui.el('div', { class: 'bb-table-wrap' }, [
+      ui.el('table', { class: 'bb-table' }, [
+        ui.el('thead', {}, [ui.el('tr', {}, [
+          ui.el('th', { style: 'width:44px' }, '#'), ui.el('th', {}, 'Footnote')
+        ])]),
+        ui.el('tbody', {}, footnotes.map(function (fn, index) {
+          return ui.el('tr', {}, [
+            ui.el('td', { class: 'bb-td-center' }, String(index + 1)),
+            ui.el('td', {}, String(fn))
+          ]);
+        }))
+      ])
+    ])];
+  }
+
+  // ---- Improve ---------------------------------------------------------------
 
   function renderImprove(host) {
     var s = summarize(results());
@@ -433,7 +624,7 @@
     });
   }
 
-  // ---- Exports & Smart Analysis ------------------------------------------
+  // ---- Exports & Smart Analysis ---------------------------------------------
 
   function renderActions(host) {
     var children = chrome('Exports & Analysis');
@@ -468,7 +659,7 @@
 
     children.push(ui.el('button', {
       class: 'bb-btn-ghost bb-danger', type: 'button',
-      onclick: function () { path = []; BB.analyze.reset(); }
+      onclick: function () { path = []; activeSheet = null; BB.analyze.reset(); }
     }, 'New Analysis'));
 
     ui.fill(host, children);
@@ -503,17 +694,32 @@
         '<td>' + ui.escapeHtml(answerSummaryOf(q) || '') + '</td>' +
         '<td>' + ui.escapeHtml((q.page_citations || []).join(', ')) + '</td></tr>';
     }).join('');
+    var visualRows = visualFindings(payload).map(function (f) {
+      return '<tr><td>' + ui.escapeHtml(String(f.page)) + '</td>' +
+        '<td>' + ui.escapeHtml(String(f.kind || '')) + '</td>' +
+        '<td>' + ui.escapeHtml(f.title || '') + '</td>' +
+        '<td>' + ui.escapeHtml(f.description || '') + '</td>' +
+        '<td>' + ui.escapeHtml(f.extracted_text || '') + '</td>' +
+        '<td>' + ui.escapeHtml((f.key_facts || []).join(' • ')) + '</td></tr>';
+    }).join('');
+    var visualSection = visualRows
+      ? '<h2>Visual Intelligence — Drawings, Maps &amp; Imagery</h2><table><thead><tr>' +
+        '<th>Page</th><th>Type</th><th>Title</th><th>What It Shows</th>' +
+        '<th>Labels &amp; Callouts</th><th>Key Facts</th></tr></thead><tbody>' +
+        visualRows + '</tbody></table>'
+      : '';
     var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
       '<title>BidBrief Analysis Report</title><style>' +
       'body{font-family:Calibri,Arial,sans-serif;font-size:12pt;margin:40px;}' +
       'h1{color:#104090;border-bottom:4px solid #5E86D0;padding-bottom:12px;}' +
+      'h2{color:#104090;margin-top:36px;}' +
       'table{width:100%;border-collapse:collapse;margin-top:20px;}' +
       'th{background:#104090;color:#fff;padding:10px;text-align:left;}' +
       'td{padding:9px;border:1px solid #ddd;vertical-align:top;}' +
       '</style></head><body><h1>' + ui.escapeHtml(payload.document_name || 'Document Analysis') +
       '</h1><p>Generated: ' + new Date().toLocaleString() + '</p><table><thead><tr>' +
       '<th>Section</th><th>Question</th><th>Answer</th><th>Answer Summary</th><th>PDF Pages</th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table></body></html>';
+      '</tr></thead><tbody>' + rows + '</tbody></table>' + visualSection + '</body></html>';
     download(html, 'bidbrief_analysis.html', 'text/html');
   }
 
@@ -621,43 +827,13 @@
     return 'high';                                             /* green */
   }
 
-  // ---- Table view (web-only) ---------------------------------------------
-
-  function renderTable(host) {
-    var rows = flatten(results());
-    var body = ui.el('tbody', {}, rows.map(function (q) {
-      return ui.el('tr', {}, [
-        ui.el('td', {}, q.section_name || ''),
-        ui.el('td', { class: 'bb-td-strong' }, q.question || ''),
-        ui.el('td', isAnswered(q) ? {} : { class: 'bb-td-pending' },
-          isAnswered(q) ? q.answer : 'Not found in document'),
-        ui.el('td', {}, answerSummaryOf(q) || ''),
-        ui.el('td', {}, (q.page_citations || []).join(', ')),
-        ui.el('td', {}, [
-          ui.el('span', { class: 'bb-pill bb-pill-' + confidenceOf(q) }, confidenceOf(q))
-        ])
-      ]);
-    }));
-
-    ui.fill(host, chrome('Table View', rows.length + ' questions').concat([
-      ui.card(null, [
-        ui.el('div', { class: 'bb-table-wrap' }, [
-          ui.el('table', { class: 'bb-table' }, [
-            ui.el('thead', {}, [ui.el('tr', {},
-              ['Section', 'Question', 'Answer', 'Answer Summary', 'Pages', 'Confidence']
-                .map(function (h) { return ui.el('th', {}, h); }))]),
-            body
-          ])
-        ])
-      ])
-    ]));
-  }
-
   BB.results = {
     render: render, push: push, back: back,
     summarize: summarize, answerSummaryOf: answerSummaryOf, isAnswered: isAnswered,
     confidenceOf: confidenceOf, flatten: flatten, toCsv: toCsv,
     ingestLiveAnswers: ingestLiveAnswers,
-    reset: function () { path = []; liveAnswers = {}; }
+    sheetList: sheetList, execSummaryRows: execSummaryRows,
+    keyDetailRows: keyDetailRows, statusOf: statusOf,
+    reset: function () { path = []; activeSheet = null; liveAnswers = {}; }
   };
 })(typeof window !== 'undefined' ? window : this);

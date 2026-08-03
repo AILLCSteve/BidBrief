@@ -47,6 +47,7 @@
       contextGuardrails: '',
       mode: 'bid_spec',
       highPower: false,
+      visualAnalysis: false,    /* opt-in Layer 0.5 vision pass - additive only */
       enableSecondPass: false,
       recheckEmptyWindows: false,
       enableDeepRAG: false,
@@ -104,6 +105,7 @@
       a.phase = 'idle'; a.file = null; a.filename = ''; a.uploadId = null;
       a.sessionId = null; a.hasPendingDocument = false; a.needsQuestionChoice = false;
       a.enabledSections = null; a.results = null; a.events = []; a.errorMessage = null;
+      a.visualAnalysis = false;
       state.notify();
     },
 

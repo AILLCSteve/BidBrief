@@ -37,6 +37,9 @@
       recheck_empty_windows: !!an.recheckEmptyWindows,
       enable_second_pass: !!an.enableSecondPass,
       enable_deep_rag: !!an.enableDeepRAG,
+      /* Opt-in vision pass over drawing/map/photo-heavy pages. ADDITIVE ONLY:
+         the standard text analysis runs unchanged either way. */
+      enable_visual_analysis: !!an.visualAnalysis,
       pipeline_mode: an.pipelineMode || 'classic'
     };
     var guard = (an.contextGuardrails || '').trim();
@@ -259,6 +262,17 @@
         onClick: function () { BB.shell.go('questions'); }
       }));
     }
+
+    children.push(ui.card('Visual Intelligence', [
+      ui.toggleRow({
+        title: 'Analyze drawings, maps & images',
+        subtitle: 'AI vision deep-processes drawing-heavy pages - plan sheets, site maps, ' +
+          'details, photos - on top of the standard analysis. The standard text ' +
+          'processing is unchanged; this only adds what the imagery reveals.',
+        checked: a().visualAnalysis,
+        onChange: function (on) { a().visualAnalysis = on; }
+      })
+    ]));
 
     children.push(ui.card('Advanced', [
       ui.toggleRow({
