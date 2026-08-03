@@ -188,15 +188,25 @@
     }, (status.ok ? '● ' : '▲ ') + status.text);
   }
 
-  function loadSessions() {
+  /** The storage check is a DIAGNOSTIC and must never gate the data.
+      Chaining it in front of the session list meant one slow database call left
+      the whole dashboard stuck on "Loading sessions..." forever. It now runs
+      alongside, and repaints the status line only if and when it answers. */
+  function loadStorageStatus() {
     window.fetch('/api/admin/storage')
       .then(function (r) { return r.json(); })
-      .then(function (info) { storageInfo = info; })
-      .catch(function () { storageInfo = null; })
-      .then(function () {
-        return window.fetch('/api/admin/sessions')
-          .then(function (r) { return r.json(); });
+      .then(function (info) {
+        storageInfo = info;
+        var host = ui.qs('#bb-storage-line');
+        if (host) ui.fill(host, [storageLine(info)]);
       })
+      .catch(function () { /* the session list stands on its own */ });
+  }
+
+  function loadSessions() {
+    loadStorageStatus();
+    window.fetch('/api/admin/sessions')
+      .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.success) throw new Error(data.error || 'Could not load');
         paintSessions(data);
@@ -221,7 +231,7 @@
             class: 'bb-btn-ghost', type: 'button', onclick: loadSessions
           }, '↻  Refresh')
         ]),
-        storageLine(storageInfo)
+        ui.el('div', { id: 'bb-storage-line' }, [storageLine(storageInfo)])
       ])
     ];
 

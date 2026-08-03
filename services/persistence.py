@@ -208,7 +208,17 @@ class Store:
                 conninfo=url, min_size=0, max_size=_pool_max(),
                 timeout=30, max_idle=120, num_workers=1, open=True,
                 check=ConnectionPool.check_connection,
-                kwargs={'autocommit': True},
+                # Hard network + query timeouts. Without these a psycopg
+                # connection has NO socket read timeout, and Neon suspends idle
+                # compute — so a stale half-open connection makes a query hang
+                # forever instead of failing. One such connection is enough to
+                # wedge an admin page at "Loading..." permanently.
+                kwargs={
+                    'autocommit': True,
+                    'connect_timeout': 10,
+                    'options': '-c statement_timeout=15000'
+                               ' -c idle_in_transaction_session_timeout=15000',
+                },
             )
             with self._pool.connection() as conn:
                 conn.execute(_SCHEMA)
