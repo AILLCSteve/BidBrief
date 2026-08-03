@@ -518,12 +518,15 @@ def _transform_to_legacy_format(hotdog_output: dict) -> dict:
                 # L6.5 distilled summary — sits between answer and page_citations
                 legacy_question['answer_summary'] = primary_answer.get('summary') or None
                 legacy_question['page_citations'] = primary_answer.get('pages', [])
+                # Layer 0.5 provenance: which drawings/maps/photos fed this answer
+                legacy_question['visual_sources'] = primary_answer.get('visual_sources', []) or []
                 legacy_question['confidence'] = primary_answer.get('confidence', 0.0)
                 legacy_question['footnote'] = primary_answer.get('footnote', '')  # Include footnote
             else:
                 legacy_question['answer'] = None
                 legacy_question['answer_summary'] = None
                 legacy_question['page_citations'] = []
+                legacy_question['visual_sources'] = []
                 legacy_question['confidence'] = 0.0
                 legacy_question['footnote'] = None
 
@@ -866,7 +869,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.4.0'
+        'version': '2.4.1'
     })
 
 @app.route('/pics/<path:filename>')

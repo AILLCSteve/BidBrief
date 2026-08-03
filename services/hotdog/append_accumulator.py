@@ -22,6 +22,8 @@ class AnswerFragment:
     expert_name: str
     timestamp: str
     raw_footnote: str = ""
+    # Layer 0.5: drawings/maps/imagery this fragment drew on, [{page, kind}]
+    visual_sources: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -32,7 +34,8 @@ class AnswerFragment:
             'window_index': self.window_index,
             'expert_name': self.expert_name,
             'timestamp': self.timestamp,
-            'raw_footnote': self.raw_footnote
+            'raw_footnote': self.raw_footnote,
+            'visual_sources': self.visual_sources
         }
 
 
@@ -78,6 +81,21 @@ class CumulativeAnswer:
         for fragment in self.fragments:
             pages.update(fragment.pages)
         return sorted(pages)
+
+    @property
+    def all_visual_sources(self) -> List[Dict[str, Any]]:
+        """Every drawing/map/photo any fragment drew on, deduped and ordered.
+
+        BestPrep never discards a fragment, so the synthesized answer must be
+        able to say which graphics fed it - the same provenance Bid/Spec gets
+        from Answer.merge_with.
+        """
+        merged = {}
+        for fragment in self.fragments:
+            for source in (fragment.visual_sources or []):
+                merged[(source.get('page'), source.get('kind'))] = source
+        return [merged[k] for k in
+                sorted(merged, key=lambda k: (k[0] or 0, k[1] or ''))]
 
     @property
     def fragment_count(self) -> int:
@@ -157,7 +175,8 @@ class AppendOnlyAccumulator:
         confidence: float,
         window_index: int,
         expert_name: str,
-        raw_footnote: str = ""
+        raw_footnote: str = "",
+        visual_sources: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """
         Add an answer fragment. Returns the fragment_id.
@@ -179,7 +198,8 @@ class AppendOnlyAccumulator:
             window_index=window_index,
             expert_name=expert_name,
             timestamp=datetime.utcnow().isoformat(),
-            raw_footnote=raw_footnote
+            raw_footnote=raw_footnote,
+            visual_sources=list(visual_sources or [])
         )
 
         self.cumulative_answers[question_id].add_fragment(fragment)

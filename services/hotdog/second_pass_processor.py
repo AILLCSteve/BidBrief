@@ -345,10 +345,26 @@ CRITICAL: Still maintain PDF page citations <PDF pg X> for ALL answers, even par
         # Truncate window text if too long
         truncated_text = window.text[:8000]
 
+        # Layer 0.5: the second pass re-reads the same windows, so it gets the
+        # same visual evidence contract. These questions went unanswered in the
+        # first pass — a drawing or map is often exactly where the answer hides.
+        visual_block = ""
+        if getattr(window, 'visual_pages', None):
+            visual_block = f"""
+VISUAL EVIDENCE IN THIS SECTION: {window.visual_summary()}.
+Drawings, maps and imagery on these pages were read by an AI vision analyst and
+their findings appear inline below inside [VISUAL CONTENT ...] blocks. These
+questions were unanswered from the written text, so scrutinize the visual
+evidence closely - dimensions, callouts, legends and schedules in the graphics
+frequently hold the answer.
+When an answer comes from a [VISUAL CONTENT] block you MUST mark it:
+  <PDF pg 7> <VIS pg 7 drawing>
+"""
+
         prompt = f"""Analyze the following document section (Pages {window.page_range_str}) with ENHANCED SCRUTINY.
 
 These questions were UNANSWERED in the first pass. Use creative interpretation and inference.
-
+{visual_block}
 DOCUMENT SECTION:
 {truncated_text}
 
@@ -447,6 +463,13 @@ Remember:
                         pages_str = ', '.join(map(str, pages))
                         answer_text += f" <PDF pg {pages_str}>"
 
+                # Layer 0.5 provenance, same contract as the first pass
+                from .visual_intelligence import extract_visual_sources
+                window_visuals = getattr(window, 'visual_pages', {}) or {}
+                visual_sources = extract_visual_sources(
+                    answer_text, allowed_pages=list(window_visuals.keys()),
+                    page_kinds=window_visuals)
+
                 # Create Answer object
                 try:
                     answer = Answer(
@@ -455,7 +478,8 @@ Remember:
                         pages=pages if pages else window.pages,
                         confidence=confidence,
                         expert=expert.name + " (Second Pass)",
-                        window=window.window_num
+                        window=window.window_num,
+                        visual_sources=visual_sources
                     )
 
                     # Add reasoning to metadata if available

@@ -36,7 +36,13 @@ _SYSTEM_TEMPLATE = (
     "into a direct 1-3 sentence answer to the question itself — the single "
     "takeaway a bidder needs. Rules: never invent facts not present in the "
     "quotes; keep numbers, dates, dimensions, and named standards exact; write "
-    "plainly; do NOT include citation markers like <PDF pg X>. "
+    "plainly; do NOT include citation markers like <PDF pg X> or <VIS pg X kind>. "
+    "Some quotes come from [VISUAL CONTENT] blocks — an AI reading of the "
+    "drawings, maps and imagery in the document. Where an answer rests on one, "
+    "say so in plain words ('the plan sheet shows...', 'per the site map...', "
+    "'the detail drawing calls for...') so the reader knows the fact came from a "
+    "graphic rather than the written specification. Never present a graphic as "
+    "written text or vice versa. "
     'Return JSON: {{"summaries": [{{"question_id": "...", "summary": "..."}}]}} '
     "with one entry per question given."
 )
@@ -91,9 +97,18 @@ class AnswerSummarizer:
             )
             user_lines = []
             for question, answer in batch:
+                # Name the graphics behind this answer so the summary can
+                # attribute them in prose rather than leaking raw markers.
+                visual_note = ""
+                sources = getattr(answer, 'visual_sources', None) or []
+                if sources:
+                    described = ", ".join(
+                        f"{s.get('kind', 'visual')} on page {s.get('page')}"
+                        for s in sources)
+                    visual_note = (f"VISUAL EVIDENCE BEHIND THIS ANSWER: {described}\n")
                 user_lines.append(
                     f"question_id: {question.id}\nQUESTION: {question.text}\n"
-                    f"APPENDED QUOTES:\n{answer.text}\n---"
+                    f"{visual_note}APPENDED QUOTES:\n{answer.text}\n---"
                 )
             user = (
                 "Synthesize a summary answer for each of the following:\n\n"

@@ -24,6 +24,7 @@ import base64
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -134,6 +135,59 @@ def build_visual_block(finding: Dict) -> str:
         lines.extend(f'- {f}' for f in facts)
     lines.append('[END VISUAL CONTENT]')
     return '\n'.join(lines)
+
+
+# <VIS pg 7 drawing> / <VIS pg 7> — the marker experts append to an answer when
+# the fact came from a graphic rather than the written text.
+_VIS_MARKER_RE = re.compile(r'<VIS\s+pg\s*(\d+)(?:\s+([a-zA-Z_]+))?\s*>', re.IGNORECASE)
+
+
+def extract_visual_sources(text: str,
+                           allowed_pages: Optional[List[int]] = None,
+                           page_kinds: Optional[Dict[int, str]] = None) -> List[Dict]:
+    """
+    Parse <VIS pg N kind> markers out of an answer into provenance records.
+
+    Pure and defensive — this reads model output, so it tolerates a missing
+    kind, odd spacing and repeats, and (when given the window's real visual
+    pages) refuses pages the model could not have seen, so a hallucinated
+    marker cannot invent a drawing that was never analyzed.
+    """
+    if not text:
+        return []
+    seen, out = set(), []
+    for match in _VIS_MARKER_RE.finditer(text):
+        try:
+            page = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if allowed_pages is not None and page not in allowed_pages:
+            continue
+        kind = (match.group(2) or '').lower()
+        if not kind and page_kinds:
+            kind = page_kinds.get(page, '')
+        kind = kind or 'visual'
+        if (page, kind) in seen:
+            continue
+        seen.add((page, kind))
+        out.append({'page': page, 'kind': kind})
+    return sorted(out, key=lambda v: v['page'])
+
+
+_KIND_DISPLAY = {
+    'drawing': 'Drawing', 'map': 'Map', 'photo': 'Photo',
+    'chart': 'Chart', 'table': 'Table image', 'mixed': 'Visual', 'visual': 'Visual',
+}
+
+
+def format_visual_sources(sources: Optional[List[Dict]]) -> str:
+    """'Drawing p.7; Map p.9' — one string for a spreadsheet cell or a caption."""
+    if not sources:
+        return ''
+    return '; '.join(
+        f"{_KIND_DISPLAY.get(str(s.get('kind', '')).lower(), str(s.get('kind') or 'Visual').title())}"
+        f" p.{s.get('page')}"
+        for s in sources)
 
 
 def parse_vision_response(raw: str, page_num: int) -> Optional[Dict]:
@@ -379,7 +433,10 @@ class VisualIntelligenceScanner:
         findings = sorted((f for f in results if f), key=lambda f: f['page'])
 
         # Rebuild the pages list, replacing enriched pages (PageData is frozen).
+        # visual_kind tags the page so create_windows can tell the experts which
+        # pages carry visual evidence and what kind it is.
         blocks = {f['page']: build_visual_block(f) for f in findings}
+        kinds = {f['page']: f.get('kind', 'visual') for f in findings}
         enriched: List[PageData] = []
         for p in pages:
             block = blocks.get(p.page_num)
@@ -387,7 +444,8 @@ class VisualIntelligenceScanner:
                 text = p.text + '\n' + block
                 enriched.append(PageData(
                     page_num=p.page_num, text=text,
-                    char_count=len(text), has_content=True))
+                    char_count=len(text), has_content=True,
+                    visual_kind=kinds.get(p.page_num, 'visual')))
             else:
                 enriched.append(p)
 

@@ -280,7 +280,7 @@ class MultiExpertProcessor:
         page_numbers = ", ".join(map(str, window.pages))
 
         prompt = f"""You are analyzing a document excerpt to answer specific questions.
-
+{self._visual_evidence_block(window)}
 DOCUMENT EXCERPT (Pages {window.page_range_str}):
 {window.text}
 
@@ -321,9 +321,56 @@ OUTPUT FORMAT (JSON):
 
 {expert.citation_strategy}
 
-Remember: Every answer MUST include BOTH direct quotes (in "quotation marks") AND <PDF pg X> citation. This is MANDATORY."""
+Remember: Every answer MUST include BOTH direct quotes (in "quotation marks") AND <PDF pg X> citation. This is MANDATORY.{self._visual_reminder(window)}"""
 
         return prompt
+
+    # ---- Layer 0.5 visual evidence -------------------------------------------
+    # The visual pass writes its findings into the page text as [VISUAL CONTENT]
+    # blocks, so experts already SEE them. These two helpers make that evidence
+    # first-class: the expert is told which pages carry drawings/maps/imagery,
+    # that it is real document evidence, and how to attribute an answer to it.
+
+    VISUAL_KIND_LABELS = {
+        'drawing': 'engineering drawing', 'map': 'map', 'photo': 'photograph',
+        'chart': 'chart', 'table': 'table image', 'mixed': 'visual content',
+    }
+
+    def _visual_evidence_block(self, window: WindowContext) -> str:
+        """The VISUAL EVIDENCE section, or '' for a text-only window."""
+        if not getattr(window, 'visual_pages', None):
+            return ""
+        described = ", ".join(
+            f"page {page} ({self.VISUAL_KIND_LABELS.get(kind, kind)})"
+            for page, kind in sorted(window.visual_pages.items()))
+        return f"""
+VISUAL EVIDENCE AVAILABLE IN THIS EXCERPT:
+{described}.
+
+These pages contain drawings, maps or imagery that were read by an AI vision
+analyst. Their findings appear inline in the excerpt below inside
+[VISUAL CONTENT ...] blocks: transcribed labels, dimensions, callouts, legends,
+station numbers, materials and sizes taken directly from the graphics.
+
+Treat this as REAL EVIDENCE FROM THE DOCUMENT, equal in standing to the written
+text - much of a construction document's substance only exists in its drawings.
+Answer questions from it whenever it is the best available source.
+
+ATTRIBUTION IS MANDATORY: whenever any part of an answer comes from a
+[VISUAL CONTENT] block, add a visual marker immediately after the page citation:
+  <PDF pg 7> <VIS pg 7 drawing>
+Use the kind shown above (drawing | map | photo | chart | table). Cite one
+marker per visual page you used. If an answer comes only from written text, do
+NOT add a visual marker.
+"""
+
+    def _visual_reminder(self, window: WindowContext) -> str:
+        if not getattr(window, 'visual_pages', None):
+            return ""
+        return (" Answers drawn from the drawings/maps/imagery on "
+                f"page(s) {window.visual_summary()} MUST also carry a "
+                "<VIS pg N kind> marker so the reader knows the fact came from "
+                "a graphic rather than the written text.")
 
     def _parse_expert_response(
         self,
@@ -382,6 +429,15 @@ Remember: Every answer MUST include BOTH direct quotes (in "quotation marks") AN
                 logger.warning(f"Question {question_id}: Pages {pages} not in window {window.pages}")
                 valid_pages = [window.pages[0]]  # Default to first page of window
 
+            # Layer 0.5 provenance: which drawings/maps this answer drew on.
+            # Restricted to the window's actually-analyzed visual pages, so a
+            # stray marker cannot invent a graphic that was never read.
+            from .visual_intelligence import extract_visual_sources
+            window_visuals = getattr(window, 'visual_pages', {}) or {}
+            visual_sources = extract_visual_sources(
+                text, allowed_pages=list(window_visuals.keys()),
+                page_kinds=window_visuals)
+
             # Create Answer object (validation happens in __post_init__)
             try:
                 answer = Answer(
@@ -391,7 +447,8 @@ Remember: Every answer MUST include BOTH direct quotes (in "quotation marks") AN
                     confidence=confidence,
                     expert=expert.name,
                     window=window.window_num,
-                    footnote=footnote  # NEW: Include footnote
+                    footnote=footnote,  # NEW: Include footnote
+                    visual_sources=visual_sources
                 )
                 answers.append(answer)
                 logger.debug(f"✅ Question {question_id}: Answer validated (pages: {valid_pages}, footnote: {len(footnote)} chars)")

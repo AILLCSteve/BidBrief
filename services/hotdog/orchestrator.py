@@ -537,7 +537,11 @@ class HotdogOrchestrator:
                         window_num=window.window_num,
                         pages=window.pages,
                         text=adjusted_context,
-                        page_data=window.page_data
+                        page_data=window.page_data,
+                        # Preserve Layer 0.5 tagging across truncation - dropping
+                        # it here would silently disarm the visual citation
+                        # contract for exactly the biggest (most complex) windows.
+                        visual_pages=window.visual_pages
                     )
 
                 # -----------------------------------------------------
@@ -589,7 +593,8 @@ class HotdogOrchestrator:
                             confidence=answer.confidence,
                             window_index=window_idx,
                             expert_name=answer.expert,
-                            raw_footnote=answer.footnote
+                            raw_footnote=answer.footnote,
+                            visual_sources=answer.visual_sources
                         )
                     self.bestprep_accumulator.mark_window_processed(window_idx)
                     accumulation_stats = {
@@ -749,7 +754,8 @@ class HotdogOrchestrator:
                                     confidence=answer.confidence,
                                     window_index=window_idx,
                                     expert_name=answer.expert + " (Recheck)",
-                                    raw_footnote=answer.footnote
+                                    raw_footnote=answer.footnote,
+                                    visual_sources=answer.visual_sources
                                 )
                         else:
                             # Bid/Spec mode: use smart accumulator
@@ -837,7 +843,11 @@ class HotdogOrchestrator:
                                 confidence=ca.highest_confidence,
                                 expert="Synthesis Agent" if ca.synthesized_answer else ca.fragments[0].expert_name,
                                 window=0,
-                                footnote=""
+                                footnote="",
+                                # L7 synthesis rewrites the text (and can drop the
+                                # <VIS> markers with it), so provenance comes from
+                                # the fragments, not from re-parsing the synthesis.
+                                visual_sources=ca.all_visual_sources
                             )
                             accumulated_answers[qid] = [answer]
                         except ValueError as e:
@@ -1259,7 +1269,11 @@ class HotdogOrchestrator:
                             'text': primary_text,
                             'pages': primary.pages,
                             'confidence': primary.confidence,
-                            'footnote': primary_footnote  # Include footnote for partial results
+                            'footnote': primary_footnote,  # Include footnote for partial results
+                            'summary': primary.summary or '',
+                            # Keep Layer 0.5 provenance on stopped/in-progress
+                            # fetches too, or the badge vanishes on partials.
+                            'visual_sources': getattr(primary, 'visual_sources', []) or []
                         }
                     }
                 else:

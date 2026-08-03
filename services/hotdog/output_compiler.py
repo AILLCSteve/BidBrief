@@ -18,6 +18,8 @@ from typing import Dict, List, Any
 from datetime import datetime
 import re
 
+from .visual_intelligence import format_visual_sources
+
 from .models import (
     AnalysisResult,
     Answer,
@@ -266,7 +268,11 @@ class OutputCompiler:
             'expert': answer.expert,
             'windows': answer.windows,
             'merge_count': answer.merge_count,
-            'footnote': footnote  # Include footnote for browser display
+            'footnote': footnote,  # Include footnote for browser display
+            # Layer 0.5 provenance: the graphics this answer drew on, so every
+            # surface can badge "from the drawing on p.7" instead of implying
+            # the fact was written in the specification text.
+            'visual_sources': getattr(answer, 'visual_sources', []) or []
         }
 
 
@@ -303,7 +309,8 @@ class OutputCompiler:
         }
 
         # Sheet 2: Answers
-        answers_rows = [['Section', 'Question ID', 'Question', 'Answer', 'Answer Summary', 'Pages', 'Confidence', 'Expert']]
+        answers_rows = [['Section', 'Question ID', 'Question', 'Answer', 'Answer Summary',
+                         'Pages', 'Visual Source', 'Confidence', 'Expert']]
 
         for section in config.sections:
             for question in section.questions:
@@ -312,8 +319,10 @@ class OutputCompiler:
 
                 if primary_answer:
                     pages_str = ', '.join(map(str, primary_answer.pages))
-                    # Remove <PDF pg X> markers from Excel export text (redundant with Pages column)
+                    # Remove citation markers from Excel export text (redundant
+                    # with the Pages and Visual Source columns)
                     clean_text = re.sub(r'\s*<PDF pg [0-9, ]+>', '', primary_answer.text)
+                    clean_text = re.sub(r'\s*<VIS pg \d+[^>]*>', '', clean_text)
 
                     answers_rows.append([
                         section.name,
@@ -322,15 +331,20 @@ class OutputCompiler:
                         clean_text,
                         primary_answer.summary or '',
                         pages_str,
+                        format_visual_sources(getattr(primary_answer, 'visual_sources', None)),
                         f"{primary_answer.confidence:.2%}",
                         primary_answer.expert
                     ])
                 else:
+                    # Column count must match the header exactly (Section,
+                    # Question ID, Question, Answer, Answer Summary, Pages,
+                    # Visual Source, Confidence, Expert) or the sheet shears.
                     answers_rows.append([
                         section.name,
                         question.id,
                         question.text,
                         'NOT FOUND',
+                        '',
                         '',
                         '',
                         '',

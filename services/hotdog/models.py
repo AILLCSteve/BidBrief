@@ -32,6 +32,9 @@ class PageData:
     text: str
     char_count: int
     has_content: bool
+    # Layer 0.5: set when the visual pass analyzed this page's drawing/map/photo
+    # content and appended it to `text`. '' means no visual analysis for this page.
+    visual_kind: str = ""
 
     def __post_init__(self):
         """Validate page data on creation."""
@@ -128,6 +131,10 @@ class Answer:
     footnote: str = ""  # Contextual footnote with PDF page + section ref + bidding context
     windows: List[int] = field(default_factory=list)  # All windows that contributed
     merge_count: int = 0  # How many times merged
+    # Layer 0.5 provenance: the drawings/maps/imagery this answer drew on, as
+    # [{'page': 7, 'kind': 'drawing'}]. Parsed from <VIS pg N kind> markers the
+    # expert emits. Empty for answers grounded purely in written text.
+    visual_sources: List[Dict[str, Any]] = field(default_factory=list)
     # Layer 6.5 (AnswerSummarizer): 1-3 sentence distilled answer synthesized
     # from the full appended quote pile. Empty until that layer runs.
     summary: str = ""
@@ -241,6 +248,15 @@ class Answer:
             else:
                 self.footnote = other.footnote
 
+        # Merge visual provenance (union by page+kind, page order preserved).
+        # A merged answer must keep every drawing/map it drew on, or the badge
+        # in the results table would depend on which copy won the merge.
+        if other.visual_sources:
+            merged = {(v.get('page'), v.get('kind')): v
+                      for v in self.visual_sources + other.visual_sources}
+            self.visual_sources = [merged[k] for k in
+                                   sorted(merged, key=lambda k: (k[0] or 0, k[1] or ''))]
+
         # Track merge history
         self.windows = sorted(set(self.windows + other.windows))
         self.merge_count += 1
@@ -258,11 +274,24 @@ class WindowContext:
     pages: List[int]  # e.g., [13, 14, 15]
     text: str  # Combined text from all pages in window
     page_data: List[PageData]  # Original page data for reference
+    # Layer 0.5: {page_num: kind} for pages in this window whose drawings/maps/
+    # imagery were analyzed. Drives the VISUAL EVIDENCE block in expert prompts
+    # and the <VIS pg N kind> citation contract. Empty = a text-only window.
+    visual_pages: Dict[int, str] = field(default_factory=dict)
 
     @property
     def page_range_str(self) -> str:
         """Get human-readable page range."""
         return f"{min(self.pages)}-{max(self.pages)}"
+
+    @property
+    def has_visual_evidence(self) -> bool:
+        return bool(self.visual_pages)
+
+    def visual_summary(self) -> str:
+        """e.g. '7 (drawing), 9 (map)' - for prompts and logs."""
+        return ", ".join(f"{page} ({kind})"
+                         for page, kind in sorted(self.visual_pages.items()))
 
 
 @dataclass

@@ -142,11 +142,17 @@ class DocumentIngestionLayer:
             page_nums = [p.page_num for p in window_pages]
             combined_text = '\n\n'.join([f"=== PAGE {p.page_num} ===\n{p.text}" for p in window_pages])
 
+            # Carry Layer 0.5 tagging into the window so the expert prompt can
+            # name the visual pages and enforce the <VIS pg N kind> contract.
+            visual_pages = {p.page_num: p.visual_kind
+                            for p in window_pages if getattr(p, 'visual_kind', '')}
+
             window = WindowContext(
                 window_num=window_num,
                 pages=page_nums,
                 text=combined_text,
-                page_data=window_pages
+                page_data=window_pages,
+                visual_pages=visual_pages
             )
             windows.append(window)
             window_num += 1
