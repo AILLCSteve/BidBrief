@@ -539,7 +539,8 @@ def _transform_to_legacy_format(hotdog_output: dict) -> dict:
         'total_questions': hotdog_output.get('total_questions', 0),
         'metadata': hotdog_output.get('metadata', {}),
         'key_requirements': hotdog_output.get('key_requirements', {}),  # Preserve key document details
-        'footnotes': hotdog_output.get('footnotes', [])  # Preserve compiled footnotes array
+        'footnotes': hotdog_output.get('footnotes', []),  # Preserve compiled footnotes array
+        'visual_findings': hotdog_output.get('visual_findings', [])  # Layer 0.5 vision pass (empty unless opted in)
     }
 
 
@@ -865,7 +866,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.3.0'
+        'version': '2.4.0'
     })
 
 @app.route('/pics/<path:filename>')
@@ -1224,6 +1225,9 @@ def analyze_document():
     enable_deep_rag = data.get('enable_deep_rag', False)  # External search for remaining
     pipeline_mode = data.get('pipeline_mode', 'classic')  # 'classic' or 'v2_pipeline'
     high_power = bool(data.get('high_power', False))  # Flagship model tier (admin/bonus only)
+    # Opt-in Layer 0.5 vision pass over drawing/map/photo-heavy pages. Purely
+    # additive to the standard pipeline; cost bounded by BIDBRIEF_VISUAL_MAX_PAGES.
+    enable_visual_analysis = bool(data.get('enable_visual_analysis', False))
 
     analysis_model, hp_error = _resolve_high_power_request(high_power)
     if hp_error:
@@ -1346,7 +1350,8 @@ def analyze_document():
                 enable_second_pass=enable_second_pass,
                 enable_deep_rag=enable_deep_rag,
                 use_pipeline_v2=(pipeline_mode == 'v2_pipeline'),
-                model=analysis_model
+                model=analysis_model,
+                enable_visual_analysis=enable_visual_analysis
             )
 
             # Update pre-registered active_analyses entry with the now-ready orchestrator

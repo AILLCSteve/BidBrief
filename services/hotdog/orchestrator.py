@@ -122,7 +122,8 @@ class HotdogOrchestrator:
         use_pipeline_v2: bool = False,
         enable_second_pass: bool = False,
         enable_deep_rag: bool = False,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        enable_visual_analysis: bool = False
     ):
         """
         Initialize the HOTDOG orchestrator.
@@ -154,6 +155,10 @@ class HotdogOrchestrator:
         self.use_pipeline_v2 = use_pipeline_v2
         self.enable_second_pass = enable_second_pass
         self.enable_deep_rag = enable_deep_rag
+        # Layer 0.5 — opt-in vision pass over drawing/map/photo-heavy pages.
+        # ADDITIVE ONLY: off (the default) leaves the pipeline byte-identical.
+        self.enable_visual_analysis = enable_visual_analysis
+        self.visual_findings = []
 
         # Detect model limits using TokenOptimizer
         from services.ai_models import standard_model
@@ -273,6 +278,24 @@ class HotdogOrchestrator:
             self._emit_progress('layer_0_start', {'layer': 'Document Ingestion'})
 
             pages, doc_metadata = self.layer0_ingestion.extract_pdf(pdf_path)
+
+            # ============================================================
+            # LAYER 0.5: VISUAL INTELLIGENCE (opt-in, additive)
+            # Runs BEFORE windows are created so enriched page text flows
+            # into every window; a failure here never fails the analysis.
+            # ============================================================
+            if self.enable_visual_analysis:
+                logger.info("🖼️ Layer 0.5: Visual Intelligence Scan")
+                try:
+                    from .visual_intelligence import VisualIntelligenceScanner
+                    scanner = VisualIntelligenceScanner(
+                        openai_client=self.openai_client, model=self.model)
+                    pages, self.visual_findings = await scanner.analyze(
+                        pdf_path, pages, emit=self._emit_progress)
+                except Exception as e:
+                    logger.warning(f"  ⚠️ Visual scan failed (non-fatal): {e}")
+                    self._emit_progress('visual_scan_failed', {'error': str(e)})
+
             windows = self.layer0_ingestion.create_windows(pages, window_size=3)
 
             logger.info(f"  ✅ Extracted {len(pages)} pages into {len(windows)} windows")
@@ -1157,6 +1180,8 @@ class HotdogOrchestrator:
         output = self.layer6_compiler.format_for_browser(result, config)
         # Add extracted key requirements (from Key Requirements Extractor)
         output['key_requirements'] = self.key_details_extractor.get_summary_data()
+        # Visual Intelligence findings (empty unless the opt-in scan ran)
+        output['visual_findings'] = getattr(self, 'visual_findings', []) or []
         return output
 
     def get_excel_output(self, result: AnalysisResult, config: ParsedConfig) -> dict:
@@ -1268,7 +1293,8 @@ class HotdogOrchestrator:
             'questions_answered': answered,
             'total_questions': config.total_questions,
             'total_pages': total_pages,
-            'key_requirements': self.key_details_extractor.get_summary_data()
+            'key_requirements': self.key_details_extractor.get_summary_data(),
+            'visual_findings': getattr(self, 'visual_findings', []) or []
         }
 
 

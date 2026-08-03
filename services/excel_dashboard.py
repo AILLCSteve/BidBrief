@@ -135,6 +135,11 @@ class ExcelDashboardGenerator:
         if self.result.get('dynamic_tables'):
             self._create_dynamic_intelligence_sheet()
 
+        # Visual Intelligence sheet — findings from the opt-in Layer 0.5 vision
+        # pass over drawing/map/photo-heavy pages (absent unless it ran)
+        if self.result.get('visual_findings'):
+            self._create_visual_intelligence_sheet()
+
         # Sheet 5: Unanswered Questions Pass (V2 Pipeline)
         if is_v2_pipeline:
             self._create_unanswered_pass_sheet()
@@ -237,6 +242,70 @@ class ExcelDashboardGenerator:
                 cell.alignment = Alignment(wrap_text=True, vertical='top')
                 row += 1
 
+            row += 1
+
+    def _create_visual_intelligence_sheet(self):
+        """Visual Intelligence — one row per drawing/map/photo finding from the
+        opt-in Layer 0.5 vision pass. Mirrors the web results sheet."""
+        ws = self.wb.create_sheet('Visual Intelligence')
+        findings = self.result.get('visual_findings') or []
+
+        headers = ['Page', 'Type', 'Title', 'What It Shows',
+                   'Labels, Dimensions & Callouts', 'Key Facts']
+        widths = [7, 12, 28, 55, 50, 50]
+
+        ws.merge_cells('A1:F1')
+        title_cell = ws['A1']
+        title_cell.value = 'VISUAL INTELLIGENCE — Drawings, Maps & Imagery'
+        title_cell.font = self.HEADER_FONT
+        title_cell.fill = self.TITLE_FILL
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.row_dimensions[1].height = 30
+
+        ws.merge_cells('A2:F2')
+        note = ws['A2']
+        note.value = (f'{len(findings)} visual-heavy page(s) deep-processed with AI vision, '
+                      'in addition to (never instead of) the standard text analysis.')
+        note.font = Font(name='Calibri', size=10, italic=True, color='374151')
+        note.fill = self.STAT_FILL
+        note.alignment = Alignment(wrap_text=True, vertical='center')
+        ws.row_dimensions[2].height = 24
+
+        row = 3
+        for col, (header, width) in enumerate(zip(headers, widths), start=1):
+            cell = ws.cell(row, col, header)
+            cell.font = self.SUBHEADER_FONT
+            cell.fill = self.HEADER_FILL
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = self.BORDER_THIN
+            ws.column_dimensions[get_column_letter(col)].width = width
+        ws.row_dimensions[row].height = 24
+        row += 1
+
+        for idx, f in enumerate(findings):
+            is_alt = idx % 2 == 1
+            key_facts = f.get('key_facts') or []
+            values = [
+                f.get('page', ''),
+                str(f.get('kind', '') or '').title(),
+                sanitize_for_excel(f.get('title') or '-'),
+                sanitize_for_excel(f.get('description') or '-'),
+                sanitize_for_excel(f.get('extracted_text') or '-'),
+                sanitize_for_excel('\n'.join(f'• {fact}' for fact in key_facts) or '-'),
+            ]
+            for col, value in enumerate(values, start=1):
+                cell = ws.cell(row, col, value)
+                cell.font = self.DATA_FONT_BOLD if col == 1 else self.DATA_FONT
+                cell.border = self.BORDER_THIN
+                if is_alt:
+                    cell.fill = self.ALT_ROW_FILL
+                cell.alignment = Alignment(
+                    horizontal='center' if col in (1, 2) else 'left',
+                    vertical='top', wrap_text=True)
+            lines = max(len(key_facts),
+                        (len(str(values[3])) // 50) + 1,
+                        (len(str(values[4])) // 45) + 1)
+            ws.row_dimensions[row].height = max(40, min(lines * 16, 220))
             row += 1
 
     def _collect_footnotes(self):
