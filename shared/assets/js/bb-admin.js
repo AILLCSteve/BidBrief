@@ -50,6 +50,7 @@
     if (here === 'scraper') return BB.scraper.render(host, back);
     if (here === 'bonus') return renderBonusManager(host);
     if (here === 'beta') return renderBetaManager(host);
+    if (here === 'sessions') return renderSessionsManager(host);
     return renderHome(host);
   }
 
@@ -72,10 +73,7 @@
     entries.forEach(function (entry) {
       children.push(ui.hubButton({
         title: entry.title, subtitle: entry.subtitle, icon: entry.icon,
-        onClick: function () {
-          if (entry.id === 'sessions') window.open('/admin/sessions', '_blank');
-          else { path.push(entry.id); render(); }
-        }
+        onClick: function () { path.push(entry.id); render(); }
       }));
     });
 
@@ -107,6 +105,134 @@
         if (!data.success) throw new Error(data.error || 'Request failed');
         return data;
       });
+  }
+
+  // ---- Session Dashboard (admin only, 2.4.0: in-app on the design system) --
+
+  /** Mode-aware Excel export URL for one session row. Pure - unit tested.
+      The Excel button lives on every session card; this is the restored
+      per-session export the legacy dashboard used to carry. */
+  function exportUrlFor(info) {
+    return (info && info.mode === 'bestprep')
+      ? '/api/export/bestprep-excel/' + info.session_id
+      : '/api/export/excel-dashboard/' + info.session_id;
+  }
+
+  /** Flatten the /api/admin/sessions buckets into ordered groups. Pure. */
+  function sessionGroups(buckets) {
+    var b = buckets || {};
+    return [
+      { key: 'active', title: 'Active', rows: b.active || [] },
+      { key: 'completed', title: 'Completed', rows: b.completed || [] },
+      { key: 'partial', title: 'Partial / Stopped', rows: b.partial || [] },
+      { key: 'legacy', title: 'Legacy', rows: b.legacy || [] }
+    ].filter(function (g) { return g.rows.length; });
+  }
+
+  /** "3 total · 1 active · 2 completed" from the summary payload. Pure. */
+  function sessionsSummaryText(summary) {
+    var s = summary || {};
+    return [
+      (s.total_sessions || 0) + ' total',
+      (s.active_count || 0) + ' active',
+      (s.completed_count || 0) + ' completed',
+      (s.partial_count || 0) + ' partial'
+    ].join('  ·  ');
+  }
+
+  function renderSessionsManager(host) {
+    if (!guardAdmin()) return;
+
+    ui.fill(host, [
+      ui.backChip('Back', back),
+      ui.stageHeader('Session Dashboard', 'All analyses in server memory'),
+      ui.el('div', { id: 'bb-sessions-body', class: 'bb-stack' },
+        [loadingBlock('Loading sessions...')])
+    ]);
+    loadSessions();
+  }
+
+  function loadSessions() {
+    window.fetch('/api/admin/sessions')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.success) throw new Error(data.error || 'Could not load');
+        paintSessions(data);
+      })
+      .catch(function (error) {
+        var body = ui.qs('#bb-sessions-body');
+        if (body) ui.fill(body, [
+          ui.el('p', { class: 'bb-body' }, 'Could not load sessions: ' + error.message)
+        ]);
+      });
+  }
+
+  function paintSessions(data) {
+    var body = ui.qs('#bb-sessions-body');
+    if (!body) return;
+
+    var children = [
+      ui.card(null, [
+        ui.el('div', { class: 'bb-row' }, [
+          ui.el('p', { class: 'bb-body bb-grow' }, sessionsSummaryText(data.summary)),
+          ui.el('button', {
+            class: 'bb-btn-ghost', type: 'button', onclick: loadSessions
+          }, '↻  Refresh')
+        ])
+      ])
+    ];
+
+    var groups = sessionGroups(data.sessions);
+    if (!groups.length) {
+      children.push(ui.card(null, [
+        ui.el('p', { class: 'bb-body' },
+          'No analyses in server memory. Sessions appear here while they run ' +
+          'and after they complete (until a server restart).')
+      ]));
+    }
+
+    groups.forEach(function (group) {
+      children.push(ui.card(group.title + ' (' + group.rows.length + ')',
+        group.rows.map(function (info) { return sessionCard(info); })));
+    });
+
+    ui.fill(body, children);
+  }
+
+  function sessionCard(info) {
+    var actions = [
+      ui.el('button', {
+        class: 'bb-btn-ghost', type: 'button',
+        onclick: function () { openSession(info); }
+      }, 'View results'),
+      ui.el('button', {
+        class: 'bb-btn-ghost', type: 'button',
+        onclick: function () { window.open(exportUrlFor(info), '_blank'); }
+      }, '📊 Excel')
+    ];
+    if (info.status === 'active') {
+      actions.push(ui.el('button', {
+        class: 'bb-btn-ghost bb-danger', type: 'button',
+        onclick: function () { stopSession(info); }
+      }, 'Stop'));
+    }
+
+    return ui.el('div', { class: 'bb-beta-session' }, [
+      ui.el('div', { class: 'bb-beta-session-main' }, [
+        ui.el('span', { class: 'bb-beta-session-file' }, info.pdf_filename || 'Unknown.pdf'),
+        ui.el('span', { class: 'bb-chip bb-chip-' + statusKind(info.status) },
+          String(info.status || '').replace(/_/g, ' '))
+      ]),
+      ui.el('div', { class: 'bb-beta-meta' },
+        (info.owner ? info.owner + '  ·  ' : '') + sessionMeta(info)),
+      ui.el('div', { class: 'bb-beta-session-actions' }, actions)
+    ]);
+  }
+
+  function stopSession(info) {
+    postJson('/api/stop/' + window.encodeURIComponent(info.session_id), null)
+      .then(function () { ui.banner('info', 'Stop requested'); loadSessions(); })
+      .catch(function (error) { ui.banner('error', 'Could not stop: ' + error.message); });
   }
 
   // ---- Bonus Features manager (admin only) --------------------------------
@@ -455,7 +581,10 @@
   BB.admin = {
     render: render, entriesFor: entriesFor, headingFor: headingFor,
     renderBonusManager: renderBonusManager, renderBetaManager: renderBetaManager,
+    renderSessionsManager: renderSessionsManager,
     betaSummaryText: betaSummaryText, quotaText: quotaText,
-    sessionMeta: sessionMeta, statusKind: statusKind
+    sessionMeta: sessionMeta, statusKind: statusKind,
+    exportUrlFor: exportUrlFor, sessionGroups: sessionGroups,
+    sessionsSummaryText: sessionsSummaryText
   };
 })(typeof window !== 'undefined' ? window : this);
