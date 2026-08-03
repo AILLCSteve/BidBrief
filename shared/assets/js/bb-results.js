@@ -262,13 +262,46 @@
 
   // ---- The workbook --------------------------------------------------------
 
+  /**
+   * A self-contained workbook for ANY results payload.
+   *
+   * Owns its own active-tab state in a closure and repaints only its own body,
+   * so the same component can be mounted on the Analyze tab and inside the
+   * admin session modal at the same time without the two fighting over which
+   * sheet is open. Everything that reads a payload goes through here — that is
+   * what guarantees an admin reviewing a session sees exactly the sheets the
+   * user who ran it sees, Document Intelligence included.
+   */
+  function buildWorkbook(payload, opts) {
+    var options = opts || {};
+    var sheets = sheetList(payload);
+    var active = options.sheet && sheets.some(function (t) { return t.id === options.sheet; })
+      ? options.sheet
+      : sheets[0].id;
+
+    var body = ui.el('div', { class: 'bb-sheet-body' });
+    var tabs = ui.el('div', { class: 'bb-sheet-tabs', role: 'tablist' });
+    var card = ui.el('div', { class: 'bb-glass-card bb-workbook' }, [tabs, body]);
+
+    function paint() {
+      ui.fill(tabs, sheets.map(function (tab) {
+        return ui.el('button', {
+          class: 'bb-sheet-tab' + (tab.id === active ? ' bb-active' : ''),
+          type: 'button', role: 'tab',
+          'aria-selected': tab.id === active ? 'true' : 'false',
+          onclick: function () { active = tab.id; paint(); }
+        }, tab.label);
+      }));
+      ui.fill(body, sheetBody(active, payload));
+    }
+
+    paint();
+    return card;
+  }
+
   function renderWorkbook(host) {
     var payload = results();
     var s = summarize(payload);
-    var sheets = sheetList(payload);
-    if (!activeSheet || !sheets.some(function (t) { return t.id === activeSheet; })) {
-      activeSheet = sheets[0].id;
-    }
 
     var children = [];
 
@@ -295,21 +328,7 @@
       ])
     ]));
 
-    /* The workbook: sheet tabs + the active sheet, one glass card. */
-    var tabs = ui.el('div', { class: 'bb-sheet-tabs', role: 'tablist' },
-      sheets.map(function (tab) {
-        return ui.el('button', {
-          class: 'bb-sheet-tab' + (tab.id === activeSheet ? ' bb-active' : ''),
-          type: 'button', role: 'tab',
-          'aria-selected': tab.id === activeSheet ? 'true' : 'false',
-          onclick: function () { activeSheet = tab.id; render(); }
-        }, tab.label);
-      }));
-
-    children.push(ui.el('div', { class: 'bb-glass-card bb-workbook' }, [
-      tabs,
-      ui.el('div', { class: 'bb-sheet-body' }, sheetBody(activeSheet, payload))
-    ]));
+    children.push(buildWorkbook(payload, { sheet: activeSheet }));
 
     var hubs = [];
     if (s.unanswered.length) {
@@ -905,6 +924,10 @@
     ingestLiveAnswers: ingestLiveAnswers,
     sheetList: sheetList, execSummaryRows: execSummaryRows,
     keyDetailRows: keyDetailRows, statusOf: statusOf,
+    /* Mount the full workbook against an arbitrary payload — the admin session
+       modal uses this so reviewing a session shows the same sheets the user
+       who ran it sees, rather than a second, poorer rendering. */
+    buildWorkbook: buildWorkbook,
     visualSourcesOf: visualSourcesOf, visualSourceLabel: visualSourceLabel,
     questionsFedBy: questionsFedBy,
     reset: function () { path = []; activeSheet = null; liveAnswers = {}; }

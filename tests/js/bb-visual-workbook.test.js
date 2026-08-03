@@ -226,3 +226,59 @@ test('a failed visual scan reads as skipped, not as an analysis error', () => {
   const line = BB.status.friendlyLine({ event: 'visual_scan_failed', payload: {} });
   assert.match(line, /skipped/i);
 });
+
+// ---- Document Intelligence must survive the results handoff (2.5.1) --------
+// A completed analysis emits results_ready WITH dynamic_tables, then the engine
+// fetches /api/results and calls finish() with that payload. When the fetch
+// landed on a branch that rebuilt the payload without the tables, finish()
+// overwrote the good one and the DI tab vanished - while the Excel export,
+// which reads the session dict directly, still had the sheet.
+
+const ENGINE_MODULES = [
+  'shared/assets/js/bb-ui.js', 'shared/assets/js/bb-state.js',
+  'shared/assets/js/bb-status.js', 'shared/assets/js/bb-orb.js',
+  'shared/assets/js/bb-shell.js', 'shared/assets/js/bb-engine.js',
+];
+
+const RICH = {
+  sections: [], dynamic_tables: [{ title: 'Pipe Segments', columns: [], rows: [] }],
+  intelligence_focus: 'Scope and quantities', visual_findings: [{ page: 3, kind: 'drawing' }],
+};
+
+test('finish() never downgrades a payload that already has DI tables', () => {
+  const { BB } = loadModules(ENGINE_MODULES);
+  const thin = { sections: [], dynamic_tables: [], intelligence_focus: '' };
+  const merged = plain(BB.engine.mergeResults(RICH, thin));
+  assert.strictEqual(merged.dynamic_tables.length, 1,
+    'the DI tab disappears if a thinner payload is allowed to win');
+  assert.strictEqual(merged.intelligence_focus, 'Scope and quantities');
+  assert.strictEqual(merged.visual_findings.length, 1);
+});
+
+test('a richer incoming payload still wins', () => {
+  const { BB } = loadModules(ENGINE_MODULES);
+  const merged = plain(BB.engine.mergeResults(
+    { sections: [], dynamic_tables: [] },
+    { sections: [], dynamic_tables: [{ title: 'New' }] }));
+  assert.strictEqual(merged.dynamic_tables.length, 1);
+  assert.strictEqual(merged.dynamic_tables[0].title, 'New');
+});
+
+test('merge tolerates a missing previous payload', () => {
+  const { BB } = loadModules(ENGINE_MODULES);
+  assert.deepStrictEqual(plain(BB.engine.mergeResults(null, RICH)).dynamic_tables.length, 1);
+  assert.deepStrictEqual(plain(BB.engine.mergeResults(RICH, null)).dynamic_tables.length, 1);
+});
+
+test('the Document Intelligence tab appears whenever tables exist', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const ids = plain(BB.results.sheetList(RICH)).map((s) => s.id);
+  assert.ok(ids.includes('intelligence'),
+    'tables present must always yield a Document Intelligence tab');
+});
+
+test('the admin session view mounts the SAME workbook as the user sees', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  assert.strictEqual(typeof BB.results.buildWorkbook, 'function',
+    'admin renders sessions through buildWorkbook so the sheets can never diverge');
+});

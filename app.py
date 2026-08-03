@@ -544,6 +544,34 @@ def _generate_analysis_dynamic_intel(legacy_result: dict, orchestrator, doc_cont
         return {'intelligence_focus': '', 'tables': []}
 
 
+def _attach_dynamic_intel(legacy_result, session_id):
+    """Put the Document Intelligence tables back onto a rebuilt legacy payload.
+
+    _transform_to_legacy_format rebuilds the dict from a fixed key set, so it
+    DROPS dynamic_tables/intelligence_focus — those are generated here in app.py
+    after the orchestrator is done, not by the orchestrator itself. Every branch
+    of /api/results must re-attach them or the client silently loses the
+    Document Intelligence tab while the Excel export (which reads the session
+    dict directly) still shows the sheet. That mismatch is exactly the bug this
+    helper exists to make impossible: one place, called by every branch.
+    """
+    if not isinstance(legacy_result, dict):
+        return legacy_result
+    with session_lock:
+        source = (completed_analyses.get(session_id)
+                  or analysis_results.get(session_id)
+                  or partial_analyses.get(session_id)
+                  or active_analyses.get(session_id) or {})
+    tables = source.get('dynamic_tables') or []
+    focus = source.get('intelligence_focus') or ''
+    # Never downgrade a payload that already carries them.
+    if tables or not legacy_result.get('dynamic_tables'):
+        legacy_result['dynamic_tables'] = tables
+    if focus or not legacy_result.get('intelligence_focus'):
+        legacy_result['intelligence_focus'] = focus
+    return legacy_result
+
+
 def _build_analysis_snapshot(session_id, legacy_result, statistics, orchestrator=None,
                              mode='bid_spec', pdf_filename='Unknown.pdf',
                              doc_context='', is_partial=False):
@@ -1104,7 +1132,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.0'
+        'version': '2.5.1'
     })
 
 @app.route('/pics/<path:filename>')
@@ -1993,6 +2021,7 @@ def get_results(session_id):
         # Attach stored dynamic intelligence (generated at analysis completion)
         legacy_result['dynamic_tables'] = session_data.get('dynamic_tables', [])
         legacy_result['intelligence_focus'] = session_data.get('intelligence_focus', '')
+        _attach_dynamic_intel(legacy_result, session_id)
 
         # Get mode for response
         mode = session_data.get('mode', 'bid_spec')
@@ -2049,6 +2078,7 @@ def get_results(session_id):
         # Attach stored dynamic intelligence (generated at analysis completion)
         legacy_result['dynamic_tables'] = session_data.get('dynamic_tables', [])
         legacy_result['intelligence_focus'] = session_data.get('intelligence_focus', '')
+        _attach_dynamic_intel(legacy_result, session_id)
 
         mode = session_data.get('mode', 'bid_spec')
 
@@ -2132,6 +2162,9 @@ def get_results(session_id):
 
         # Transform to legacy format
         legacy_result = _transform_to_legacy_format(partial_browser_output)
+        # Re-attach Document Intelligence: the transform drops it, and a client
+        # that fetches results in this window would otherwise lose the DI tab.
+        _attach_dynamic_intel(legacy_result, session_id)
 
         # Build response
         response = {
@@ -2214,6 +2247,9 @@ def get_results(session_id):
 
         # Transform to legacy format
         legacy_result = _transform_to_legacy_format(partial_browser_output)
+        # Re-attach Document Intelligence: the transform drops it, and a client
+        # that fetches results in this window would otherwise lose the DI tab.
+        _attach_dynamic_intel(legacy_result, session_id)
 
         # Build response
         response = {

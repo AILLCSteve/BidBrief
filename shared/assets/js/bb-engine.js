@@ -203,9 +203,30 @@
     return new window.Promise(function (resolve) { window.setTimeout(resolve, ms); });
   }
 
+  /** Fields that arrive with `results_ready` but can be absent from a later
+      /api/results payload (they are attached server-side after the orchestrator
+      finishes). Overwriting a rich payload with a thinner one is how the
+      Document Intelligence tab used to vanish from a completed analysis while
+      the Excel export still had the sheet. Never downgrade. */
+  var PRESERVED_ON_FINISH = ['dynamic_tables', 'intelligence_focus',
+                             'visual_findings', 'key_requirements', 'footnotes'];
+
+  function mergeResults(existing, incoming) {
+    if (!incoming) return existing;
+    if (!existing) return incoming;
+    PRESERVED_ON_FINISH.forEach(function (key) {
+      var fresh = incoming[key];
+      var had = existing[key];
+      var freshIsEmpty = !fresh || (fresh.length === 0);
+      var hadSomething = had && (had.length === undefined || had.length > 0);
+      if (freshIsEmpty && hadSomething) incoming[key] = had;
+    });
+    return incoming;
+  }
+
   function finish(result, isPartial, statistics) {
     var a = state();
-    a.results = result;
+    a.results = mergeResults(a.results, result);
     a.isPartial = !!isPartial;
     if (statistics) a.statistics = statistics;
     a.phase = 'done';
@@ -284,6 +305,7 @@
     handleEvent: handleEvent,
     fetchResults: fetchResults,
     finish: finish,
+    mergeResults: mergeResults,
     fail: fail,
     stop: stop,
     runPass: runPass,

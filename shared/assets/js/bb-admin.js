@@ -546,7 +546,7 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.success) throw new Error(data.error || 'Results not available');
-        paintSessionResults(data.result || {});
+        paintSessionResults(data.result || {}, info);
       })
       .catch(function (error) {
         var body = ui.qs('#bb-beta-session-body');
@@ -556,27 +556,46 @@
       });
   }
 
-  function paintSessionResults(payload) {
+  /** Render a session exactly as its owner sees it: the full workbook, every
+      sheet — Executive Summary, Detailed Results, By Section, Document
+      Intelligence, Visual Intelligence, Footnotes. This used to be a flat list
+      of answers, which quietly hid the dynamic Document Intelligence tables an
+      admin most wants when reviewing a run. */
+  function paintSessionResults(payload, info) {
     var body = ui.qs('#bb-beta-session-body');
     if (!body) return;
     var stats = BB.results.summarize(payload);
-    var rows = BB.results.flatten(payload);
 
-    ui.fill(body, [
-      ui.el('p', { class: 'bb-body' },
-        stats.answered + ' of ' + stats.total + ' questions answered (' + stats.rate + ')  ·  ' +
-        stats.pages + ' pages'),
-      ui.el('div', { class: 'bb-beta-answers' }, rows.map(function (row) {
-        var summary = BB.results.answerSummaryOf(row);
-        return ui.el('div', { class: 'bb-beta-answer' }, [
-          ui.el('div', { class: 'bb-eyebrow' }, row.section_name || ''),
-          ui.el('div', { class: 'bb-beta-question' }, row.question || ''),
-          ui.el('div', { class: 'bb-body' },
-            BB.results.isAnswered(row) ? row.answer : 'Not found'),
-          summary ? ui.el('div', { class: 'bb-beta-summary' }, summary) : null
-        ]);
-      }))
-    ]);
+    var children = [
+      ui.el('div', { class: 'bb-stats', style: 'margin-bottom:14px' }, [
+        ui.el('div', { class: 'bb-stat' }, [
+          ui.el('div', { class: 'bb-stat-value' }, stats.answered + '/' + stats.total),
+          ui.el('div', { class: 'bb-stat-label' }, 'Answered')
+        ]),
+        ui.el('div', { class: 'bb-stat-sep' }),
+        ui.el('div', { class: 'bb-stat' }, [
+          ui.el('div', { class: 'bb-stat-value' }, String(stats.pages)),
+          ui.el('div', { class: 'bb-stat-label' }, 'Pages')
+        ]),
+        ui.el('div', { class: 'bb-stat-sep' }),
+        ui.el('div', { class: 'bb-stat' }, [
+          ui.el('div', { class: 'bb-stat-value' }, stats.rate),
+          ui.el('div', { class: 'bb-stat-label' }, 'Rate')
+        ])
+      ]),
+      BB.results.buildWorkbook(payload)
+    ];
+
+    if (info && info.session_id) {
+      children.push(ui.el('div', { class: 'bb-row', style: 'margin-top:14px' }, [
+        ui.el('button', {
+          class: 'bb-btn-ghost', type: 'button',
+          onclick: function () { window.open(exportUrlFor(info), '_blank'); }
+        }, '📊  Excel Report Package')
+      ]));
+    }
+
+    ui.fill(body, children);
   }
 
   function updateTester(username, body, successText) {
