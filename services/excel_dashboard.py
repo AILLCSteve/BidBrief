@@ -14,6 +14,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+from services.hotdog.visual_intelligence import format_visual_sources
+
 
 def sanitize_for_excel(text):
     """
@@ -582,8 +584,9 @@ class ExcelDashboardGenerator:
         # Headers — Answer Summary (L6.5 distilled answer) sits between the
         # appended-quotes Answer column and PDF Pages.
         row = 2
-        headers = ['#', 'Section', 'Question', 'Answer', 'Answer Summary', 'PDF Pages', 'Footnote', 'Status']
-        widths = [5, 25, 45, 60, 40, 12, 8, 11]
+        headers = ['#', 'Section', 'Question', 'Answer', 'Answer Summary', 'PDF Pages',
+                   'Visual Source', 'Footnote', 'Status']
+        widths = [5, 25, 45, 60, 40, 12, 18, 8, 11]
 
         for col, (header, width) in enumerate(zip(headers, widths), start=1):
             cell = ws.cell(row, col, header)
@@ -640,19 +643,27 @@ class ExcelDashboardGenerator:
                 pages_cell.font = self.DATA_FONT_BOLD if has_answer else self.DATA_FONT
                 pages_cell.alignment = Alignment(horizontal='center', vertical='top')
 
-                fn_cell = ws.cell(row, 7, '✓' if has_footnote else '-')
+                # Layer 0.5: which drawing/map/photo this answer came from, so a
+                # reader can tell graphic-derived facts from specification text.
+                visual_label = format_visual_sources(q.get('visual_sources'))
+                vis_cell = ws.cell(row, 7, visual_label or '-')
+                vis_cell.font = (Font(name='Calibri', size=10, bold=True, color=self.BLUE)
+                                 if visual_label else self.DATA_FONT)
+                vis_cell.alignment = Alignment(horizontal='center', vertical='top', wrap_text=True)
+
+                fn_cell = ws.cell(row, 8, '✓' if has_footnote else '-')
                 fn_cell.font = Font(name='Calibri', size=11, bold=True, color=self.GREEN if has_footnote else self.GRAY)
                 fn_cell.alignment = Alignment(horizontal='center', vertical='top')
 
-                status_cell = ws.cell(row, 8, 'Found' if has_answer else 'Not Found')
+                status_cell = ws.cell(row, 9, 'Found' if has_answer else 'Not Found')
                 status_cell.font = Font(name='Calibri', size=10, bold=True)
                 status_cell.fill = self.ANSWERED_FILL if has_answer else self.UNANSWERED_FILL
                 status_cell.alignment = Alignment(horizontal='center', vertical='top')
 
-                for col in range(1, 9):
+                for col in range(1, 10):
                     cell = ws.cell(row, col)
                     cell.border = self.BORDER_THIN
-                    if col not in [7, 8]:
+                    if col not in [8, 9]:
                         if is_alt_row:
                             cell.fill = self.ALT_ROW_FILL
                     cell.alignment = Alignment(
@@ -688,7 +699,8 @@ class ExcelDashboardGenerator:
             row += 1
 
             # Column headers
-            headers = ['#', 'Question', 'Answer', 'Answer Summary', 'PDF Pages', 'Notes', 'Status']
+            headers = ['#', 'Question', 'Answer', 'Answer Summary', 'PDF Pages',
+                       'Visual Source', 'Notes', 'Status']
             for col, header in enumerate(headers, start=1):
                 cell = ws.cell(row, col, header)
                 cell.font = self.SUBHEADER_FONT
@@ -725,20 +737,26 @@ class ExcelDashboardGenerator:
                 ws.cell(row, 5, pages_str).font = self.DATA_FONT_BOLD if has_answer else self.DATA_FONT
                 ws.cell(row, 5).alignment = Alignment(horizontal='center', vertical='top')
 
+                visual_label = format_visual_sources(q.get('visual_sources'))
+                vis_cell = ws.cell(row, 6, visual_label or '-')
+                vis_cell.font = (Font(name='Calibri', size=10, bold=True, color=self.BLUE)
+                                 if visual_label else self.DATA_FONT)
+                vis_cell.alignment = Alignment(horizontal='center', vertical='top', wrap_text=True)
+
                 has_footnote = bool(q.get('footnote'))
-                notes_cell = ws.cell(row, 6, 'See footnotes' if has_footnote else '-')
+                notes_cell = ws.cell(row, 7, 'See footnotes' if has_footnote else '-')
                 notes_cell.font = Font(name='Calibri', size=10, italic=True, color=self.BLUE if has_footnote else self.GRAY)
                 notes_cell.alignment = Alignment(horizontal='center', vertical='top')
 
-                status_cell = ws.cell(row, 7, '✓' if has_answer else '✗')
+                status_cell = ws.cell(row, 8, '✓' if has_answer else '✗')
                 status_cell.font = Font(name='Calibri', size=14, bold=True, color=self.GREEN if has_answer else self.RED)
                 status_cell.fill = self.ANSWERED_FILL if has_answer else self.UNANSWERED_FILL
                 status_cell.alignment = Alignment(horizontal='center', vertical='top')
 
-                for col in range(1, 8):
+                for col in range(1, 9):
                     cell = ws.cell(row, col)
                     cell.border = self.BORDER_THIN
-                    if col != 7 and is_alt:
+                    if col != 8 and is_alt:
                         cell.fill = self.ALT_ROW_FILL
                     cell.alignment = Alignment(
                         horizontal='left' if col in [2, 3, 4] else 'center',
@@ -757,8 +775,9 @@ class ExcelDashboardGenerator:
         ws.column_dimensions['C'].width = 60
         ws.column_dimensions['D'].width = 40
         ws.column_dimensions['E'].width = 12
-        ws.column_dimensions['F'].width = 14
-        ws.column_dimensions['G'].width = 10
+        ws.column_dimensions['F'].width = 18
+        ws.column_dimensions['G'].width = 14
+        ws.column_dimensions['H'].width = 10
 
     def _create_footnotes_sheet(self):
         """Sheet 4: Footnotes - All citations and contextual notes"""

@@ -34,6 +34,47 @@
 
   function statusOf(q) { return isAnswered(q) ? 'found' : 'missing'; }
 
+  /* ---- Layer 0.5 provenance ------------------------------------------------
+     An answer can be grounded in the written text, in a drawing/map/photo, or
+     both. visual_sources says which graphics fed it; absent on results cached
+     before 2.4.0, so every reader must tolerate its absence. */
+
+  var VISUAL_KIND_LABELS = {
+    drawing: 'Drawing', map: 'Map', photo: 'Photo',
+    chart: 'Chart', table: 'Table image', mixed: 'Visual', visual: 'Visual'
+  };
+  var VISUAL_KIND_ICONS = {
+    drawing: '📐', map: '🗺', photo: '📷', chart: '📊', table: '▦', mixed: '🖼', visual: '🖼'
+  };
+
+  function visualSourcesOf(q) {
+    var list = q && q.visual_sources;
+    return (Object.prototype.toString.call(list) === '[object Array]') ? list : [];
+  }
+
+  /** "Drawing p.7; Map p.9" - matches the Excel Visual Source column. */
+  function visualSourceLabel(q) {
+    return visualSourcesOf(q).map(function (s) {
+      var kind = String(s.kind || 'visual').toLowerCase();
+      return (VISUAL_KIND_LABELS[kind] || 'Visual') + ' p.' + s.page;
+    }).join('; ');
+  }
+
+  /** Chips marking an answer as sourced from graphics, or null when text-only. */
+  function visualBadges(q) {
+    var sources = visualSourcesOf(q);
+    if (!sources.length) return null;
+    return ui.el('span', { class: 'bb-vis-badges' }, sources.map(function (s) {
+      var kind = String(s.kind || 'visual').toLowerCase();
+      return ui.el('span', {
+        class: 'bb-vis-badge',
+        title: 'This answer came from the ' + (VISUAL_KIND_LABELS[kind] || 'graphic').toLowerCase() +
+               ' on page ' + s.page + ', not from the written text'
+      }, (VISUAL_KIND_ICONS[kind] || '🖼') + ' ' +
+         (VISUAL_KIND_LABELS[kind] || 'Visual') + ' p.' + s.page);
+    }));
+  }
+
   function allQuestions(payload) {
     return ((payload && payload.sections) || []).reduce(function (acc, sec) {
       return acc.concat(sec.questions || []);
@@ -167,7 +208,7 @@
   }
 
   function toCsv(payload) {
-    var lines = ['Section,#,Question,Answer,Answer Summary,PDF Pages'];
+    var lines = ['Section,#,Question,Answer,Answer Summary,PDF Pages,Visual Source'];
     ((payload && payload.sections) || []).forEach(function (sec) {
       (sec.questions || []).forEach(function (q, index) {
         lines.push([
@@ -176,7 +217,8 @@
           csvCell(q.question),
           csvCell(isAnswered(q) ? q.answer : 'Not found'),
           csvCell(answerSummaryOf(q) || ''),
-          csvCell((q.page_citations || []).join(';'))
+          csvCell((q.page_citations || []).join(';')),
+          csvCell(visualSourceLabel(q))
         ].join(','));
       });
     });
@@ -379,9 +421,10 @@
         ui.el('td', { class: 'bb-td-center' }, String(index + 1)),
         ui.el('td', {}, q.section_name || ''),
         ui.el('td', { class: 'bb-td-strong' }, q.question || ''),
-        ui.el('td', {}, [expandableAnswer(q)]),
+        ui.el('td', {}, [expandableAnswer(q), visualBadges(q)]),
         ui.el('td', {}, answerSummaryOf(q) || '-'),
         ui.el('td', { class: 'bb-td-center' }, (q.page_citations || []).join(', ') || '-'),
+        ui.el('td', { class: 'bb-td-center' }, visualSourceLabel(q) || '-'),
         ui.el('td', { class: 'bb-td-center' }, q.footnote ? '✓' : '-'),
         ui.el('td', { class: 'bb-td-center' }, [statusPill(q)])
       ]);
@@ -392,7 +435,8 @@
       ui.el('div', { class: 'bb-table-wrap' }, [
         ui.el('table', { class: 'bb-table' }, [
           ui.el('thead', {}, [ui.el('tr', {},
-            ['#', 'Section', 'Question', 'Answer', 'Answer Summary', 'PDF Pages', 'FN', 'Status']
+            ['#', 'Section', 'Question', 'Answer', 'Answer Summary', 'PDF Pages',
+             'Visual Source', 'FN', 'Status']
               .map(function (h) { return ui.el('th', {}, h); }))]),
           body
         ])
@@ -414,15 +458,16 @@
       blocks.push(ui.el('div', { class: 'bb-table-wrap' }, [
         ui.el('table', { class: 'bb-table' }, [
           ui.el('thead', {}, [ui.el('tr', {},
-            ['#', 'Question', 'Answer', 'Answer Summary', 'PDF Pages', 'Status']
+            ['#', 'Question', 'Answer', 'Answer Summary', 'PDF Pages', 'Visual Source', 'Status']
               .map(function (h) { return ui.el('th', {}, h); }))]),
           ui.el('tbody', {}, questions.map(function (q, index) {
             return ui.el('tr', {}, [
               ui.el('td', { class: 'bb-td-center' }, String(index + 1)),
               ui.el('td', { class: 'bb-td-strong' }, q.question || ''),
-              ui.el('td', {}, [expandableAnswer(q)]),
+              ui.el('td', {}, [expandableAnswer(q), visualBadges(q)]),
               ui.el('td', {}, answerSummaryOf(q) || '-'),
               ui.el('td', { class: 'bb-td-center' }, (q.page_citations || []).join(', ') || '-'),
+              ui.el('td', { class: 'bb-td-center' }, visualSourceLabel(q) || '-'),
               ui.el('td', { class: 'bb-td-center' }, [
                 ui.el('span', {
                   class: 'bb-status-mark ' +
@@ -481,12 +526,22 @@
 
   // ---- Sheet: Visual Intelligence -------------------------------------------
 
+  /** Questions whose answers cite a given visual page - the proof that the
+      visual pass fed the question set rather than sitting beside it. */
+  function questionsFedBy(payload, page) {
+    return flatten(payload).filter(function (q) {
+      return visualSourcesOf(q).some(function (s) { return s.page === page; });
+    });
+  }
+
   function sheetVisual(payload) {
     var findings = visualFindings(payload);
     var blocks = [
       ui.el('p', { class: 'bb-caption', style: 'margin-bottom:10px' },
         findings.length + ' visual-heavy page' + (findings.length === 1 ? '' : 's') +
-        ' deep-processed with AI vision, on top of the standard text analysis.')
+        ' deep-processed with AI vision. Everything read here was fed to the ' +
+        'experts as evidence for your question set - answers it produced are ' +
+        'marked with a badge throughout the report.')
     ];
     findings.forEach(function (f) {
       var parts = [
@@ -507,6 +562,20 @@
         parts.push(ui.el('ul', { class: 'bb-visual-facts' }, f.key_facts.map(function (fact) {
           return ui.el('li', {}, String(fact));
         })));
+      }
+
+      /* Close the loop: name the questions this graphic actually answered. */
+      var fed = questionsFedBy(payload, f.page);
+      if (fed.length) {
+        parts.push(ui.el('div', { class: 'bb-visual-fed' }, [
+          ui.el('div', { class: 'bb-visual-fed-head' },
+            'Answered ' + fed.length + ' question' + (fed.length === 1 ? '' : 's') +
+            ' in your set:'),
+          ui.el('ul', { class: 'bb-visual-facts' }, fed.map(function (q) {
+            return ui.el('li', {}, (q.section_name ? q.section_name + ' — ' : '') +
+              (q.question || ''));
+          }))
+        ]));
       }
       blocks.push(ui.el('div', { class: 'bb-visual-finding' }, parts));
     });
@@ -692,7 +761,8 @@
         '<td>' + ui.escapeHtml(q.question) + '</td>' +
         '<td>' + ui.escapeHtml(isAnswered(q) ? q.answer : 'Not found') + '</td>' +
         '<td>' + ui.escapeHtml(answerSummaryOf(q) || '') + '</td>' +
-        '<td>' + ui.escapeHtml((q.page_citations || []).join(', ')) + '</td></tr>';
+        '<td>' + ui.escapeHtml((q.page_citations || []).join(', ')) + '</td>' +
+        '<td>' + ui.escapeHtml(visualSourceLabel(q)) + '</td></tr>';
     }).join('');
     var visualRows = visualFindings(payload).map(function (f) {
       return '<tr><td>' + ui.escapeHtml(String(f.page)) + '</td>' +
@@ -719,6 +789,7 @@
       '</style></head><body><h1>' + ui.escapeHtml(payload.document_name || 'Document Analysis') +
       '</h1><p>Generated: ' + new Date().toLocaleString() + '</p><table><thead><tr>' +
       '<th>Section</th><th>Question</th><th>Answer</th><th>Answer Summary</th><th>PDF Pages</th>' +
+      '<th>Visual Source</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>' + visualSection + '</body></html>';
     download(html, 'bidbrief_analysis.html', 'text/html');
   }
@@ -834,6 +905,8 @@
     ingestLiveAnswers: ingestLiveAnswers,
     sheetList: sheetList, execSummaryRows: execSummaryRows,
     keyDetailRows: keyDetailRows, statusOf: statusOf,
+    visualSourcesOf: visualSourcesOf, visualSourceLabel: visualSourceLabel,
+    questionsFedBy: questionsFedBy,
     reset: function () { path = []; activeSheet = null; liveAnswers = {}; }
   };
 })(typeof window !== 'undefined' ? window : this);
