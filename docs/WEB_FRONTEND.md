@@ -1,4 +1,4 @@
-# BidBrief Web Front-End (2.4.0)
+# BidBrief Web Front-End (2.5.6)
 
 The web app was rebuilt in 2.2.0 to match the BidBrief iOS app's visual language
 and information architecture. This is the map of what owns what, and the
@@ -115,7 +115,7 @@ or the cue sticks on Questions forever.
     byte-identical — a text-only window must get the exact prompt it got before
     2.4.0. Old cached results lack `visual_findings` / `visual_sources`, so
     every reader must tolerate their absence.
-16. **Visual evidence is INSIDE the pipeline, not beside it.** The vision pass
+14. **Visual evidence is INSIDE the pipeline, not beside it.** The vision pass
     appends `[VISUAL CONTENT]` blocks to page text *before* windows are built,
     `create_windows` tags each window with `visual_pages` ({page: kind}), and
     the expert prompt declares that evidence and requires a `<VIS pg N kind>`
@@ -125,26 +125,44 @@ or the cue sticks on Questions forever.
     column. If you add a new answer path, carry `visual_sources` through it —
     a dropped field silently turns a drawing-sourced fact into one that looks
     like it was written in the spec.
-17. **Provenance must be trustworthy.** `extract_visual_sources` only accepts
+15. **Provenance must be trustworthy.** `extract_visual_sources` only accepts
     marker pages the vision pass actually analyzed (`allowed_pages`), so a
     hallucinated marker cannot invent a graphic. Never relax that bound.
-18. **Automatic library backups are deduplicated by content.** Pre-generation
+16. **Automatic library backups are deduplicated by content.** Pre-generation
     snapshots go through `BB.libraries.autoBackup`, which skips the save when an
     identical set is already stored and caps auto entries at
     `MAX_AUTO_BACKUPS`. Calling `save()` directly for an automatic snapshot is
     what produced four or five copies of the same stock set, each named with a
     raw timestamp. User-saved libraries are never deduplicated or capped.
-14. **The results screen mirrors the Excel workbook (2.4.0).** `sheetList()`
+17. **The results screen mirrors the Excel workbook (2.4.0).** `sheetList()`
     owns which tabs a payload earns; Executive Summary/Detailed Results/By
     Section/Footnotes are always present, Document Intelligence and Visual
     Intelligence only when their data exists. New result surfaces should be a
     sheet in BOTH the web workbook and `services/excel_dashboard.py`, not one
     or the other.
-15. **The Session Dashboard lives in-app.** `bb-admin.js` renders it from
+18. **The Session Dashboard lives in-app.** `bb-admin.js` renders it from
     `/api/admin/sessions` on the design system; every session row carries the
     mode-aware Excel export (`exportUrlFor`: bestprep → bestprep-excel, else
     excel-dashboard). The legacy `/admin/sessions` page still answers but
     nothing links to it — don't reintroduce the `window.open` escape hatch.
+
+19. **One workbook renderer, two surfaces.** `BB.results.buildWorkbook(payload)`
+    owns its own tab state and is mounted by BOTH the Analyze results screen and
+    the admin session modal. An admin reviewing a session must see exactly the
+    sheets the user who ran it sees — a second, poorer rendering is how the
+    Document Intelligence tables stayed invisible to admins.
+20. **Never downgrade a results payload.** `BB.engine.finish()` merges rather
+    than overwrites `dynamic_tables`, `intelligence_focus`, `visual_findings`,
+    `key_requirements` and `footnotes`. `results_ready` carries them; a later
+    `/api/results` fetch may not, and letting the thinner payload win is what
+    erased the Document Intelligence tab while the Excel export still had it.
+    Server side, `_attach_dynamic_intel()` re-attaches them in EVERY branch.
+21. **A diagnostic must never gate the data it describes.** The storage-health
+    check runs alongside the session list, never in front of it — chaining it
+    left the dashboard stuck on "Loading sessions..." whenever the database was
+    slow, with a Refresh button that appeared dead.
+22. **The Settings version comes from `/health`.** A hardcoded literal there
+    read 2.3.0 through five releases before anyone noticed.
 
 ## Tests
 

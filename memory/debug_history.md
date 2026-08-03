@@ -53,6 +53,143 @@ in the same script that does the split.
 
 ---
 
+## 2026-08-03 — Durable storage: four failures in one night (2.5.0 → 2.5.6)
+
+Enabling `DATABASE_URL` on Render surfaced four defects in a row. Every one was
+mine, and every one was found by reproduction rather than reasoning. Read this
+before touching `services/persistence.py`.
+
+### 1. TIMESTAMPTZ took the whole site down (2.5.3)
+
+**Symptom:** every page returned
+`{"error":"An unexpected error occurred. Please try again.","success":false}`
+immediately after `DATABASE_URL` was set.
+
+**Reproduction first, on the exact live code** — put an aware datetime in
+`active_sessions`, `GET /` → 500 with the byte-identical body. Traceback:
+
+```
+app.py check_auth_cookie
+  if session['expires_at'] < datetime.now():
+TypeError: can't compare offset-naive and offset-aware datetimes
+```
+
+psycopg's `TimestamptzLoader` returns *"a datetime with the timezone of the
+connection"* — **aware**. Restored sessions carried it; `datetime.now()` is
+naive; Python refuses the comparison. Because `/` is `@require_auth`, one bad
+datetime 500'd every authenticated page.
+
+**Fix:** nothing timezone-aware escapes `persistence.py` (`_naive_local` on every
+read, `_aware_utc` on every write), AND `check_auth_cookie` normalizes both
+sides and **fails closed** on anything unparseable. An auth check must never be
+able to take the site down, whatever ends up in that field.
+
+### 2. `options='-c statement_timeout=...'` is rejected by PgBouncer (2.5.6)
+
+Added in 2.5.5 to stop query hangs. **Neon's pooled endpoint IS PgBouncer**,
+which rejects unknown startup parameters — so every connection failed and the
+pool timed out: `couldn't get a connection after 30.00 sec`. It had been working
+minutes earlier.
+
+**Rule:** through a pooled endpoint, only pass libpq CONNECTION parameters.
+TCP keepalives (`keepalives`, `keepalives_idle`, `keepalives_interval`,
+`keepalives_count`) plus `connect_timeout` give the same dead-socket protection
+and are pooler-safe. Server-side `SET`/startup options are not.
+
+### 3. A failed init LEAKED THE WHOLE POOL (2.5.6) — the actual escalation
+
+The failure path did `self._pool = None` **without closing it**. A
+`ConnectionPool` runs a background worker that keeps opening connections, so the
+thread and its server-side connections survived. Combined with the 60s retry
+added in the same release, that leaked a fresh pool **every minute** until the
+database refused everything — turning a transient blip into a permanent
+"couldn't get a connection".
+
+**Fix:** teardown centralized in `_discard_pool()` (always `close()` before
+dropping), `init()` serialized behind its own lock so concurrent retries cannot
+build two pools, stale pool discarded before any re-init. Regression test tracks
+pool construction vs close: 3 failed inits → 3 created, 3 closed, 0 lingering
+threads.
+
+**Rule:** never drop a pool/client reference. `close()` it. Anything with a
+background thread leaks silently and only shows up as resource exhaustion later.
+
+### 4. A diagnostic that gated the data (2.5.5)
+
+The admin dashboard hung on "Loading sessions..." forever, and Refresh did
+nothing. Cause: 2.5.4 chained `/api/admin/storage` **in front of**
+`/api/admin/sessions`, so one slow database call blocked the entire list.
+
+**Rule:** a diagnostic must never gate the data it describes. Run it alongside
+and let it paint in when it answers. Verified with the storage endpoint stubbed
+to never resolve — the list still renders.
+
+### What measurement ruled out
+
+A realistic completed-analysis snapshot is **0.41 MB** (10×10 questions, quote
+piles, visual findings, dynamic tables, key details, 10K doc_context). Payload
+size was never the problem — measuring it is what redirected the hunt to the
+leak. Measure before optimizing.
+
+### Standing gap
+
+Every fix above was validated against reproductions, psycopg source and
+instrumented fakes — **never against the real Neon database**, because no
+Postgres exists on the dev machine. `DATABASE_URL='...' python -m
+services.persistence` exercises connect → schema → write → read → cleanup and
+would have caught the PgBouncer rejection before it shipped. Run it before any
+future connection-parameter change.
+
+---
+
+## 2026-08-03 — Document Intelligence vanished from the web but not from Excel (2.5.1)
+
+**Symptom:** the DI tab was missing from the web results while the Excel export
+had the sheet — so the tables demonstrably existed.
+
+**Cause, two halves:**
+1. `_transform_to_legacy_format` rebuilds the payload from a FIXED key set, so it
+   **drops** `dynamic_tables`/`intelligence_focus` (generated in `app.py` after
+   the orchestrator finishes, not by the orchestrator). Only the `completed` and
+   `legacy` branches of `/api/results` re-attached them; `partial` and `active`
+   did not.
+2. `bb-engine.finish()` **overwrote** `state.analysis.results` with whatever the
+   follow-up fetch returned. `results_ready` carries the tables; a fetch landing
+   on a thinner branch erased them.
+
+Excel reads the session dict directly, which is why the two surfaces disagreed.
+
+**Fix:** `_attach_dynamic_intel()` called by EVERY branch (never downgrades a
+payload that already has tables), and `finish()` merges instead of overwriting
+for `dynamic_tables`, `intelligence_focus`, `visual_findings`,
+`key_requirements`, `footnotes`.
+
+**Rule for this codebase:** any helper that rebuilds `legacy_result` from a fixed
+key set silently drops app-level enrichments. Re-attach in one shared place, and
+never let a later fetch downgrade a richer client payload.
+
+---
+
+## 2026-08-03 — Excel: fixed row heights hid wrapped answers (2.5.2)
+
+`mobile_optimize` clamps the Answer column 60 → 42 chars and enables wrapping,
+but the generator hard-coded `row_dimensions[row].height = 55` (~3.7 lines). An
+800-character answer wraps to ~20 lines, so everything past line four was
+invisible — present in the cell, impossible to see.
+
+**Fix:** `autosize_rows()` computes height from real content against the FINAL
+column widths and only ever GROWS a row (deliberate header heights survive).
+It must run AFTER the clamp — measuring pre-clamp width under-sizes the row,
+which is how this happened. Merged cells are measured across their whole span or
+the summary sheets balloon. `_relieve_overflowing_columns()` widens a column
+(bounded at 72) when 42 chars would push content past Excel's **409.5pt** row
+ceiling.
+
+**Known ceiling:** beyond ~2,000 characters no single Excel row can display a
+whole cell. Not fixable in a row — needs a one-block-per-answer sheet.
+
+---
+
 ## 2026-08-02 — Calibrate visual-page heuristics against a REAL PDF, not just unit fixtures (2.4.0)
 
 **What happened:** the Visual Intelligence page-selection heuristic (`score_page` in

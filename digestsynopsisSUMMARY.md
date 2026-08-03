@@ -1106,3 +1106,55 @@ ignores unknown keys). Full detail: `HANDOFF.md` § 2.4.0, `docs/WEB_FRONTEND.md
 4. `/health` → **2.4.1**. Suite: **176 passed** (was 149); JS: **115 passed** (was 110).
    Stubbed end-to-end proof: a fact existing only in a drawing reaches the expert prompt,
    is answered against a normal question, and returns badged. Chromium 10/10, no console errors.
+
+---
+
+## Δ 2026-08-03 — Durable storage shakedown + results/export fixes (2.5.1 → 2.5.6)
+
+Web app only. `DATABASE_URL` is now SET on Render, so persistence is live.
+**Read `memory/debug_history.md` before touching `services/persistence.py`.**
+
+### New/changed modules
+- `services/persistence.py` — gained `_naive_local`/`_aware_utc` (nothing
+  timezone-aware may escape), `_discard_pool()` (always close, never drop),
+  serialized `init()` behind `_init_lock`, `_try_reinit()` self-heal (throttled
+  to once a minute, only when `DATABASE_URL` is set), `self_test()` round-trip
+  write check (cached 30s), `count_analyses()`, `index_limit()`.
+  Connection kwargs are libpq-only: `connect_timeout` + TCP keepalives.
+  **Never pass `options='-c ...'` — Neon's pooled endpoint is PgBouncer and
+  rejects it, failing every connection.**
+- `app.py` — `_attach_dynamic_intel()` re-attaches `dynamic_tables`/
+  `intelligence_focus` in EVERY `/api/results` branch (the legacy transform
+  drops them); `check_auth_cookie` normalizes tz and fails CLOSED;
+  `/api/admin/storage` reports health + `write_test` + `database_url_set`;
+  `_restore_persisted_state` captures the beta switch on first boot with a DB.
+- `services/excel_mobile.py` — `autosize_rows()` (grow-only, runs AFTER the
+  column clamp, merged cells measured across their span) and
+  `_relieve_overflowing_columns()` (widen up to 72 rather than clip at Excel's
+  409.5pt row ceiling). Applies to every generator.
+- `shared/assets/js/bb-results.js` — `buildWorkbook(payload, opts)` is a
+  self-contained component with its own tab state, mounted by BOTH the Analyze
+  results screen and the admin session modal.
+- `shared/assets/js/bb-engine.js` — `mergeResults()`: a later `/api/results`
+  payload may never downgrade `dynamic_tables`, `intelligence_focus`,
+  `visual_findings`, `key_requirements` or `footnotes`.
+- `shared/assets/js/bb-admin.js` — in-modal full workbook, `storageStatusText()`
+  (pure, unit-tested) naming the exact storage state, and the storage check runs
+  ALONGSIDE the session list, never in front of it.
+- `shared/assets/js/bb-settings.js` — version read from `/health`; Patent
+  Pending attributed to Stephen Bartlett (also `login.html`).
+
+### Invariants added (docs/WEB_FRONTEND.md 16–18 + persistence rules)
+1. Nothing timezone-aware escapes the storage module; auth checks fail closed.
+2. Pooled endpoints get libpq CONNECTION parameters only.
+3. Always `close()` a pool before discarding it; serialize `init()`.
+4. A diagnostic must never gate the data it describes.
+5. Re-attach app-level enrichments in one shared helper every branch calls.
+
+### Verification
+`pytest -q` → **223 passed** (was 194); `node --test` → **134 passed** (was 115).
+`/health` → **2.5.6**. Chromium: workbook + DI tab on user AND admin surfaces,
+dashboard renders while the storage check hangs, zero console errors.
+**Standing gap:** no query has ever run against the real Neon database from the
+dev machine — `DATABASE_URL='...' python -m services.persistence` is the
+pre-flight for any connection-parameter change.

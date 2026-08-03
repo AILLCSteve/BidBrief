@@ -1,5 +1,55 @@
 # HANDOFF — BidBrief (Flask backend + web front-end)
 
+> Updated: 2026-08-03 — **live on 2.5.6.** Durable storage (Neon) is wired and
+> `DATABASE_URL` IS set on Render. Read `memory/debug_history.md` before touching
+> `services/persistence.py`: four separate defects were found and fixed the night
+> it was enabled, and the reproductions are written down.
+
+## 2.5.1 → 2.5.6 — the durable-storage shakedown (this round)
+
+Shipped in sequence, each fixing something the previous one exposed. Full
+reproductions and rules: **`memory/debug_history.md`**.
+
+| Ver | Fix |
+|---|---|
+| 2.5.1 | Document Intelligence tab was being erased client-side; admin session view now mounts the SAME workbook as the user sees |
+| 2.5.2 | Excel rows grow to fit wrapped answers; a column widens rather than clip |
+| 2.5.3 | **OUTAGE**: `TIMESTAMPTZ` returns tz-AWARE datetimes → `TypeError` in `check_auth_cookie` → every authenticated page 500'd |
+| 2.5.4 | Storage state made visible (status line + round-trip write self-test); beta switch captured at boot |
+| 2.5.5 | Admin dashboard hung on "Loading sessions" (a diagnostic was gating the data) |
+| 2.5.6 | **Failed init leaked the whole pool**; PgBouncer-safe connect params; self-healing re-init; version read from `/health`; Patent Pending → Stephen Bartlett |
+
+**The three storage rules that came out of it** (all now enforced + tested):
+1. Nothing timezone-aware escapes `persistence.py`, and `check_auth_cookie`
+   fails CLOSED — an auth check must never be able to 500 the site.
+2. Only libpq CONNECTION parameters go to a pooled endpoint. Neon's pooled host
+   is PgBouncer and rejects `options='-c ...'`, failing every connection.
+   Use `connect_timeout` + TCP keepalives.
+3. Never drop a pool reference — `close()` it. `init()` is serialized; a stale
+   pool is discarded first. A regression test counts pools created vs closed.
+
+**Also this round:** the Settings version now reads `/health` (it had been a
+hardcoded `2.3.0` for five releases) and Patent Pending is attributed to
+**Stephen Bartlett** in Settings and the login footer; the Additional
+Intelligence LLC credit is unchanged.
+
+**Verified:** `pytest -q` → **223 passed**; `node --test` → **134 passed**;
+Chromium passes for the workbook/DI tab on both user and admin surfaces, and for
+the dashboard rendering while the storage check hangs.
+
+### What only the user can confirm
+1. **The Session Dashboard status line** — it names the exact state (off /
+   failed to start + error / connected but not writable / active + row count).
+   That line is the fastest diagnosis for anything storage-related.
+2. **That an analysis survives a deploy.** Storage was never proven against the
+   real Neon database from this machine (no Postgres locally) — see the standing
+   gap in the debug history. `DATABASE_URL='...' python -m services.persistence`
+   round-trips connect → schema → write → read → cleanup and would have caught
+   the PgBouncer rejection before it shipped. **Run it before any future change
+   to connection parameters.**
+
+> Previous rounds below.
+
 > Updated: 2026-08-02 — **2.4.0: Visual Intelligence (opt-in vision pass over drawing/map/photo
 > pages), the results screen rebuilt as the Excel workbook, and the admin Session Dashboard
 > brought in-app with per-session Excel export. iOS untouched this round.**
