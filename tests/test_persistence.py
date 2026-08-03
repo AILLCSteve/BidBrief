@@ -99,13 +99,19 @@ class TestSnapshotSerialization:
                 return 'weird'
         assert 'weird' in json.dumps({'x': Weird()}, default=_json_default)
 
-    def test_retention_default_and_override(self, monkeypatch):
+    def test_retention_keeps_everything_by_default(self, monkeypatch):
+        """Deleting a user's analyses is the one irreversible thing this module
+        can do, so it must never happen unless explicitly configured."""
         monkeypatch.delenv('BIDBRIEF_DB_RETENTION_DAYS', raising=False)
-        assert retention_days() == 90
-        monkeypatch.setenv('BIDBRIEF_DB_RETENTION_DAYS', '7')
-        assert retention_days() == 7
+        assert retention_days() == 0
+        monkeypatch.setenv('BIDBRIEF_DB_RETENTION_DAYS', '')
+        assert retention_days() == 0
         monkeypatch.setenv('BIDBRIEF_DB_RETENTION_DAYS', 'nonsense')
-        assert retention_days() == 90
+        assert retention_days() == 0, 'a typo must not start deleting data'
+
+    def test_retention_window_is_opt_in(self, monkeypatch):
+        monkeypatch.setenv('BIDBRIEF_DB_RETENTION_DAYS', '30')
+        assert retention_days() == 30
 
 
 class TestAnalysisSnapshotShape:
@@ -223,3 +229,74 @@ class TestAdminContractUnchanged:
         finally:
             app_module.completed_analyses.pop('sess_dup', None)
             app_module.restored_analyses.clear()
+
+
+class TestRestoredSessionsAreAdminOnly:
+    """Persisting analyses must not silently hand end users a history feature.
+
+    Restored sessions are an admin capability by default — including the
+    dangerous case of a pre-auth analysis stored with owner=None, which the
+    ordinary ownership rule would treat as public.
+    """
+
+    @pytest.fixture
+    def restored(self, monkeypatch):
+        import app as app_module
+        monkeypatch.delenv('BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY', raising=False)
+        app_module.restored_analyses['sess_old'] = {
+            'pdf_filename': 'old.pdf', 'owner': 'alice', 'mode': 'bid_spec',
+            'status': 'completed', 'statistics': {},
+        }
+        app_module.restored_analyses['sess_unowned'] = {
+            'pdf_filename': 'anon.pdf', 'owner': None, 'mode': 'bid_spec',
+            'status': 'completed', 'statistics': {},
+        }
+        yield app_module
+        app_module.restored_analyses.clear()
+
+    def _as(self, app_module, monkeypatch, username, role):
+        monkeypatch.setattr(app_module, '_current_user_info', lambda: (username, role))
+
+    def test_owner_is_denied_their_own_restored_analysis(self, restored, monkeypatch):
+        self._as(restored, monkeypatch, 'alice', 'user')
+        with restored.app.test_request_context('/'):
+            assert restored._is_authorized_for_session('sess_old') is False
+
+    def test_other_users_are_denied(self, restored, monkeypatch):
+        self._as(restored, monkeypatch, 'bob', 'user')
+        with restored.app.test_request_context('/'):
+            assert restored._is_authorized_for_session('sess_old') is False
+
+    def test_admin_is_allowed(self, restored, monkeypatch):
+        self._as(restored, monkeypatch, 'admin@x', 'admin')
+        with restored.app.test_request_context('/'):
+            assert restored._is_authorized_for_session('sess_old') is True
+
+    def test_unowned_restored_analysis_is_not_public(self, restored, monkeypatch):
+        """Analyses created before /api/analyze required auth have owner=None.
+        The plain ownership rule calls those public — the admin gate must win."""
+        self._as(restored, monkeypatch, None, None)
+        with restored.app.test_request_context('/'):
+            assert restored._is_authorized_for_session('sess_unowned') is False
+
+    def test_flag_can_open_it_to_owners(self, restored, monkeypatch):
+        monkeypatch.setenv('BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY', 'false')
+        self._as(restored, monkeypatch, 'alice', 'user')
+        with restored.app.test_request_context('/'):
+            assert restored._is_authorized_for_session('sess_old') is True
+        # ...but never to somebody else's analysis
+        self._as(restored, monkeypatch, 'bob', 'user')
+        with restored.app.test_request_context('/'):
+            assert restored._is_authorized_for_session('sess_old') is False
+
+    def test_live_sessions_are_unaffected_by_the_gate(self, restored, monkeypatch):
+        """The gate applies ONLY to restored history. A user reading their own
+        live analysis in this process must keep working exactly as before."""
+        restored.completed_analyses['sess_live'] = {
+            'pdf_filename': 'live.pdf', 'owner': 'alice', 'mode': 'bid_spec'}
+        try:
+            self._as(restored, monkeypatch, 'alice', 'user')
+            with restored.app.test_request_context('/'):
+                assert restored._is_authorized_for_session('sess_live') is True
+        finally:
+            restored.completed_analyses.pop('sess_live', None)

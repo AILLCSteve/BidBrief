@@ -23,11 +23,36 @@ direct endpoint will exhaust its connection limit.
 
 | Variable | Value | Required |
 |---|---|---|
-| `DATABASE_URL` | the pooled Neon string above | **yes** — this is the on/off switch |
-| `BIDBRIEF_DB_RETENTION_DAYS` | how long analyses are kept (default `90`) | no |
-| `BIDBRIEF_DB_POOL_MAX` | max pooled connections (default `4`) | no |
+| `DATABASE_URL` | the pooled Neon string above | **yes — and it is the only one** |
+| `BIDBRIEF_DB_RETENTION_DAYS` | delete analyses older than N days. **Unset = keep forever** | no |
+| `BIDBRIEF_DB_POOL_MAX` | max concurrent **connections** (default `4`) | no |
+| `BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY` | `false` lets users reach their own history (default: admin only) | no |
 
-Nothing else changes. The tables are created automatically on first boot.
+Nothing else changes, and **there is no migration step** — see below.
+
+### `BIDBRIEF_DB_POOL_MAX` is not a storage limit
+
+It caps how many **database connections** the app holds open at once, so a burst
+of requests plus analysis worker threads cannot exhaust Neon's connection
+allowance. It has no effect whatsoever on how many analyses are stored or how
+large they are. The only setting that ever deletes data is
+`BIDBRIEF_DB_RETENTION_DAYS`, and leaving it unset means nothing is ever deleted.
+
+### There is no migration to run
+
+`Store.init()` executes the whole schema as `CREATE TABLE IF NOT EXISTS` on every
+boot, so the first deploy creates the six tables and later boots are a no-op.
+That is the migration — it just runs itself, idempotently.
+
+This is deliberate for an app this size (one worker, six tables, and the analysis
+payload lives in a single `JSONB` column so payload changes never need a schema
+change). **The limitation to know:** `CREATE TABLE IF NOT EXISTS` will not ALTER
+a table that already exists. If a future change needs a new *column*, it needs an
+explicit `ALTER TABLE ... IF NOT EXISTS` added to `_SCHEMA`, or a real migration
+tool. Adding fields to the snapshot JSON needs nothing.
+
+If you would rather create the schema before deploying, running the self-check in
+step 3 does exactly that.
 
 **3. Verify.** Locally, with the same string:
 
@@ -89,11 +114,24 @@ most releases, and a blob means new fields need no migration.
 5. **Revocation must outlive the process.** Logout and tester deletion delete
    the stored token too, or a restart would resurrect it.
 
+## Who can read a restored session
+
+**Admins only, by default.** Persisting analyses must not quietly hand end users
+a history feature they were never given: without this gate every user would gain
+access to their past runs, and any analysis created before `/api/analyze`
+required auth (stored with `owner=None`) would be readable by anyone, because the
+ordinary ownership rule treats unowned sessions as public.
+
+Set `BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY=false` to let a user reach their OWN
+restored analyses — never anyone else's. The gate applies only to restored
+history; a live analysis in the current process is unaffected.
+
 ## Cost
 
 Analyses are the only large rows (a full Q&A payload, typically tens to a few
-hundred KB). At the default 90-day retention this sits comfortably inside Neon's
-free tier for normal usage. Lower `BIDBRIEF_DB_RETENTION_DAYS` if storage grows.
+hundred KB). Nothing is deleted by default. If storage ever needs bounding, set
+`BIDBRIEF_DB_RETENTION_DAYS` to a number of days — until then every analysis is
+kept indefinitely.
 
 ## Rollback
 

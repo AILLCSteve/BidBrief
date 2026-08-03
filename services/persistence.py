@@ -27,8 +27,14 @@ DESIGN RULES (do not break)
 
 ENVIRONMENT
   DATABASE_URL                  Neon connection string (required to enable)
-  BIDBRIEF_DB_RETENTION_DAYS    delete analyses older than this (default 90)
-  BIDBRIEF_DB_POOL_MAX          max pooled connections (default 4)
+  BIDBRIEF_DB_RETENTION_DAYS    delete analyses older than N days. UNSET/0 =
+                                keep forever (the default — nothing is ever
+                                deleted unless you ask for it)
+  BIDBRIEF_DB_POOL_MAX          max concurrent DATABASE CONNECTIONS, default 4.
+                                This is a connection limit, NOT a storage limit:
+                                it caps how many sockets the app opens to Neon
+                                so it cannot exhaust the connection allowance.
+                                It has no effect on how much data is stored.
 """
 
 import json
@@ -98,10 +104,18 @@ def database_url() -> str:
 
 
 def retention_days() -> int:
+    """Days to keep analyses. 0 (the default) means KEEP FOREVER.
+
+    Deliberately opt-in: silently deleting a user's analyses is the one
+    irreversible thing this module could do, so it does nothing unless asked.
+    """
+    raw = (os.environ.get('BIDBRIEF_DB_RETENTION_DAYS', '') or '').strip()
+    if not raw:
+        return 0
     try:
-        return max(1, int(os.environ.get('BIDBRIEF_DB_RETENTION_DAYS', '90')))
+        return max(0, int(raw))
     except ValueError:
-        return 90
+        return 0
 
 
 def _pool_max() -> int:
@@ -164,8 +178,9 @@ class Store:
                 conn.execute(_SCHEMA)
             self.enabled = True
             self.last_error = None
+            days = retention_days()
             logger.info("💾 Persistence ENABLED — session state survives restarts "
-                        f"(retention {retention_days()}d)")
+                        + (f"(retention {days}d)" if days > 0 else "(analyses kept indefinitely)"))
             return True
         except Exception as e:
             self.last_error = str(e)
@@ -302,11 +317,20 @@ class Store:
         return bool(self._run(_op, default=False, label='delete_analysis'))
 
     def purge_expired(self) -> int:
-        """Retention sweep — runs alongside the in-memory cleanup timer."""
+        """Housekeeping sweep — runs alongside the in-memory cleanup timer.
+
+        Analyses are deleted ONLY when a retention window is explicitly
+        configured. With the default (keep forever) this just clears auth tokens
+        that have already expired, which are dead weight either way.
+        """
+        days = retention_days()
+
         def _op(conn):
-            cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days())
-            cur = conn.execute('DELETE FROM bb_analyses WHERE updated_at < %s', (cutoff,))
             conn.execute('DELETE FROM bb_auth_sessions WHERE expires_at < NOW()')
+            if days <= 0:
+                return 0  # keep every analysis, forever
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            cur = conn.execute('DELETE FROM bb_analyses WHERE updated_at < %s', (cutoff,))
             return cur.rowcount or 0
         return int(self._run(_op, default=0, label='purge_expired') or 0)
 

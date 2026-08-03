@@ -867,6 +867,16 @@ def _resolve_high_power_request(requested: bool):
     return resolve_model(True), None
 
 
+def _restored_sessions_admin_only() -> bool:
+    """Restored-history access is admin-only unless explicitly opened up.
+
+    Default True: persistence is a backend/admin capability. Flipping this to
+    false lets a user reach their OWN past analyses (never anyone else's).
+    """
+    value = (os.environ.get('BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY', 'true') or '').strip().lower()
+    return value not in ('false', '0', 'no', 'off')
+
+
 def _is_authorized_for_session(session_id: str) -> bool:
     """Return True if current request is authorized to access results/exports for session_id.
 
@@ -874,6 +884,7 @@ def _is_authorized_for_session(session_id: str) -> bool:
     """
     with session_lock:
         session_data = None
+        is_restored_only = False
         if session_id in completed_analyses:
             session_data = completed_analyses[session_id]
         elif session_id in partial_analyses:
@@ -883,9 +894,11 @@ def _is_authorized_for_session(session_id: str) -> bool:
         elif session_id in analysis_results:
             session_data = analysis_results[session_id]
         elif session_id in restored_analyses:
-            # Recovered from durable storage after a restart — ownership still
-            # applies, it just comes from the stored row rather than memory.
+            # Recovered from durable storage after a restart. Gated separately
+            # below — restored history is an ADMIN capability by default, not
+            # something end users get just because their analysis was saved.
             session_data = restored_analyses[session_id]
+            is_restored_only = True
         else:
             logger.warning(
                 f"[AUTH-403] Session {session_id[:12]} not found in any dict. "
@@ -895,11 +908,26 @@ def _is_authorized_for_session(session_id: str) -> bool:
             )
             return False
 
+    username, role = _current_user_info()
+
+    # Sessions recovered from durable storage are an ADMIN capability. Ordinary
+    # users get no history feature yet: without this gate, persisting analyses
+    # would silently hand every user access to their past runs (and any
+    # pre-auth analysis stored with owner=None would be readable by anyone,
+    # since the ownership rule below treats unowned sessions as public).
+    # Set BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY=false to open it to owners.
+    if is_restored_only and _restored_sessions_admin_only():
+        if role != 'admin':
+            logger.info(
+                f"[AUTH-403] Restored session {session_id[:12]} is admin-only "
+                f"(user={username}, role={role})")
+            return False
+        return True
+
     owner = session_data.get('owner') if session_data else None
     if not owner:
         return True
 
-    username, role = _current_user_info()
     if role == 'admin':
         return True
     if username and username == owner:
