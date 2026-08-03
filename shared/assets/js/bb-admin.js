@@ -216,6 +216,10 @@
         onclick: function () { stopSession(info); }
       }, 'Stop'));
     }
+    actions.push(ui.el('button', {
+      class: 'bb-btn-ghost bb-danger', type: 'button',
+      onclick: function () { confirmDeleteSession(info); }
+    }, 'Delete'));
 
     return ui.el('div', { class: 'bb-beta-session' }, [
       ui.el('div', { class: 'bb-beta-session-main' }, [
@@ -227,6 +231,35 @@
         (info.owner ? info.owner + '  ·  ' : '') + sessionMeta(info)),
       ui.el('div', { class: 'bb-beta-session-actions' }, actions)
     ]);
+  }
+
+  /** Deleting an analysis is irreversible and wipes it from storage too, so it
+      always asks first. Admin-only screen. */
+  function confirmDeleteSession(info) {
+    BB.modal.open([
+      ui.el('div', { class: 'bb-modal-head' }, [ui.el('h2', {}, 'Delete this analysis?')]),
+      ui.el('div', { class: 'bb-modal-body' }, [
+        ui.el('p', { class: 'bb-body' },
+          (info.pdf_filename || 'This analysis') + ' will be removed permanently, ' +
+          'including its results, exports and any Smart Analysis. This cannot be undone.'),
+        ui.el('div', { class: 'bb-beta-actions' }, [
+          ui.el('button', {
+            class: 'bb-btn-ghost bb-grow', type: 'button', onclick: BB.modal.close
+          }, 'Cancel'),
+          ui.el('button', {
+            class: 'bb-btn-ghost bb-danger bb-grow', type: 'button',
+            onclick: function () { BB.modal.close(); deleteSession(info); }
+          }, 'Delete permanently')
+        ])
+      ])
+    ]);
+  }
+
+  function deleteSession(info) {
+    postJson('/api/admin/analyses/' + window.encodeURIComponent(info.session_id),
+             null, 'DELETE')
+      .then(function () { ui.banner('info', 'Analysis deleted.'); loadSessions(); })
+      .catch(function (error) { ui.banner('error', 'Could not delete: ' + error.message); });
   }
 
   function stopSession(info) {

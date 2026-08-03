@@ -300,3 +300,146 @@ class TestRestoredSessionsAreAdminOnly:
                 assert restored._is_authorized_for_session('sess_live') is True
         finally:
             restored.completed_analyses.pop('sess_live', None)
+
+
+class TestHistoryAccumulatesForever:
+    """Beta iterations must accumulate without ever losing a session."""
+
+    def test_each_analysis_gets_its_own_row_key(self):
+        """Rows are keyed by session_id, which /api/analyze mints per run as
+        sess_<32 hex>. Two analyses can never collide onto one row, so the
+        upsert can only ever update the SAME analysis, never overwrite another."""
+        import re
+        import app as app_module
+        ids = {f'sess_{__import__("secrets").token_hex(16)}' for _ in range(200)}
+        assert len(ids) == 200, 'session ids must be unique per analysis'
+        for sid in list(ids)[:5]:
+            assert re.fullmatch(r'sess_[0-9a-f]{32}', sid)
+        assert 'secrets.token_hex(16)' in open(
+            app_module.__file__.replace('.pyc', '.py'), encoding='utf-8').read()
+
+    def test_index_limit_is_memory_only_and_generous(self, monkeypatch):
+        from services.persistence import index_limit
+        monkeypatch.delenv('BIDBRIEF_DB_INDEX_LIMIT', raising=False)
+        assert index_limit() == 10000
+        monkeypatch.setenv('BIDBRIEF_DB_INDEX_LIMIT', '50000')
+        assert index_limit() == 50000
+        monkeypatch.setenv('BIDBRIEF_DB_INDEX_LIMIT', 'nonsense')
+        assert index_limit() == 10000
+
+    def test_nothing_is_deleted_without_an_explicit_retention_window(self, monkeypatch):
+        """purge_expired must not touch analyses under the default settings."""
+        monkeypatch.delenv('BIDBRIEF_DB_RETENTION_DAYS', raising=False)
+        executed = []
+
+        class RecordingConn:
+            def execute(self, sql, params=None):
+                executed.append(' '.join(sql.split()))
+                class Cur:
+                    rowcount = 0
+                return Cur()
+
+        class Pool:
+            def connection(self):
+                class Ctx:
+                    def __enter__(self_inner): return RecordingConn()
+                    def __exit__(self_inner, *a): return False
+                return Ctx()
+
+        store = Store()
+        store.enabled = True
+        store._pool = Pool()
+        store.purge_expired()
+
+        assert not any('DELETE FROM bb_analyses' in s for s in executed), \
+            'analyses must never be deleted by default'
+        assert any('bb_auth_sessions' in s for s in executed), \
+            'expired auth tokens are still cleared'
+
+
+class TestAdminCanDeleteAnything:
+    """Deleting an analysis is admin-only and wipes it everywhere at once."""
+
+    @pytest.fixture
+    def client(self):
+        from app import app as flask_app
+        flask_app.config['TESTING'] = True
+        with flask_app.test_client() as c:
+            yield c
+
+    def _login(self, client, token, username, role):
+        from app import active_sessions
+        from datetime import timedelta
+        active_sessions[token] = {
+            'username': username, 'name': username, 'role': role,
+            'is_beta': False, 'expires_at': datetime.now() + timedelta(hours=1),
+        }
+        client.set_cookie('bidbrief_auth', token)
+
+    def test_delete_removes_from_memory_and_storage(self, client, monkeypatch):
+        import app as app_module
+        calls = []
+        monkeypatch.setattr(app_module.persistence_store, 'delete_analysis',
+                            lambda sid: (calls.append(sid), True)[1])
+        self._login(client, 'tok-del-admin', 'admin@test.local', 'admin')
+
+        app_module.completed_analyses['sess_del'] = {'pdf_filename': 'x.pdf', 'owner': 'u'}
+        app_module.restored_analyses['sess_del'] = {'pdf_filename': 'x.pdf', 'owner': 'u'}
+        app_module.smart_analysis_results['sess_del'] = object()
+        try:
+            resp = client.delete('/api/admin/analyses/sess_del')
+            assert resp.status_code == 200
+            body = resp.get_json()
+            assert body['success'] is True
+            assert 'database' in body['removed_from']
+            assert calls == ['sess_del']
+            assert 'sess_del' not in app_module.completed_analyses
+            assert 'sess_del' not in app_module.restored_analyses
+            assert 'sess_del' not in app_module.smart_analysis_results
+        finally:
+            for d in (app_module.completed_analyses, app_module.restored_analyses,
+                      app_module.smart_analysis_results):
+                d.pop('sess_del', None)
+            app_module.active_sessions.pop('tok-del-admin', None)
+
+    def test_deleting_an_unknown_session_is_a_404(self, client, monkeypatch):
+        import app as app_module
+        monkeypatch.setattr(app_module.persistence_store, 'delete_analysis', lambda sid: False)
+        self._login(client, 'tok-del-admin', 'admin@test.local', 'admin')
+        try:
+            assert client.delete('/api/admin/analyses/sess_missing').status_code == 404
+        finally:
+            app_module.active_sessions.pop('tok-del-admin', None)
+
+    def test_non_admins_cannot_delete(self, client):
+        import app as app_module
+        app_module.completed_analyses['sess_guard'] = {'pdf_filename': 'x.pdf', 'owner': 'bob'}
+        self._login(client, 'tok-del-user', 'bob', 'user')
+        try:
+            assert client.delete('/api/admin/analyses/sess_guard').status_code in (302, 403)
+            assert 'sess_guard' in app_module.completed_analyses, 'nothing may be deleted'
+        finally:
+            app_module.completed_analyses.pop('sess_guard', None)
+            app_module.active_sessions.pop('tok-del-user', None)
+
+
+class TestNoUserFacingExposure:
+    """End users must not learn that history is stored, or that it can be
+    restored. The gate is one half; the absence of any UI is the other."""
+
+    def test_no_web_asset_mentions_storage_or_restoring(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent / 'shared' / 'assets'
+        banned = ('restored', 'persistence', 'database', 'neon')
+        offenders = []
+        for path in list(root.rglob('*.js')) + list(root.rglob('*.css')):
+            if path.name == 'bb-admin.js':
+                continue  # admin-only screen
+            for line in path.read_text(encoding='utf-8').splitlines():
+                stripped = line.strip()
+                if stripped.startswith(('//', '/*', '*')):
+                    continue  # comments are not shipped UI text
+                low = line.lower()
+                if any(word in low for word in banned):
+                    offenders.append(f'{path.name}: {stripped[:80]}')
+        assert not offenders, 'user-facing assets leak persistence wording: ' + str(offenders)

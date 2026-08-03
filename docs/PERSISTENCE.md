@@ -26,6 +26,7 @@ direct endpoint will exhaust its connection limit.
 | `DATABASE_URL` | the pooled Neon string above | **yes — and it is the only one** |
 | `BIDBRIEF_DB_RETENTION_DAYS` | delete analyses older than N days. **Unset = keep forever** | no |
 | `BIDBRIEF_DB_POOL_MAX` | max concurrent **connections** (default `4`) | no |
+| `BIDBRIEF_DB_INDEX_LIMIT` | how many analyses the dashboard lists (default `10000`) | no |
 | `BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY` | `false` lets users reach their own history (default: admin only) | no |
 
 Nothing else changes, and **there is no migration step** — see below.
@@ -125,6 +126,31 @@ ordinary ownership rule treats unowned sessions as public.
 Set `BIDBRIEF_RESTORED_SESSIONS_ADMIN_ONLY=false` to let a user reach their OWN
 restored analyses — never anyone else's. The gate applies only to restored
 history; a live analysis in the current process is unaffected.
+
+## History accumulates forever
+
+Every analysis is its own row, keyed by the `sess_<32 hex>` id `/api/analyze`
+mints per run. Two analyses can never collide onto the same key, so the upsert
+can only ever update the SAME analysis (a stop or a failure rewriting its own
+row) — it can never overwrite a different one. Combined with the default of
+never deleting, history accumulates indefinitely across as many beta iterations
+as you run.
+
+`BIDBRIEF_DB_INDEX_LIMIT` bounds only how many rows the admin dashboard holds in
+memory at boot (newest first, default 10,000). Rows beyond it are still stored
+and still loadable by session id — it is a display bound, never a storage bound.
+Metadata is ~200 bytes a row, so raising it is cheap.
+
+`GET /api/admin/storage` (admin-only) reports the true stored count, how many are
+indexed, and the active retention setting.
+
+## Deleting
+
+Admins can erase any analysis: **Delete** on the session card, or
+`DELETE /api/admin/analyses/<session_id>`. It removes the analysis from memory
+AND from the database, including its cached Smart Analysis. It is irreversible,
+which is why it is explicit and admin-only rather than something a timer does
+behind your back. Non-admins cannot reach the route at all.
 
 ## Cost
 

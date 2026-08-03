@@ -3256,6 +3256,64 @@ def delete_beta_tester(username):
     return jsonify({'success': True, 'username': username, 'sessions_revoked': revoked})
 
 
+@app.route('/api/admin/analyses/<session_id>', methods=['DELETE'])
+@require_admin
+def admin_delete_analysis(session_id):
+    """Admin-only: erase one analysis everywhere — memory and durable storage.
+
+    Deletion is irreversible, which is exactly why it is admin-only and explicit
+    rather than something a retention timer does behind your back.
+    """
+    removed_from = []
+
+    with session_lock:
+        for name, bucket in (('completed', completed_analyses),
+                             ('partial', partial_analyses),
+                             ('legacy', analysis_results),
+                             ('active', active_analyses)):
+            if bucket.pop(session_id, None) is not None:
+                removed_from.append(name)
+        if restored_analyses.pop(session_id, None) is not None:
+            removed_from.append('stored')
+        session_timestamps.pop(session_id, None)
+        session_events.pop(session_id, None)
+        progress_queues.pop(session_id, None)
+        smart_analysis_results.pop(session_id, None)
+
+    # Removes the analysis AND its cached Smart Analysis from the database.
+    deleted = persistence_store.delete_analysis(session_id)
+    if deleted:
+        removed_from.append('database')
+
+    if not removed_from:
+        return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+    admin_user, _ = _current_user_info()
+    audit_log('admin_delete_analysis', admin_user,
+              {'session_id': session_id, 'removed_from': removed_from})
+    logger.info(f"🗑️ Analysis {session_id[:12]} deleted by {admin_user} "
+                f"({', '.join(removed_from)})")
+    return jsonify({'success': True, 'session_id': session_id,
+                    'removed_from': removed_from})
+
+
+@app.route('/api/admin/storage', methods=['GET'])
+@require_admin
+def admin_storage_status():
+    """Admin-only: is history actually being kept, and how much of it."""
+    health = persistence_store.health()
+    from services.persistence import retention_days, index_limit
+    return jsonify({
+        'success': True,
+        'persistence': health,
+        'stored_analyses': persistence_store.count_analyses() if health.get('enabled') else 0,
+        'indexed_in_memory': len(restored_analyses),
+        'index_limit': index_limit(),
+        'retention_days': retention_days(),
+        'retention': 'indefinite' if retention_days() <= 0 else f'{retention_days()} days',
+    })
+
+
 @app.route('/api/admin/sessions', methods=['GET'])
 @require_admin
 def get_all_sessions():

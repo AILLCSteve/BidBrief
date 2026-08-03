@@ -118,6 +118,20 @@ def retention_days() -> int:
         return 0
 
 
+def index_limit() -> int:
+    """How many analyses the boot index holds in memory (newest first).
+
+    This is a MEMORY bound, never a storage bound: rows beyond it stay in the
+    table untouched and are still loadable by session id. Metadata is tiny
+    (~200 bytes/row), so the default comfortably covers many thousands of beta
+    sessions; raise BIDBRIEF_DB_INDEX_LIMIT if the dashboard should list more.
+    """
+    try:
+        return max(1, int(os.environ.get('BIDBRIEF_DB_INDEX_LIMIT', '10000')))
+    except ValueError:
+        return 10000
+
+
 def _pool_max() -> int:
     try:
         return max(1, int(os.environ.get('BIDBRIEF_DB_POOL_MAX', '4')))
@@ -260,13 +274,28 @@ class Store:
             return json.loads(snapshot) if isinstance(snapshot, str) else snapshot
         return self._run(_op, default=None, label='load_analysis')
 
-    def list_analysis_index(self, limit: int = 500) -> List[Dict[str, Any]]:
+    def count_analyses(self) -> int:
+        """Total stored analyses — the truth about how much history exists,
+        independent of how many the boot index loaded."""
+        def _op(conn):
+            row = conn.execute('SELECT COUNT(*) FROM bb_analyses').fetchone()
+            return int(row[0]) if row else 0
+        return int(self._run(_op, default=0, label='count_analyses') or 0)
+
+    def list_analysis_index(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Lightweight metadata for every stored analysis, newest first.
 
         Deliberately does NOT return snapshots: the admin dashboard and the
         ownership check only need metadata, and pulling every full payload into
         memory at boot would defeat the point of persisting them.
+
+        The limit bounds only how many rows this index holds in memory — it
+        NEVER bounds what is stored. Every analysis stays in the table; a row
+        outside the index is still on disk and still loadable by session id.
         """
+        if limit is None:
+            limit = index_limit()
+
         def _op(conn):
             rows = conn.execute(
                 """
