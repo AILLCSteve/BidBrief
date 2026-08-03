@@ -4,7 +4,51 @@
 > pages), the results screen rebuilt as the Excel workbook, and the admin Session Dashboard
 > brought in-app with per-session Excel export. iOS untouched this round.**
 
-## 2.4.0 — Visual Intelligence + results workbook + in-app session dashboard (this round)
+## 2.4.1 — Visual evidence woven INTO HOTDOG + GPT-5.6 model tiers
+
+**Model tiers moved a generation forward** (configuration, not code — both IDs keep the
+`gpt-5` prefix so `is_reasoning_model` and the 400K TokenOptimizer budget still apply):
+standard `gpt-5.4` → **`gpt-5.6-terra`** (cheaper: $2/$12 vs $2.50/$15 per Mtok, and it
+out-scores gpt-5.5 on vision), high power `gpt-5.5` → **`gpt-5.6-sol`** (same $5/$30, the
+strongest vision model OpenAI has shipped — 46.2 vs 13.8 mAP@50). Rollback is a Render env
+var. The vision prompt also now forbids counting/tallying items from a drawing (GPT-5.x
+vision is weak at dense quantification, ~30%); quantities must be printed on the sheet.
+
+**The visual layer is no longer a separate report.** 2.4.0 shipped it as a bolt-on: it
+analyzed drawings, summarized them, and added a sheet. It is now evidence *inside* the
+HOTDOG orchestration, answering the user's own question set:
+
+1. **Windows carry visual tagging.** `PageData.visual_kind` is set by the scanner;
+   `create_windows` collects `WindowContext.visual_pages` ({page: kind}). Preserved when
+   the orchestrator rebuilds a truncated window — dropping it there would disarm the
+   contract for exactly the biggest, most drawing-heavy windows.
+2. **Every expert is told the evidence exists and must attribute it.** The L3 prompt gains
+   a VISUAL EVIDENCE block naming each page and kind, framing it as real document evidence
+   equal to the written text, and requiring `<PDF pg 7> <VIS pg 7 drawing>` when an answer
+   uses it. The second pass gets the same block, pointed harder at the graphics (its
+   questions already failed against the text). A text-only window gets NO block — the
+   prompt is byte-identical to pre-2.4.0.
+3. **Provenance flows end to end.** Markers parse into `Answer.visual_sources` (bounded by
+   the pages actually analyzed, so a hallucinated marker cannot invent a graphic), union on
+   `merge_with`, aggregate across BestPrep fragments (`CumulativeAnswer.all_visual_sources`,
+   used for the L7-synthesized answer since synthesis rewrites the text and drops markers),
+   feed L6.5 (which now attributes graphics in prose — "the plan sheet shows…" — instead of
+   leaking raw markers), and reach `/api/results` as `visual_sources` per question.
+4. **Every surface shows it.** Excel Detailed Results + By Section gain a **Visual Source**
+   column ("Drawing p.7"), the OutputCompiler Answers sheet too; the web workbook badges
+   drawing-sourced answers inline with a tooltip, adds the same column, and the Visual
+   Intelligence sheet now lists **which questions each graphic answered** — the proof it fed
+   the question set. CSV and the HTML report carry the column.
+
+**Verified:** `pytest -q` → **176 passed** (+25 in `tests/test_visual_integration.py`);
+`node --test` → **115 passed**; a stubbed end-to-end run proving a fact that exists ONLY in
+a drawing reaches the expert prompt, is answered against a normal question, and returns
+badged as drawing-sourced; a Chromium pass (10/10) on the badges, columns, cross-reference
+and 390px, zero console errors.
+
+> Previous round (2.4.0) below.
+
+## 2.4.0 — Visual Intelligence + results workbook + in-app session dashboard
 
 Plan: `docs/superpowers/plans/2026-08-02-visual-intelligence-results-workbook-admin.md`.
 Front-end invariants 13–15 are new: **`docs/WEB_FRONTEND.md`**.

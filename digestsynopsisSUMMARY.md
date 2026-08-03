@@ -1078,3 +1078,31 @@ ignores unknown keys). Full detail: `HANDOFF.md` § 2.4.0, `docs/WEB_FRONTEND.md
    Stop for active). Legacy `/admin/sessions` page unlinked but still served.
 5. `/health` → **2.4.0**. Suite: **149 passed** (was 130); JS: **110 passed** (was 97).
    Chromium walkthrough green, zero console errors, 1280px + 390px.
+
+---
+
+## Δ 2026-08-02 (b) — Visual evidence INSIDE HOTDOG + GPT-5.6 tiers (2.4.1)
+
+1. **Model registry** (`services/ai_models.py`): standard `gpt-5.4` → **`gpt-5.6-terra`**
+   (cheaper AND better at vision than gpt-5.5), high power `gpt-5.5` → **`gpt-5.6-sol`**
+   (same price, best OpenAI vision model). No code change needed — the 5.6 IDs keep the
+   `gpt-5` prefix so `is_reasoning_model` and TokenOptimizer's 400K budget still apply.
+   Env-overridable as always. Vision prompt now forbids counting items from a drawing
+   (GPT-5.x vision is weak at dense quantification); quantities must be printed.
+2. **The visual layer moved from bolt-on to interwoven.** New data flow:
+   `PageData.visual_kind` (set by the scanner) → `WindowContext.visual_pages` (built in
+   `create_windows`, preserved across token-budget truncation) → a VISUAL EVIDENCE block in
+   the L3 AND second-pass prompts declaring the evidence and requiring `<VIS pg N kind>`
+   attribution → `extract_visual_sources` (bounded by pages actually analyzed) →
+   `Answer.visual_sources` → union on `merge_with`, `AnswerFragment.visual_sources` +
+   `CumulativeAnswer.all_visual_sources` for BestPrep → L6.5 attributes graphics in prose →
+   `OutputCompiler` browser/Excel formats → legacy payload `visual_sources` per question.
+   A text-only window gets NO visual block: the prompt is byte-identical to pre-2.4.0.
+3. **Surfaces**: excel_dashboard Detailed Results + By Section gain a **Visual Source**
+   column; the OutputCompiler Answers sheet too; the web workbook badges drawing-sourced
+   answers inline (tooltip explains the fact came from a graphic), adds the column, and the
+   Visual Intelligence sheet cross-references **which questions each graphic answered**.
+   CSV + HTML report carry it.
+4. `/health` → **2.4.1**. Suite: **176 passed** (was 149); JS: **115 passed** (was 110).
+   Stubbed end-to-end proof: a fact existing only in a drawing reaches the expert prompt,
+   is answered against a normal question, and returns badged. Chromium 10/10, no console errors.

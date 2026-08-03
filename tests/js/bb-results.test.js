@@ -93,7 +93,13 @@ test('csv rows carry the answer summary between answer and pages', () => {
   const BB = load();
   const csv = BB.results.toCsv(RESULTS);
   const header = csv.split('\n')[0];
-  assert.strictEqual(header, 'Section,#,Question,Answer,Answer Summary,PDF Pages');
+  // Answer Summary must stay BETWEEN Answer and PDF Pages (invariant 5);
+  // Visual Source was appended after them in 2.4.0.
+  assert.strictEqual(header,
+    'Section,#,Question,Answer,Answer Summary,PDF Pages,Visual Source');
+  const cols = header.split(',');
+  assert.ok(cols.indexOf('Answer Summary') === cols.indexOf('Answer') + 1);
+  assert.ok(cols.indexOf('PDF Pages') === cols.indexOf('Answer Summary') + 1);
   assert.match(csv, /A 10% bid bond is required\./);
   assert.match(csv, /"4;9"/);
 });

@@ -112,11 +112,22 @@ or the cue sticks on Questions forever.
     stay open across deploys, it has to be set there, not just toggled in the UI.
 13. **Visual Intelligence is ADDITIVE and opt-in (2.4.0).** The configure-stage
     toggle sends `enable_visual_analysis`; off (the default) leaves the pipeline
-    byte-identical. Never make the vision pass replace, gate, or re-prompt the
-    standard text analysis — it only appends `[VISUAL CONTENT]` blocks to page
-    text and collects `visual_findings` for the results workbook + Excel sheet.
-    Old cached results lack `visual_findings` — every reader must tolerate its
-    absence.
+    byte-identical — a text-only window must get the exact prompt it got before
+    2.4.0. Old cached results lack `visual_findings` / `visual_sources`, so
+    every reader must tolerate their absence.
+16. **Visual evidence is INSIDE the pipeline, not beside it.** The vision pass
+    appends `[VISUAL CONTENT]` blocks to page text *before* windows are built,
+    `create_windows` tags each window with `visual_pages` ({page: kind}), and
+    the expert prompt declares that evidence and requires a `<VIS pg N kind>`
+    marker whenever an answer uses it. Those markers parse into
+    `Answer.visual_sources`, which survives merging, BestPrep fragments, L6.5
+    and compilation, and reaches every surface as a badge / Visual Source
+    column. If you add a new answer path, carry `visual_sources` through it —
+    a dropped field silently turns a drawing-sourced fact into one that looks
+    like it was written in the spec.
+17. **Provenance must be trustworthy.** `extract_visual_sources` only accepts
+    marker pages the vision pass actually analyzed (`allowed_pages`), so a
+    hallucinated marker cannot invent a graphic. Never relax that bound.
 14. **The results screen mirrors the Excel workbook (2.4.0).** `sheetList()`
     owns which tabs a payload earns; Executive Summary/Detailed Results/By
     Section/Footnotes are always present, Document Intelligence and Visual

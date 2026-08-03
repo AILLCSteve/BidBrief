@@ -155,6 +155,57 @@ test('sessionsSummaryText reads like the dashboard header', () => {
     '3 total  ·  1 active  ·  2 completed  ·  0 partial');
 });
 
+// ---- visual provenance on answers (2.4.0 interweave) ----------------------
+
+const VIS_PAYLOAD = {
+  sections: [{
+    section_id: 'a', section_name: 'Scope',
+    questions: [
+      { question_id: 'q1', question: 'Pipe size?', answer: '8 inch <PDF pg 7>',
+        page_citations: [7], visual_sources: [{ page: 7, kind: 'drawing' }] },
+      { question_id: 'q2', question: 'Route?', answer: 'Along Oak <PDF pg 9>',
+        page_citations: [9],
+        visual_sources: [{ page: 9, kind: 'map' }, { page: 7, kind: 'drawing' }] },
+      { question_id: 'q3', question: 'Bond?', answer: 'Yes <PDF pg 2>', page_citations: [2] },
+    ],
+  }],
+  visual_findings: [{ page: 7, kind: 'drawing', description: 'Plan sheet' }],
+};
+
+test('visualSourceLabel matches the Excel Visual Source cell', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const qs = VIS_PAYLOAD.sections[0].questions;
+  assert.strictEqual(BB.results.visualSourceLabel(qs[0]), 'Drawing p.7');
+  assert.strictEqual(BB.results.visualSourceLabel(qs[1]), 'Map p.9; Drawing p.7');
+});
+
+test('a text-only answer has no visual label and no badge', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const q = VIS_PAYLOAD.sections[0].questions[2];
+  assert.strictEqual(BB.results.visualSourceLabel(q), '');
+  assert.deepStrictEqual(plain(BB.results.visualSourcesOf(q)), []);
+});
+
+test('results cached before 2.4.0 decode without visual_sources', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  assert.deepStrictEqual(plain(BB.results.visualSourcesOf({ answer: 'old' })), []);
+  assert.strictEqual(BB.results.visualSourceLabel({ answer: 'old' }), '');
+});
+
+test('questionsFedBy proves which questions a graphic actually answered', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const fed = plain(BB.results.questionsFedBy(VIS_PAYLOAD, 7));
+  assert.deepStrictEqual(fed.map((q) => q.question_id), ['q1', 'q2']);
+  assert.deepStrictEqual(plain(BB.results.questionsFedBy(VIS_PAYLOAD, 99)), []);
+});
+
+test('CSV carries the visual source column', () => {
+  const { BB } = loadModules(RESULTS_MODULES);
+  const csv = BB.results.toCsv(VIS_PAYLOAD);
+  assert.ok(csv.split('\n')[0].endsWith('Visual Source'));
+  assert.ok(csv.includes('"Drawing p.7"'));
+});
+
 // ---- visual events in the progress story --------------------------------------
 
 test('visual scan events narrate under the 12% window band and never outrank it', () => {
