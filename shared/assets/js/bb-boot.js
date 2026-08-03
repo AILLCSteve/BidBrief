@@ -11,7 +11,12 @@
 
     BB.shell.init();
 
-    /* The Starter Set is seeded ONCE into Libraries - never auto-applied. */
+    /* One-time cleanup of libraries saved before duplicate auto-backups were
+       fixed: collapses identical sets and renames the old timestamped entries.
+       Runs before the seed so the Sample Set can't be re-added as a duplicate. */
+    BB.libraries.tidyOnce();
+
+    /* The Sample Set is seeded ONCE into Libraries - never auto-applied. */
     window.fetch('/shared/assets/data/starter-question-set.json')
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (config) { if (config) BB.libraries.seedStarterOnce(config); })

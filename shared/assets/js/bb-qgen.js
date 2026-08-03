@@ -381,11 +381,11 @@
     draft.generating = true;
     render(host, onBack);
 
-    /* Replace mode snapshots the current set first - nothing is ever lost. */
+    /* Replace mode snapshots the current set first - nothing is ever lost.
+       autoBackup skips the save when that exact set is already in Libraries,
+       so iterating on generation no longer stacks up copies of the same set. */
     if (draft.mode === 'replace' && BB.state.questionHub.config) {
-      BB.libraries.save(
-        'Before AI generation - ' + new Date().toLocaleString(),
-        BB.state.questionHub.config);
+      BB.libraries.autoBackup(BB.state.questionHub.config, 'Backup before generating');
     }
 
     postGenerate(buildGeneratePayload(draft)).then(function (data) {
