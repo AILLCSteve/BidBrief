@@ -138,6 +138,26 @@
     return entry;
   }
 
+  /**
+   * Keep a set the user actually adopted, automatically.
+   *
+   * The backend question config lives on an ephemeral filesystem, so a deploy
+   * or restart resets it to the bundled sample set — silently losing whatever
+   * the user generated. Every adopted set is therefore remembered here, in the
+   * browser, where a server restart cannot touch it. Deduplicated by content so
+   * re-applying the same set never stacks copies, and NOT capped like an auto
+   * backup: this is the user's own work.
+   */
+  function remember(config, label) {
+    if (!config || !((config.sections || []).length)) return null;
+    var print = fingerprint(config);
+    var existing = read().filter(function (lib) {
+      return (lib.fingerprint || fingerprint(lib.config)) === print;
+    })[0];
+    if (existing) return existing;
+    return save((label || 'Your set') + ' · ' + describe(config) + ' · ' + shortStamp(), config);
+  }
+
   function list() { return read(); }
 
   function get(id) {
@@ -214,7 +234,8 @@
 
   BB.libraries = {
     list: list, get: get, save: save, remove: remove,
-    autoBackup: autoBackup, seedStarterOnce: seedStarterOnce, tidyOnce: tidyOnce,
+    autoBackup: autoBackup, remember: remember,
+    seedStarterOnce: seedStarterOnce, tidyOnce: tidyOnce,
     fingerprint: fingerprint, describe: describe,
     MAX_AUTO_BACKUPS: MAX_AUTO_BACKUPS
   };

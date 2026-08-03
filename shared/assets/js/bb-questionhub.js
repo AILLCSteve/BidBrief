@@ -102,6 +102,17 @@
     });
     BB.state.questionHub.config = cfg;
     BB.state.setConfirmed(true);
+
+    /* Auto-save it. The backend config lives on an ephemeral filesystem, so a
+       deploy resets it to the bundled sample set and the user's generated set
+       would silently vanish. Remembering it here means it is always one tap
+       away in Libraries, with no manual "save" step. Deduplicated by content,
+       so re-applying the same set never creates copies. */
+    try {
+      if (BB.libraries && BB.libraries.remember) {
+        BB.libraries.remember(cfg, 'Your question set');
+      }
+    } catch (e) { /* never block adopting a set on a storage hiccup */ }
   }
 
   /** The backend always physically holds a set; adopting it is the user's call. */

@@ -140,6 +140,14 @@ def _cell(value: Any) -> str:
     return str(value)
 
 
+# A reasoning model over a full document's answers is a slow call; 150s was
+# tight enough that a large run could time out and silently lose the tab.
+DI_TIMEOUT_SECONDS = 300.0
+
+# Retry once with a smaller evidence window before giving up.
+DI_RETRY_EVIDENCE_CHARS = 25000
+
+
 class DynamicIntelligenceEngine:
     """One AI call: evidence in, document-specific tables out. Failure-safe."""
 
@@ -172,7 +180,7 @@ class DynamicIntelligenceEngine:
                         context_label=context_label, focus_note=focus_block, evidence=evidence)},
                 ],
                 response_format={'type': 'json_object'},
-                timeout=150.0,
+                timeout=DI_TIMEOUT_SECONDS,
                 **completion_params(self.model, 6000, temperature=0.2),
             )
             raw = json.loads(response.choices[0].message.content)
@@ -183,13 +191,31 @@ class DynamicIntelligenceEngine:
             )
             return result
         except Exception as e:
-            logger.error(f'[DynamicIntel] Failed ({context_label}): {e}')
-            return {'intelligence_focus': '', 'tables': []}
+            # Report the reason. Returning a bare empty result made a missing
+            # Document Intelligence tab undiagnosable without server logs.
+            logger.error(f'[DynamicIntel] Failed ({context_label}): '
+                         f'{type(e).__name__}: {e}', exc_info=True)
+            return {'intelligence_focus': '', 'tables': [],
+                    'error': f'{type(e).__name__}: {e}'}
 
     def generate_sync(self, *args, **kwargs) -> Dict[str, Any]:
-        """For sync callers (analysis/scraper worker threads). New event loop per call."""
+        """For sync callers (analysis/scraper worker threads). New event loop per call.
+
+        Retries ONCE with a smaller evidence window: a timeout or a truncated
+        response on a big document should not cost the whole tab.
+        """
         loop = asyncio.new_event_loop()
         try:
-            return loop.run_until_complete(self.generate(*args, **kwargs))
+            result = loop.run_until_complete(self.generate(*args, **kwargs))
+            if not (result.get('tables') or []):
+                logger.warning('[DynamicIntel] First pass produced nothing — '
+                               'retrying with a smaller evidence window')
+                kwargs['max_evidence_chars'] = DI_RETRY_EVIDENCE_CHARS
+                retry = loop.run_until_complete(self.generate(*args, **kwargs))
+                if retry.get('tables'):
+                    return retry
+                # Keep whichever error is more informative.
+                result.setdefault('error', retry.get('error', ''))
+            return result
         finally:
             loop.close()

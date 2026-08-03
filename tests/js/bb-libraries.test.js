@@ -173,3 +173,49 @@ test('the Sample Set is not seeded when that exact set is already saved', () => 
   assert.strictEqual(seeded, null, 'seeding must not create a duplicate of a stored set');
   assert.strictEqual(BB.libraries.list().length, 1);
 });
+
+// ---- generated sets save themselves (2.5.7) --------------------------------
+// The backend question config lives on an ephemeral filesystem, so a deploy
+// resets it to the bundled sample set. Without an automatic client-side save
+// the user's generated set vanished and the hub "reverted to the 10 sections".
+
+test('remember() keeps an adopted set without the user saving it', () => {
+  const { BB } = loadModules(MODULES, { localStorage: fakeStorage() });
+  const entry = BB.libraries.remember(SET_A, 'Your question set');
+  assert.ok(entry, 'an adopted set must be stored automatically');
+  assert.strictEqual(BB.libraries.list().length, 1);
+  assert.match(entry.name, /^Your question set · 1 section · 2 questions · /);
+  assert.strictEqual(entry.auto, false, 'the user\'s own set is not a capped auto backup');
+});
+
+test('re-adopting the same set never creates a second copy', () => {
+  const { BB } = loadModules(MODULES, { localStorage: fakeStorage() });
+  for (let i = 0; i < 4; i += 1) BB.libraries.remember(SET_A, 'Your question set');
+  assert.strictEqual(BB.libraries.list().length, 1);
+});
+
+test('remembered sets are never dropped by the auto-backup cap', () => {
+  const { BB } = loadModules(MODULES, { localStorage: fakeStorage() });
+  BB.libraries.remember(SET_A, 'Your question set');
+  for (let i = 0; i < 6; i += 1) {
+    BB.libraries.autoBackup(
+      { sections: [{ section_id: 'x' + i, section_name: 'X' + i,
+                     questions: [{ text: 'q' + i }] }] }, 'Backup');
+  }
+  const kept = plain(BB.libraries.list()).filter((l) => !l.auto);
+  assert.strictEqual(kept.length, 1, 'the user set must survive the cap');
+  assert.match(kept[0].name, /Your question set/);
+});
+
+test('an empty set is never remembered', () => {
+  const { BB } = loadModules(MODULES, { localStorage: fakeStorage() });
+  assert.strictEqual(BB.libraries.remember({ sections: [] }, 'x'), null);
+  assert.strictEqual(BB.libraries.remember(null, 'x'), null);
+});
+
+test('questionHub.apply auto-saves the set it adopts', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync('shared/assets/js/bb-questionhub.js', 'utf8');
+  assert.match(src, /BB\.libraries\.remember\(cfg/,
+    'apply() must remember every adopted set - generation, library apply and upload all go through it');
+});

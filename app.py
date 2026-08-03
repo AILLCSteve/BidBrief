@@ -519,6 +519,25 @@ def _analysis_intel_evidence(legacy_result: dict, orchestrator, doc_context: str
         except Exception:
             pass
 
+    # Compress each answer before it becomes evidence. The engine truncates the
+    # whole payload at a fixed size, so verbose answers meant only the first
+    # fraction of the document's questions ever reached the model. Strip the
+    # citation markers and the [VISUAL CONTENT] blocks — their substance is
+    # already stated in the answer text — collapse whitespace, and cap each
+    # answer. Breadth across every question beats depth on a handful.
+    # NOTE: this shortens ONLY the prompt string built here. It returns a new
+    # string and never writes back — the stored answer, the results payload,
+    # the Excel export and the UI all keep the full text.
+    import re as _re
+
+    def _compact_answer(text: str, limit: int = 700) -> str:
+        text = _re.sub(r'\[VISUAL CONTENT.*?\[END VISUAL CONTENT\]',
+                       ' [from a drawing/map] ', text or '', flags=_re.S)
+        text = _re.sub(r'<PDF pg [^>]*>', '', text)
+        text = _re.sub(r'<VIS pg [^>]*>', '', text)
+        text = _re.sub(r'\s+', ' ', text).strip()
+        return text if len(text) <= limit else text[:limit] + '…'
+
     qa_lines = []
     for section in legacy_result.get('sections', []):
         for q in section.get('questions', []):
@@ -527,7 +546,7 @@ def _analysis_intel_evidence(legacy_result: dict, orchestrator, doc_context: str
                 suffix = f' (pages {pages})' if pages else ''
                 qa_lines.append(
                     f"[{section.get('section_name', '')}] Q: {q.get('question', '')}\n"
-                    f"A: {q.get('answer', '')}{suffix}"
+                    f"A: {_compact_answer(q.get('answer', ''))}{suffix}"
                 )
     if qa_lines:
         parts.append('ANSWERED QUESTIONS:\n\n' + '\n\n'.join(qa_lines))
@@ -536,18 +555,48 @@ def _analysis_intel_evidence(legacy_result: dict, orchestrator, doc_context: str
 
 
 def _generate_analysis_dynamic_intel(legacy_result: dict, orchestrator, doc_context: str,
-                                     api_key: str, model: str, label: str) -> dict:
-    """Failure-safe dynamic intelligence pass over completed analysis results."""
+                                     api_key: str, model: str, label: str,
+                                     emit=None) -> dict:
+    """Dynamic intelligence pass over completed analysis results.
+
+    Still failure-safe — an analysis must never die here — but NO LONGER SILENT.
+    Every outcome reports itself: swallowing the reason twice (here and in the
+    engine) made a missing Document Intelligence tab impossible to diagnose
+    without server logs.
+    """
+    def _emit(event, data):
+        if emit:
+            try:
+                emit(event, data)
+            except Exception:
+                pass
+
     try:
         from services.dynamic_intelligence import DynamicIntelligenceEngine
         evidence = _analysis_intel_evidence(legacy_result, orchestrator, doc_context)
         if not evidence.strip():
-            return {'intelligence_focus': '', 'tables': []}
+            logger.error('[DynamicIntel] No evidence to work from — skipping')
+            _emit('dynamic_intel_failed', {'reason': 'no_evidence'})
+            return {'intelligence_focus': '', 'tables': [],
+                    'error': 'No answered questions to build tables from.'}
+
+        _emit('dynamic_intel_start', {'evidence_chars': len(evidence), 'model': model})
         engine = DynamicIntelligenceEngine(api_key, model=model)
-        return engine.generate_sync(context_label=label, evidence=evidence)
+        result = engine.generate_sync(context_label=label, evidence=evidence)
+
+        tables = result.get('tables') or []
+        if tables:
+            _emit('dynamic_intel_complete', {'tables': len(tables)})
+        else:
+            reason = result.get('error') or 'the model returned no tables'
+            logger.error(f'[DynamicIntel] Produced NO tables ({label}): {reason}')
+            _emit('dynamic_intel_failed', {'reason': reason})
+            result.setdefault('error', reason)
+        return result
     except Exception as e:
-        logger.error(f'Dynamic intelligence generation failed: {e}')
-        return {'intelligence_focus': '', 'tables': []}
+        logger.error(f'Dynamic intelligence generation failed: {e}', exc_info=True)
+        _emit('dynamic_intel_failed', {'reason': f'{type(e).__name__}: {e}'})
+        return {'intelligence_focus': '', 'tables': [], 'error': f'{type(e).__name__}: {e}'}
 
 
 def _attach_dynamic_intel(legacy_result, session_id):
@@ -1152,7 +1201,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.6'
+        'version': '2.5.7'
     })
 
 @app.route('/pics/<path:filename>')
@@ -1678,9 +1727,12 @@ def analyze_document():
                     doc_ctx_for_intel = (active_analyses.get(session_id) or {}).get('doc_context', '')
                 dynamic_intel = _generate_analysis_dynamic_intel(
                     legacy_result, orchestrator, doc_ctx_for_intel, openai_key, analysis_model,
-                    f'Full document analysis of {pdf_filename} (mode: {analysis_mode})')
+                    f'Full document analysis of {pdf_filename} (mode: {analysis_mode})',
+                    emit=progress_callback)
                 legacy_result['dynamic_tables'] = dynamic_intel.get('tables', [])
                 legacy_result['intelligence_focus'] = dynamic_intel.get('intelligence_focus', '')
+                if dynamic_intel.get('error'):
+                    legacy_result['intelligence_error'] = dynamic_intel['error']
                 analysis_results[session_id]['dynamic_tables'] = legacy_result['dynamic_tables']
                 analysis_results[session_id]['intelligence_focus'] = legacy_result['intelligence_focus']
 
