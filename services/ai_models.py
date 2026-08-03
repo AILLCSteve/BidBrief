@@ -7,8 +7,16 @@ Two tiers:
                via a `high_power: true` body flag on the AI feature endpoints.
 
 Both are env-overridable so model bumps or rollbacks are a Render env change:
-  BIDBRIEF_MODEL_STANDARD    (default: gpt-5.4)
-  BIDBRIEF_MODEL_HIGH_POWER  (default: gpt-5.5)
+  BIDBRIEF_MODEL_STANDARD    (default: gpt-5.6-terra)
+  BIDBRIEF_MODEL_HIGH_POWER  (default: gpt-5.6-sol)
+
+Why the GPT-5.6 family (2026-08-02): Terra is cheaper than the gpt-5.4 it
+replaces ($2/$12 vs $2.50/$15 per Mtok) AND scores above gpt-5.5 on vision;
+Sol costs exactly what gpt-5.5 cost ($5/$30) and is the strongest vision model
+OpenAI has shipped (object detection 46.2 mAP@50 vs 13.8 for gpt-5.5) — which
+is what the Layer 0.5 visual pass reads drawings and maps with. Both keep the
+400K-context GPT-5 budget in TokenOptimizer and the reasoning-model parameter
+shape below, so the swap is configuration, not code.
 
 Why this module exists (do not bypass it):
 GPT-5.x are reasoning models. In Chat Completions they REJECT `max_tokens`,
@@ -39,11 +47,11 @@ _MAX_COMPLETION_CAP = 128000
 
 
 def standard_model() -> str:
-    return os.environ.get('BIDBRIEF_MODEL_STANDARD', 'gpt-5.4')
+    return os.environ.get('BIDBRIEF_MODEL_STANDARD', 'gpt-5.6-terra')
 
 
 def high_power_model() -> str:
-    return os.environ.get('BIDBRIEF_MODEL_HIGH_POWER', 'gpt-5.5')
+    return os.environ.get('BIDBRIEF_MODEL_HIGH_POWER', 'gpt-5.6-sol')
 
 
 def resolve_model(high_power: bool = False) -> str:

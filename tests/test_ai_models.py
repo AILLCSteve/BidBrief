@@ -15,13 +15,17 @@ from services.ai_models import (
 )
 
 
-def test_default_tiers():
-    assert standard_model() == 'gpt-5.4'
-    assert high_power_model() == 'gpt-5.5'
-    assert resolve_model(False) == 'gpt-5.4'
-    assert resolve_model(True) == 'gpt-5.5'
-    assert model_tier('gpt-5.5') == 'high_power'
-    assert model_tier('gpt-5.4') == 'standard'
+def test_default_tiers(monkeypatch):
+    # Delete the overrides first: a machine that sets these in its own env
+    # would otherwise fail a test about the built-in defaults.
+    monkeypatch.delenv('BIDBRIEF_MODEL_STANDARD', raising=False)
+    monkeypatch.delenv('BIDBRIEF_MODEL_HIGH_POWER', raising=False)
+    assert standard_model() == 'gpt-5.6-terra'
+    assert high_power_model() == 'gpt-5.6-sol'
+    assert resolve_model(False) == 'gpt-5.6-terra'
+    assert resolve_model(True) == 'gpt-5.6-sol'
+    assert model_tier('gpt-5.6-sol') == 'high_power'
+    assert model_tier('gpt-5.6-terra') == 'standard'
 
 
 def test_env_override(monkeypatch):
@@ -34,6 +38,11 @@ def test_env_override(monkeypatch):
 def test_reasoning_detection():
     assert is_reasoning_model('gpt-5.4')
     assert is_reasoning_model('gpt-5.5')
+    # The 5.6 family keeps the gpt-5 prefix, so the named tiers must still be
+    # routed to max_completion_tokens/reasoning_effort - never temperature.
+    assert is_reasoning_model('gpt-5.6-sol')
+    assert is_reasoning_model('gpt-5.6-terra')
+    assert is_reasoning_model('gpt-5.6-luna')
     assert is_reasoning_model('o3')
     assert not is_reasoning_model('gpt-4o')
     assert not is_reasoning_model('gpt-4o-mini')
