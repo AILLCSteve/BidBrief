@@ -4,6 +4,45 @@
 > pages), the results screen rebuilt as the Excel workbook, and the admin Session Dashboard
 > brought in-app with per-session Excel export. iOS untouched this round.**
 
+## 2.5.0 — Durable session storage (Neon) — backend only
+
+Setup + design: **`docs/PERSISTENCE.md`**. Nothing about this appears in the user UI
+(deliberate: admin/backend concern only).
+
+Server state used to live in one worker's memory, so every deploy wiped logins,
+entitlements and every completed analysis. Now memory stays the hot path and Postgres
+is the durable mirror.
+
+- **`services/persistence.py` (NEW)** — schema bootstrap, pooled connections, repo
+  functions. **Without `DATABASE_URL` every call is a no-op and the app is unchanged**;
+  every operation is failure-safe so a Neon outage can never fail an analysis or a login.
+- **Analyses persist as a JSON snapshot**, not the orchestrator (which cannot be
+  serialized). The snapshot holds the legacy result payload, statistics, key details,
+  document type and BestPrep data — enough for `/api/results`, the Excel/CSV exports AND
+  Smart Analysis to work on a restored session, because those paths consume the dict, not
+  the orchestrator. Second pass / Deep RAG need the live cached windows and refuse with a
+  clear 409.
+- **Also durable**: signed-in sessions, Bonus grants, beta testers and their spent quota,
+  cached Smart Analysis results (never re-billed after a restart), and the free-beta switch
+  (which no longer reverts to `BETA_LOGIN_ENABLED` on deploy).
+- **In-flight analyses** are marked `interrupted` at boot — their worker thread died with
+  the previous process, so a run that can never resume now says so.
+- Recovered rows **fold into the existing admin buckets** with `restored: true` rather than
+  adding a fifth bucket: those four names are the contract the iOS dashboard decodes.
+- `requirements.txt` gains `psycopg[binary]` + `psycopg-pool`.
+
+**Env vars (Render):** `DATABASE_URL` (pooled Neon string — the on/off switch),
+optional `BIDBRIEF_DB_RETENTION_DAYS` (90), `BIDBRIEF_DB_POOL_MAX` (4).
+**Verify:** `DATABASE_URL='...' python -m services.persistence` round-trips the schema;
+after deploy, `/api/admin/sessions` → `diagnostics.persistence` (admin-only, never on the
+public `/health`).
+
+**Verified:** `pytest -q` → **194 passed** (+18); `node --test` → **115 passed**; boot with
+no `DATABASE_URL` confirmed unchanged. **A live Neon round-trip has NOT been run — that
+needs your connection string** (see the one-command self-check above).
+
+> Previous round (2.4.1) below.
+
 ## 2.4.1 — Visual evidence woven INTO HOTDOG + GPT-5.6 model tiers
 
 **Model tiers moved a generation forward** (configuration, not code — both IDs keep the

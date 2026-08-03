@@ -128,6 +128,12 @@ or the cue sticks on Questions forever.
 17. **Provenance must be trustworthy.** `extract_visual_sources` only accepts
     marker pages the vision pass actually analyzed (`allowed_pages`), so a
     hallucinated marker cannot invent a graphic. Never relax that bound.
+18. **Automatic library backups are deduplicated by content.** Pre-generation
+    snapshots go through `BB.libraries.autoBackup`, which skips the save when an
+    identical set is already stored and caps auto entries at
+    `MAX_AUTO_BACKUPS`. Calling `save()` directly for an automatic snapshot is
+    what produced four or five copies of the same stock set, each named with a
+    raw timestamp. User-saved libraries are never deduplicated or capped.
 14. **The results screen mirrors the Excel workbook (2.4.0).** `sheetList()`
     owns which tabs a payload earns; Executive Summary/Detailed Results/By
     Section/Footnotes are always present, Document Intelligence and Visual
