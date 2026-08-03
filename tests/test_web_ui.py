@@ -38,10 +38,10 @@ def _auth(client, role='user', username='webtester'):
         return {'Cookie': f'bidbrief_auth={token}'}
 
 
-def test_health_reports_2_3_0(client):
+def test_health_reports_2_4_0(client):
     resp = client.get('/health')
     assert resp.status_code == 200
-    assert resp.get_json()['version'] == '2.3.0'
+    assert resp.get_json()['version'] == '2.4.0'
 
 
 @pytest.mark.parametrize('name', [
@@ -76,11 +76,17 @@ def test_pages_use_the_truly_transparent_logos(client, page):
 MODULE_OWNERSHIP = {
     'bb-engine.js': ['BB.engine =', 'startPolling', 'fetchResults'],
     'bb-status.js': ['BB.status =', 'WINDOW_BAND_SPAN'],
-    'bb-analyze.js': ['BB.analyze =', 'buildAnalyzePayload'],
+    'bb-analyze.js': ['BB.analyze =', 'buildAnalyzePayload', 'enable_visual_analysis'],
     'bb-progress.js': ['BB.progress =', 'phaseTrack'],
-    'bb-results.js': ['BB.results =', 'answer_summary'],
+    # 2.4.0: the results screen IS the Excel workbook (sheet tabs), including
+    # the Visual Intelligence sheet fed by the opt-in vision pass.
+    'bb-results.js': ['BB.results =', 'answer_summary', 'sheetList',
+                      'Executive Summary', 'Visual Intelligence', 'visual_findings'],
     'bb-scraper.js': ['BB.scraper =', '/api/scraper/research'],
-    'bb-admin.js': ['BB.admin =', 'entriesFor', '/api/admin/beta', 'betaSummaryText'],
+    # 2.4.0: the session dashboard lives in-app (no more legacy new-tab page)
+    # and every session row carries a mode-aware Excel export.
+    'bb-admin.js': ['BB.admin =', 'entriesFor', '/api/admin/beta', 'betaSummaryText',
+                    '/api/admin/sessions', 'exportUrlFor', '/api/export/bestprep-excel/'],
     'bb-settings.js': ['BB.settings =', '/auth/logout'],
     'bb-questionhub.js': ['BB.questionHub =', 'buildSaveBody'],
     'bb-qgen.js': ['BB.qgen =', 'context_file'],
@@ -103,6 +109,8 @@ def test_js_modules_are_served_and_own_their_responsibilities(client, filename, 
     ('/shared/assets/js/bb-ui.js', 'BB.ui ='),
     ('/shared/assets/css/bb-orb.css', '.bb-orb-planet'),
     ('/shared/assets/js/bb-orb.js', 'starPoints'),
+    ('/shared/assets/css/bb-screens.css', '.bb-sheet-tabs'),
+    ('/shared/assets/css/bb-screens.css', '.bb-visual-finding'),
 ])
 def test_design_system_assets_served(client, path, needle):
     resp = client.get(path)

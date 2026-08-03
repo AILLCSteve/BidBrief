@@ -1,4 +1,4 @@
-# BidBrief Web Front-End (2.3.0)
+# BidBrief Web Front-End (2.4.0)
 
 The web app was rebuilt in 2.2.0 to match the BidBrief iOS app's visual language
 and information architecture. This is the map of what owns what, and the
@@ -41,11 +41,11 @@ index.html
 | `js/bb-engine.js` | `BB.engine` — the pipeline client: upload, analyze, event polling, results fetch with backoff, stop, second pass / RAG, Smart Analysis. **No DOM rendering.** |
 | `js/bb-analyze.js` | `BB.analyze` — idle / uploading / configure stages and `buildAnalyzePayload` |
 | `js/bb-progress.js` | `BB.progress` — orb ring, phase track, Live Activity popup |
-| `js/bb-results.js` | `BB.results` — overview / sections / key details / intelligence / improve / exports / table, plus CSV + HTML export and the Smart Analysis renderer |
+| `js/bb-results.js` | `BB.results` — the results WORKBOOK (2.4.0): sheet tabs mirroring the Excel export (Executive Summary / Detailed Results / By Section / Document Intelligence / Visual Intelligence / Footnotes) plus the improve + exports layers, CSV/HTML export and the Smart Analysis renderer |
 | `js/bb-questionhub.js` | `BB.questionHub` — hub menu, sections, questions, question edit, libraries stage, load/save |
 | `js/bb-qgen.js` | `BB.qgen` — the Create / Add Question Set screen and `buildGeneratePayload` |
 | `js/bb-libraries.js` | `BB.libraries` — localStorage snapshots + the one-time Starter Set seed |
-| `js/bb-admin.js` | `BB.admin` — admin/bonus hub, the Bonus Features manager, and the Free Beta manager (switch, testers, quotas, per-tester sessions) |
+| `js/bb-admin.js` | `BB.admin` — admin/bonus hub, the in-app Session Dashboard (2.4.0: buckets, View results, mode-aware Excel export, Stop), the Bonus Features manager, and the Free Beta manager (switch, testers, quotas, per-tester sessions) |
 | `js/bb-login.js` | `BB.login` — the sign-in page: orb mount, `?error=` copy, and the Free Beta Testing button + terms modal |
 | `js/bb-settings.js` | `BB.settings` |
 | `js/bb-scraper.js` | `BB.scraper` — CityScraper on glass |
@@ -110,6 +110,24 @@ or the cue sticks on Questions forever.
     state; the admin toggle overrides it in memory. Everything in this process is
     wiped on a Render deploy, so the env var is what survives — if free beta must
     stay open across deploys, it has to be set there, not just toggled in the UI.
+13. **Visual Intelligence is ADDITIVE and opt-in (2.4.0).** The configure-stage
+    toggle sends `enable_visual_analysis`; off (the default) leaves the pipeline
+    byte-identical. Never make the vision pass replace, gate, or re-prompt the
+    standard text analysis — it only appends `[VISUAL CONTENT]` blocks to page
+    text and collects `visual_findings` for the results workbook + Excel sheet.
+    Old cached results lack `visual_findings` — every reader must tolerate its
+    absence.
+14. **The results screen mirrors the Excel workbook (2.4.0).** `sheetList()`
+    owns which tabs a payload earns; Executive Summary/Detailed Results/By
+    Section/Footnotes are always present, Document Intelligence and Visual
+    Intelligence only when their data exists. New result surfaces should be a
+    sheet in BOTH the web workbook and `services/excel_dashboard.py`, not one
+    or the other.
+15. **The Session Dashboard lives in-app.** `bb-admin.js` renders it from
+    `/api/admin/sessions` on the design system; every session row carries the
+    mode-aware Excel export (`exportUrlFor`: bestprep → bestprep-excel, else
+    excel-dashboard). The legacy `/admin/sessions` page still answers but
+    nothing links to it — don't reintroduce the `window.open` escape hatch.
 
 ## Tests
 

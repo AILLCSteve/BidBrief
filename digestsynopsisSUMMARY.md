@@ -1047,3 +1047,34 @@ document quota. **iOS untouched.** Full detail: `HANDOFF.md` § 2.3.0, `docs/WEB
    login; `format_session_info` + `_snapshot_sessions_by_bucket` lifted to module scope so the beta
    dashboard and `/api/admin/sessions` serve identical session rows (the shape iOS decodes).
 7. `/health` → **2.3.0**. Suite: **130 passed** (was 106); JS: **97 passed** (was 85).
+
+---
+
+## Δ 2026-08-02 — Visual Intelligence, results-as-workbook, in-app admin dashboard (2.4.0)
+
+Web app only; iOS untouched and unaffected (it never sends the new flag; its results decode
+ignores unknown keys). Full detail: `HANDOFF.md` § 2.4.0, `docs/WEB_FRONTEND.md` invariants 13–15.
+
+1. **Layer 0.5 — Visual Intelligence** (`services/hotdog/visual_intelligence.py`, NEW; opt-in via
+   `enable_visual_analysis` on `/api/analyze`). Heuristic page selection (raster coverage + vector
+   path density + text sparsity; pure `score_page` fn; cap `BIDBRIEF_VISUAL_MAX_PAGES`=25) →
+   pages rendered ≤1568px → vision call through `completion_params` (`BIDBRIEF_MODEL_VISION`
+   overrides the model) → each finding appends a `[VISUAL CONTENT]` block to the page text
+   BEFORE `create_windows`, so experts cite drawing/map/photo content as normal `<PDF pg X>`
+   answers. **ADDITIVE ONLY + failure-safe**: flag off ⇒ byte-identical pipeline; any error ⇒
+   `visual_scan_failed` event, analysis continues. Findings list `visual_findings`
+   {page, kind, title, description, extracted_text, key_facts, confidence} rides
+   `get_browser_output`/`_build_partial_browser_output` → legacy payload → `/api/results` +
+   `results_ready` + Excel export. Events: `visual_scan_start/visual_page_complete/
+   visual_scan_complete/visual_scan_failed`.
+2. **excel_dashboard.py** gains a **Visual Intelligence** sheet (after Document Intelligence,
+   only when findings exist). The web HTML report gains the same table.
+3. **Web results screen = the Excel workbook** (`bb-results.js` rebuilt): glass sheet tabs —
+   Executive Summary / Detailed Results / By Section / Document Intelligence / Visual
+   Intelligence / Footnotes (`sheetList()` gates the conditional two). Improve + Exports/Smart
+   Analysis remain separate layers; `BB.results` helper API unchanged (bb-admin depends on it).
+4. **Admin Session Dashboard in-app** (`bb-admin.js`): renders `/api/admin/sessions` on the
+   design system (buckets, View results modal, **mode-aware per-session Excel export restored**,
+   Stop for active). Legacy `/admin/sessions` page unlinked but still served.
+5. `/health` → **2.4.0**. Suite: **149 passed** (was 130); JS: **110 passed** (was 97).
+   Chromium walkthrough green, zero console errors, 1280px + 390px.

@@ -1,7 +1,67 @@
 # HANDOFF — BidBrief (Flask backend + web front-end)
 
-> Updated: 2026-07-27 — **2.3.0: Free Beta Testing — a one-click trial login on the web sign-in
-> page, an admin panel to run it, and a 5-document quota per tester. iOS untouched this round.**
+> Updated: 2026-08-02 — **2.4.0: Visual Intelligence (opt-in vision pass over drawing/map/photo
+> pages), the results screen rebuilt as the Excel workbook, and the admin Session Dashboard
+> brought in-app with per-session Excel export. iOS untouched this round.**
+
+## 2.4.0 — Visual Intelligence + results workbook + in-app session dashboard (this round)
+
+Plan: `docs/superpowers/plans/2026-08-02-visual-intelligence-results-workbook-admin.md`.
+Front-end invariants 13–15 are new: **`docs/WEB_FRONTEND.md`**.
+
+1. **Layer 0.5 — Visual Intelligence** (`services/hotdog/visual_intelligence.py`, NEW). Opt-in
+   (`enable_visual_analysis` on `/api/analyze`, the "Analyze drawings, maps & images" switch on
+   the web configure stage). A zero-AI-cost heuristic scores every page (raster coverage via
+   `get_image_rects`, vector path density via `get_drawings`, text sparsity), the top pages
+   (cap `BIDBRIEF_VISUAL_MAX_PAGES`, default 25) are rendered ≤1568px and sent to the vision
+   model (`BIDBRIEF_MODEL_VISION` overrides; defaults to the analysis model) through
+   `completion_params`. Each finding appends a `[VISUAL CONTENT]` block to the page text BEFORE
+   windows are built — the L3 experts read it inside normal windows and cite `<PDF pg X>`
+   naturally — and is collected as `visual_findings` for results + exports. **ADDITIVE ONLY:
+   with the box off the pipeline is byte-identical; every failure is non-fatal**
+   (`visual_scan_failed` event, analysis continues).
+2. **Findings surfaces**: `visual_findings` rides `get_browser_output` /
+   `_build_partial_browser_output` → `_transform_to_legacy_format` → `/api/results` (all four
+   session types), `results_ready`, and the Excel export, which gains a **Visual Intelligence
+   sheet** (Page / Type / Title / What It Shows / Labels & Callouts / Key Facts). The HTML
+   report gains the same table. Progress events `visual_scan_start/page_complete/complete/
+   failed` narrate under the 12% window band (`bb-status.js`).
+3. **Results = the Excel workbook** (`bb-results.js` rebuilt): sheet tabs on glass —
+   Executive Summary (stats + Key Document Details in the Excel order/labels), Detailed
+   Results (#/Section/Question/Answer/Answer Summary/PDF Pages/FN/Status), By Section
+   (header bands with rates), Document Intelligence, Visual Intelligence, Footnotes —
+   `sheetList()` decides which tabs a payload earns. Improve Results and Exports & Smart
+   Analysis remain their own layers. The public helper API (`summarize/flatten/...`, used by
+   bb-admin) is unchanged.
+4. **Admin Session Dashboard in-app** (`bb-admin.js`): the hub entry renders on the design
+   system instead of opening the legacy page — summary line, Refresh, lifecycle buckets,
+   and per-session **View results / mode-aware Excel export (restored) / Stop**. The legacy
+   `/admin/sessions` route still answers; nothing links to it.
+5. `/health` → **2.4.0** (the FIRST `/health` route — the second registration is dead code).
+
+**Verified:** `pytest -q` → **149 passed** (was 130; +19 in `tests/test_visual_intelligence.py`);
+`node --test tests/js/*.test.js` → **110 passed** (was 97; +13 in `bb-visual-workbook.test.js`);
+page-selection heuristic exercised against a real PyMuPDF-built PDF (drawing page picked, text
+page skipped); full Chromium walkthrough (login → configure toggle → payload flag → all six
+workbook sheets → in-app session dashboard → 390px) — **zero console errors**.
+
+**What only the user can verify (first real run):**
+1. **A live vision call on production** — no OpenAI key exists on this dev machine, so
+   gpt-5.4/5.5 accepting `image_url` content was not exercised end-to-end. The layer is
+   failure-safe (worst case: `visual_scan_failed`, standard analysis unaffected). If the
+   model family rejects images, set `BIDBRIEF_MODEL_VISION` on Render to a vision-capable
+   model — no deploy needed.
+2. Cost/latency of a real visual run on a drawing-heavy spec (25-page cap ≈ bounded; tune
+   `BIDBRIEF_VISUAL_MAX_PAGES` on Render if needed).
+3. The workbook view against a real completed analysis (synthetic payloads exercised every
+   sheet, but not a live 100-question run).
+
+> **iOS note:** the web results view now presents as a workbook while iOS 2.1.3 keeps the
+> staged results UX, and iOS does not send `enable_visual_analysis` (Swift Codable ignores
+> unknown keys, so the new `visual_findings` field is invisible to its decoder). The user
+> deliberately deferred the iOS port of 2.4.0.
+
+> Previous round (2.3.0) below.
 
 ## 2.3.0 — Free Beta Testing (this round)
 
