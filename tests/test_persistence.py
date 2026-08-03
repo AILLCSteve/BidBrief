@@ -443,3 +443,68 @@ class TestNoUserFacingExposure:
                 if any(word in low for word in banned):
                     offenders.append(f'{path.name}: {stripped[:80]}')
         assert not offenders, 'user-facing assets leak persistence wording: ' + str(offenders)
+
+
+class TestTimezoneAwareSessionsCannotBreakAuth:
+    """The 2.5.2 outage: enabling DATABASE_URL made every page return
+    {"error":"An unexpected error occurred..."}.
+
+    Postgres TIMESTAMPTZ round-trips as a timezone-AWARE datetime. Restored auth
+    sessions carried one, check_auth_cookie compared it to a naive
+    datetime.now(), and the TypeError reached the global exception handler — so
+    one bad datetime 500'd every authenticated request on the site.
+    """
+
+    @pytest.fixture
+    def client(self):
+        from app import app
+        app.config['TESTING'] = False
+        with app.test_client() as c:
+            yield c
+
+    def _session(self, expires_at):
+        from app import active_sessions
+        active_sessions['tz-test'] = {
+            'username': 'admin@test.local', 'name': 'Admin', 'role': 'admin',
+            'is_beta': False, 'expires_at': expires_at,
+        }
+
+    def test_an_aware_expiry_no_longer_500s_the_site(self, client):
+        from datetime import timedelta, timezone
+        self._session(datetime.now(timezone.utc) + timedelta(hours=24))
+        client.set_cookie('bidbrief_auth', 'tz-test')
+        assert client.get('/').status_code == 200
+
+    def test_an_expired_aware_session_is_still_rejected(self, client):
+        from datetime import timedelta, timezone
+        self._session(datetime.now(timezone.utc) - timedelta(hours=1))
+        client.set_cookie('bidbrief_auth', 'tz-test')
+        assert client.get('/').status_code in (301, 302), 'must bounce to login'
+
+    def test_an_unreadable_expiry_fails_closed(self, client):
+        """Anything unparseable is treated as expired. An auth check must never
+        take the site down, whatever ends up in the field."""
+        self._session('not-a-datetime')
+        client.set_cookie('bidbrief_auth', 'tz-test')
+        assert client.get('/').status_code in (301, 302)
+
+
+class TestNothingTimezoneAwareEscapesTheStore:
+    def test_naive_local_strips_awareness(self):
+        from datetime import timezone
+        from services.persistence import _naive_local
+        aware = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
+        assert _naive_local(aware).tzinfo is None
+        naive = datetime(2026, 8, 2, 12, 0)
+        assert _naive_local(naive) is naive, 'already-naive values pass through'
+        assert _naive_local(None) is None
+
+    def test_writes_store_explicit_utc(self):
+        from services.persistence import _aware_utc
+        assert _aware_utc(datetime(2026, 8, 2, 12, 0)).tzinfo is not None
+        assert _aware_utc(None) is None
+
+    def test_the_round_trip_preserves_the_instant(self):
+        from services.persistence import _aware_utc, _naive_local
+        moment = datetime(2026, 8, 2, 23, 0, 0)
+        assert _naive_local(_aware_utc(moment)) == moment

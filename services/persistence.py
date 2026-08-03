@@ -139,6 +139,28 @@ def _pool_max() -> int:
         return 4
 
 
+def _naive_local(value):
+    """Postgres TIMESTAMPTZ round-trips as a timezone-AWARE datetime.
+
+    The app compares expiries against a naive datetime.now(), and comparing the
+    two raises TypeError — which, thrown inside the auth check, 500s every
+    authenticated page. So nothing timezone-aware may escape this module: every
+    datetime handed back to the app is converted to naive LOCAL time, matching
+    what the rest of the process uses.
+    """
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.astimezone().replace(tzinfo=None)
+    return value
+
+
+def _aware_utc(value):
+    """Naive local datetimes are stored as explicit UTC, so the value in the
+    database is correct no matter what timezone the host runs in."""
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.astimezone(timezone.utc)
+    return value
+
+
 def _json_default(value):
     """datetimes and stray objects must never break a snapshot write."""
     if isinstance(value, datetime):
@@ -244,7 +266,7 @@ class Store:
             conn.execute(
                 """
                 INSERT INTO bb_analyses
-                    (session_id, owner, pdf_filename, mode, status, completed_at,
+                    (session_id, owner, pdf_filename, mode, status, _aware_utc(completed_at),
                      updated_at, snapshot)
                 VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
                 ON CONFLICT (session_id) DO UPDATE SET
@@ -256,7 +278,7 @@ class Store:
                     updated_at = NOW(),
                     snapshot = EXCLUDED.snapshot
                 """,
-                (session_id, owner, pdf_filename, mode, status, completed_at,
+                (session_id, owner, pdf_filename, mode, status, _aware_utc(completed_at),
                  json.dumps(snapshot, default=_json_default)),
             )
             return True
@@ -317,7 +339,8 @@ class Store:
                 out.append({
                     'session_id': r[0], 'owner': r[1], 'pdf_filename': r[2],
                     'mode': r[3], 'status': r[4],
-                    'created_at': r[5], 'completed_at': r[6],
+                    'created_at': _naive_local(r[5]),
+                    'completed_at': _naive_local(r[6]),
                     'statistics': stats or {},
                 })
             return out
@@ -374,7 +397,7 @@ class Store:
                 ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at
                 """,
                 (token, record.get('username'), record.get('name'), record.get('role'),
-                 bool(record.get('is_beta')), record.get('expires_at')),
+                 bool(record.get('is_beta')), _aware_utc(record.get('expires_at'))),
             )
             return True
         return bool(self._run(_op, default=False, label='save_auth_session'))
@@ -400,7 +423,8 @@ class Store:
                 FROM bb_auth_sessions WHERE expires_at > NOW()
                 """).fetchall()
             return {r[0]: {'username': r[1], 'name': r[2], 'role': r[3],
-                           'is_beta': bool(r[4]), 'expires_at': r[5]} for r in rows}
+                           'is_beta': bool(r[4]), 'expires_at': _naive_local(r[5])}
+                    for r in rows}
         return self._run(_op, default={}, label='load_auth_sessions') or {}
 
     # ---- beta testers --------------------------------------------------------
@@ -416,8 +440,9 @@ class Store:
                     name = EXCLUDED.name, last_seen = EXCLUDED.last_seen,
                     docs_used = EXCLUDED.docs_used, doc_limit = EXCLUDED.doc_limit
                 """,
-                (record.get('username'), record.get('name'), record.get('created_at'),
-                 record.get('last_seen'), int(record.get('docs_used', 0) or 0),
+                (record.get('username'), record.get('name'),
+                 _aware_utc(record.get('created_at')), _aware_utc(record.get('last_seen')),
+                 int(record.get('docs_used', 0) or 0),
                  int(record.get('doc_limit', 0) or 0)),
             )
             return True
@@ -436,9 +461,9 @@ class Store:
                 SELECT username, name, created_at, last_seen, docs_used, doc_limit
                 FROM bb_beta_testers
                 """).fetchall()
-            return [{'username': r[0], 'name': r[1], 'created_at': r[2],
-                     'last_seen': r[3], 'docs_used': r[4] or 0,
-                     'doc_limit': r[5] or 0} for r in rows]
+            return [{'username': r[0], 'name': r[1],
+                     'created_at': _naive_local(r[2]), 'last_seen': _naive_local(r[3]),
+                     'docs_used': r[4] or 0, 'doc_limit': r[5] or 0} for r in rows]
         return self._run(_op, default=[], label='load_beta_testers') or []
 
     # ---- bonus features ------------------------------------------------------

@@ -789,10 +789,24 @@ def check_auth_cookie():
     if not session:
         return None
 
-    # Check expiration
-    if session.get('expires_at') and session['expires_at'] < datetime.now():
-        active_sessions.pop(token, None)
-        return None
+    # Check expiration.
+    # Fails CLOSED and never raises: a session restored from Postgres carries a
+    # timezone-AWARE expiry, and comparing that to a naive datetime.now() throws
+    # TypeError. Thrown here it reaches the global handler and 500s every
+    # authenticated page — i.e. one bad datetime takes the whole site down.
+    # Normalize both sides, and treat anything unreadable as expired.
+    expires_at = session.get('expires_at')
+    if expires_at is not None:
+        try:
+            if getattr(expires_at, 'tzinfo', None) is not None:
+                expires_at = expires_at.astimezone().replace(tzinfo=None)
+            if expires_at < datetime.now():
+                active_sessions.pop(token, None)
+                return None
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Unreadable session expiry ({e}) - treating as expired")
+            active_sessions.pop(token, None)
+            return None
 
     return session
 
@@ -1132,7 +1146,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.2'
+        'version': '2.5.3'
     })
 
 @app.route('/pics/<path:filename>')
