@@ -27,6 +27,7 @@
   };
 
   var path = [];
+  var storageInfo = null;   /* last /api/admin/storage result */
 
   function entriesFor(session) {
     var out = [];
@@ -152,9 +153,50 @@
     loadSessions();
   }
 
+  /** One line telling an admin whether history is really being kept.
+      "Connected but empty" and "not connected at all" look identical from the
+      session list, which is exactly how a silent storage failure hides. */
+  function storageStatusText(info) {
+    var p = (info && info.persistence) || {};
+    var write = (info && info.write_test) || {};
+    var ok = !!(p.enabled && p.reachable && write.ok);
+
+    if (!info || !info.database_url_set) {
+      return { ok: false, text: 'Durable storage OFF — DATABASE_URL is not set on this ' +
+        'server. Sessions live in memory only and are lost on restart.' };
+    }
+    if (!p.enabled) {
+      return { ok: false, text: 'Durable storage FAILED to start — ' +
+        (p.error || 'unknown error') + '. Sessions are in memory only.' };
+    }
+    if (!write.ok) {
+      return { ok: false, text: 'Durable storage connected but NOT writable (' +
+        (write.reason || 'unknown') + (write.error ? ': ' + write.error : '') +
+        '). Nothing is being saved.' };
+    }
+    return { ok: ok, text: 'Durable storage active · ' + (info.stored_analyses || 0) +
+      ' analysis(es) stored · ' + (info.indexed_in_memory || 0) + ' listed here · retention ' +
+      (info.retention || 'indefinite') };
+  }
+
+  function storageLine(info) {
+    if (!info) return null;
+    var status = storageStatusText(info);
+    return ui.el('p', {
+      class: status.ok ? 'bb-caption' : 'bb-beta-quota-full',
+      style: 'margin-top:8px'
+    }, (status.ok ? '● ' : '▲ ') + status.text);
+  }
+
   function loadSessions() {
-    window.fetch('/api/admin/sessions')
+    window.fetch('/api/admin/storage')
       .then(function (r) { return r.json(); })
+      .then(function (info) { storageInfo = info; })
+      .catch(function () { storageInfo = null; })
+      .then(function () {
+        return window.fetch('/api/admin/sessions')
+          .then(function (r) { return r.json(); });
+      })
       .then(function (data) {
         if (!data.success) throw new Error(data.error || 'Could not load');
         paintSessions(data);
@@ -178,7 +220,8 @@
           ui.el('button', {
             class: 'bb-btn-ghost', type: 'button', onclick: loadSessions
           }, '↻  Refresh')
-        ])
+        ]),
+        storageLine(storageInfo)
       ])
     ];
 
@@ -637,6 +680,7 @@
     betaSummaryText: betaSummaryText, quotaText: quotaText,
     sessionMeta: sessionMeta, statusKind: statusKind,
     exportUrlFor: exportUrlFor, sessionGroups: sessionGroups,
+    storageLine: storageLine, storageStatusText: storageStatusText,
     sessionsSummaryText: sessionsSummaryText
   };
 })(typeof window !== 'undefined' ? window : this);

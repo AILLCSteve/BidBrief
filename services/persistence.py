@@ -296,6 +296,25 @@ class Store:
             return json.loads(snapshot) if isinstance(snapshot, str) else snapshot
         return self._run(_op, default=None, label='load_analysis')
 
+    def self_test(self) -> Dict[str, Any]:
+        """Prove the store can actually WRITE and read back, not merely connect.
+
+        'Connected' is not the same as 'working': a wrong database, a read-only
+        role or a failed schema create all still connect. This round-trips a
+        settings row so the admin panel can state plainly whether history is
+        really being kept.
+        """
+        if not self.enabled:
+            return {'ok': False, 'reason': 'disabled', 'error': self.last_error}
+        key = '__write_check__'
+        stamp = datetime.now(timezone.utc).isoformat()
+        if not self.set_setting(key, {'at': stamp}):
+            return {'ok': False, 'reason': 'write_failed', 'error': self.last_error}
+        value = self.get_setting(key) or {}
+        if value.get('at') != stamp:
+            return {'ok': False, 'reason': 'readback_mismatch', 'error': self.last_error}
+        return {'ok': True}
+
     def count_analyses(self) -> int:
         """Total stored analyses — the truth about how much history exists,
         independent of how many the boot index loaded."""

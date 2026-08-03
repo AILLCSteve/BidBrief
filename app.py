@@ -386,6 +386,12 @@ def _restore_persisted_state():
         stored_switch = persistence_store.get_setting('beta_login_enabled')
         if isinstance(stored_switch, bool):
             beta_access.set_enabled(stored_switch)
+        else:
+            # Nothing stored yet: capture the CURRENT state now rather than
+            # waiting for someone to toggle it. Otherwise the very first restart
+            # after enabling the database silently reverts the switch, which
+            # looks exactly like "beta testing did not persist".
+            persistence_store.set_setting('beta_login_enabled', beta_access.enabled)
 
         index = persistence_store.list_analysis_index()
         for row in index:
@@ -1146,7 +1152,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.3'
+        'version': '2.5.4'
     })
 
 @app.route('/pics/<path:filename>')
@@ -3356,6 +3362,10 @@ def admin_storage_status():
     return jsonify({
         'success': True,
         'persistence': health,
+        # A round-trip write, so this answers "is history really being kept?"
+        # rather than only "did a socket open?"
+        'write_test': persistence_store.self_test(),
+        'database_url_set': bool(os.environ.get('DATABASE_URL')),
         'stored_analyses': persistence_store.count_analyses() if health.get('enabled') else 0,
         'indexed_in_memory': len(restored_analyses),
         'index_limit': index_limit(),

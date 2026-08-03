@@ -282,3 +282,33 @@ test('the admin session view mounts the SAME workbook as the user sees', () => {
   assert.strictEqual(typeof BB.results.buildWorkbook, 'function',
     'admin renders sessions through buildWorkbook so the sheets can never diverge');
 });
+
+// ---- storage status must be legible at a glance (2.5.4) --------------------
+// "Connected but empty" and "not connected at all" produce an identical session
+// list, which is exactly how a silent storage failure hides from an admin.
+
+test('storage line names the specific failure, not just "not working"', () => {
+  const { BB } = loadModules(ADMIN_MODULES);
+  const line = (info) => BB.admin.storageStatusText(info).text;
+
+  assert.match(line({ database_url_set: false }), /DATABASE_URL is not set/);
+  assert.match(line({ database_url_set: true, persistence: { enabled: false, error: 'bad password' } }),
+    /FAILED to start .*bad password/);
+  assert.match(line({ database_url_set: true, persistence: { enabled: true, reachable: true },
+                      write_test: { ok: false, reason: 'write_failed', error: 'read-only role' } }),
+    /connected but NOT writable .*read-only role/);
+});
+
+test('a healthy store reports what is actually stored', () => {
+  const { BB } = loadModules(ADMIN_MODULES);
+  const status = BB.admin.storageStatusText({
+    database_url_set: true, persistence: { enabled: true, reachable: true },
+    write_test: { ok: true }, stored_analyses: 7, indexed_in_memory: 7,
+    retention: 'indefinite',
+  });
+  assert.strictEqual(status.ok, true);
+  const text = status.text;
+  assert.match(text, /active/);
+  assert.match(text, /7 analysis\(es\) stored/);
+  assert.match(text, /retention indefinite/);
+});
