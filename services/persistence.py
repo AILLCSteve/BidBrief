@@ -497,6 +497,12 @@ class Store:
             return True
         return bool(self._run(_op, default=False, label='set_setting'))
 
+    def delete_setting(self, key: str) -> bool:
+        def _op(conn):
+            conn.execute('DELETE FROM bb_settings WHERE key = %s', (key,))
+            return True
+        return bool(self._run(_op, default=False, label='delete_setting'))
+
     def get_setting(self, key: str, default: Any = None) -> Any:
         def _op(conn):
             row = conn.execute('SELECT value FROM bb_settings WHERE key = %s',
@@ -552,11 +558,22 @@ def _self_check() -> int:
     if (store.get_setting('selfcheck') or {}).get('ok') is not True:
         print('FAIL: settings round-trip failed')
         return 1
+    store.delete_setting('selfcheck')  # leave no trace of the probe
     print('OK  settings round-trip')
 
     store.delete_analysis(sid)
-    print('OK  cleaned up the test row')
-    print('\nPersistence is working. Set DATABASE_URL on Render and redeploy.')
+    print('OK  cleaned up the test rows')
+
+    stored = store.count_analyses()
+    print(f'OK  {stored} analysis(es) currently stored')
+
+    # Shut the pool down explicitly: without this the worker threads outlive the
+    # script and psycopg prints "couldn't stop thread" warnings at exit.
+    store.close()
+    print('OK  connections closed cleanly')
+
+    print('\nPersistence is working. With DATABASE_URL set on Render, session '
+          'history survives restarts and accumulates indefinitely.')
     return 0
 
 
