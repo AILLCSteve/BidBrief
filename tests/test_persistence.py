@@ -508,3 +508,67 @@ class TestNothingTimezoneAwareEscapesTheStore:
         from services.persistence import _aware_utc, _naive_local
         moment = datetime(2026, 8, 2, 23, 0, 0)
         assert _naive_local(_aware_utc(moment)) == moment
+
+
+class TestAFailedInitNeverLeaksAPool:
+    """A ConnectionPool runs a background worker that keeps opening connections.
+    Dropping the reference on a failed init leaked that worker AND its
+    server-side connections; with a retry loop it leaked one pool per attempt
+    until the database refused everything with
+    'couldn't get a connection after N sec'.
+    """
+
+    def test_every_failed_pool_is_closed(self, monkeypatch):
+        import psycopg_pool
+        from services.persistence import Store
+
+        created, closed = [], []
+        real = psycopg_pool.ConnectionPool
+
+        class Tracked(real):
+            def __init__(self, *a, **k):
+                created.append(self)
+                super().__init__(*a, **k)
+
+            def close(self, *a, **k):
+                closed.append(self)
+                return super().close(*a, **k)
+
+        monkeypatch.setattr(psycopg_pool, 'ConnectionPool', Tracked)
+        monkeypatch.setenv('DATABASE_URL',
+                           'postgresql://nobody:nope@127.0.0.1:1/none?connect_timeout=1')
+
+        store = Store()
+        for _ in range(3):
+            store._last_init_attempt = 0.0
+            store.init()
+
+        assert len(created) == 3
+        assert len(closed) == len(created), 'a failed pool must always be closed'
+        assert store.enabled is False
+
+    def test_retry_is_throttled_so_it_cannot_hammer_the_database(self, monkeypatch):
+        from services.persistence import Store
+        monkeypatch.setenv('DATABASE_URL', 'postgresql://stub/db')
+        store = Store()
+        attempts = {'n': 0}
+
+        def failing_init():
+            attempts['n'] += 1
+            return False
+
+        store.init = failing_init
+        store._last_init_attempt = 0.0
+        assert store.load_analysis('x') is None
+        assert attempts['n'] == 1
+        assert store.load_analysis('x') is None
+        assert attempts['n'] == 1, 'retry must be throttled, not per-call'
+
+    def test_no_retry_at_all_without_a_database_url(self, monkeypatch):
+        from services.persistence import Store
+        monkeypatch.delenv('DATABASE_URL', raising=False)
+        store = Store()
+        attempts = {'n': 0}
+        store.init = lambda: (attempts.__setitem__('n', attempts['n'] + 1), False)[1]
+        assert store.load_analysis('x') is None
+        assert attempts['n'] == 0

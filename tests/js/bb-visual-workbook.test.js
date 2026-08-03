@@ -312,3 +312,41 @@ test('a healthy store reports what is actually stored', () => {
   assert.match(text, /7 analysis\(es\) stored/);
   assert.match(text, /retention indefinite/);
 });
+
+// ---- Settings version must come from the server (2.5.6) --------------------
+// A hardcoded literal sat at 2.3.0 through five releases. The About card now
+// reads /health, so it cannot drift from the running build again.
+
+const SETTINGS_MODULES = [
+  'shared/assets/js/bb-ui.js', 'shared/assets/js/bb-state.js',
+  'shared/assets/js/bb-settings.js',
+];
+
+test('settings does not ship a hardcoded version literal', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync('shared/assets/js/bb-settings.js', 'utf8');
+  assert.ok(!/VERSION\s*=\s*'\d+\.\d+\.\d+'/.test(src),
+    'a literal version here silently drifts from the real build');
+  assert.match(src, /fetch\('\/health'\)/, 'version must be read from the server');
+});
+
+test('the version placeholder is replaced once /health answers', async () => {
+  const { BB } = loadModules(SETTINGS_MODULES, {
+    fetch: () => Promise.resolve({ json: () => Promise.resolve({ version: '9.9.9' }) }),
+  });
+  assert.strictEqual(BB.settings.version(), '—', 'placeholder before the fetch');
+  BB.settings.loadVersion();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.strictEqual(BB.settings.version(), '9.9.9', 'must show the running build');
+});
+
+test('patent attribution names the filer, company credit stays', () => {
+  const fs = require('fs');
+  const settings = fs.readFileSync('shared/assets/js/bb-settings.js', 'utf8');
+  const login = fs.readFileSync('login.html', 'utf8');
+  assert.match(settings, /Patent Pending — Stephen Bartlett/);
+  assert.match(login, /Patent Pending — Stephen Bartlett/);
+  assert.ok(!/Patent Pending — Additional Intelligence/.test(settings));
+  assert.match(settings, /Additional Intelligence LLC/, 'company credit remains');
+  assert.match(login, /Additional Intelligence LLC/, 'company credit remains');
+});

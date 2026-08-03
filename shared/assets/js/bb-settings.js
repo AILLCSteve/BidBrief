@@ -5,7 +5,23 @@
   var BB = window.BB = window.BB || {};
   var ui = BB.ui;
 
-  var VERSION = '2.3.0';
+  /* Read from the server, never hardcoded: a literal here silently drifts from
+     the real build (it sat at 2.3.0 through five releases). The fallback is
+     only what shows for the instant before /health answers. */
+  var VERSION = '—';
+
+  function loadVersion() {
+    window.fetch('/health')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.version) {
+          VERSION = data.version;
+          var host = ui.qs('#bb-version-value');
+          if (host) ui.fill(host, [window.document.createTextNode(VERSION)]);
+        }
+      })
+      .catch(function () { /* the rest of Settings does not depend on it */ });
+  }
 
   function render() {
     var host = ui.qs('#bb-page-settings');
@@ -29,13 +45,16 @@
       ]) : null,
 
       ui.card('About', [
-        row('Version', VERSION),
+        ui.el('div', { class: 'bb-row', style: 'justify-content:space-between' }, [
+          ui.el('span', { class: 'bb-body' }, 'Version'),
+          ui.el('span', { id: 'bb-version-value' }, VERSION)
+        ]),
         ui.el('p', { class: 'bb-body', style: 'margin-top:10px' },
           'BidBrief is an AI document-analysis system by Additional Intelligence LLC. ' +
           'It reads long bid specifications, contracts, and RFPs, builds a bespoke panel of ' +
           'expert readers for your question set, and returns cited answers you can export.'),
         ui.el('p', { class: 'bb-caption', style: 'margin-top:10px' },
-          'Patent Pending — Additional Intelligence, LLC'),
+          'Patent Pending — Stephen Bartlett'),
         ui.el('p', { class: 'bb-caption', style: 'margin-top:6px' }, [
           'Powered by ',
           ui.el('a', { href: 'https://additionalintel.com', target: '_blank', rel: 'noopener' },
@@ -43,6 +62,8 @@
         ])
       ])
     ]);
+
+    loadVersion();
   }
 
   function row(label, value) {
@@ -76,7 +97,8 @@
   }
 
   BB.settings = {
-    render: render, VERSION: VERSION,
+    render: render, loadVersion: loadVersion,
+    version: function () { return VERSION; },
     accountKind: accountKind, betaRemainingText: betaRemainingText, betaNotice: betaNotice
   };
 })(typeof window !== 'undefined' ? window : this);

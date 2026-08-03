@@ -38,10 +38,10 @@ def _auth(client, role='user', username='webtester'):
         return {'Cookie': f'bidbrief_auth={token}'}
 
 
-def test_health_reports_2_5_5(client):
+def test_health_reports_2_5_6(client):
     resp = client.get('/health')
     assert resp.status_code == 200
-    assert resp.get_json()['version'] == '2.5.5'
+    assert resp.get_json()['version'] == '2.5.6'
 
 
 @pytest.mark.parametrize('name', [

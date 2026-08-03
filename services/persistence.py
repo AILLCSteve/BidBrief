@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -180,13 +181,36 @@ class Store:
     def __init__(self):
         self._pool = None
         self._lock = threading.Lock()
+        self._init_lock = threading.RLock()
         self.enabled = False
         self.last_error: Optional[str] = None
+        self._last_init_attempt = 0.0
+        self._self_test_cache = None
 
     # ---- lifecycle -----------------------------------------------------------
 
+    def _discard_pool(self):
+        """Tear a pool down completely. Never just drop the reference."""
+        pool, self._pool = self._pool, None
+        self.enabled = False
+        if pool is not None:
+            try:
+                pool.close()
+            except Exception as e:
+                logger.warning(f"💾 Pool close failed (continuing): {e}")
+
     def init(self) -> bool:
-        """Open the pool and ensure the schema. Returns True when usable."""
+        """Open the pool and ensure the schema. Returns True when usable.
+
+        Serialized: two threads retrying at once would build two pools and leak
+        one of them.
+        """
+        with self._init_lock:
+            return self._init_locked()
+
+    def _init_locked(self) -> bool:
+        # A previous attempt may have left a pool behind; never stack them.
+        self._discard_pool()
         url = database_url()
         if not url:
             logger.info("💾 Persistence disabled (no DATABASE_URL) — state is in-memory only")
@@ -206,18 +230,22 @@ class Store:
             # reopen dead ones rather than handing a broken socket to a request.
             self._pool = ConnectionPool(
                 conninfo=url, min_size=0, max_size=_pool_max(),
-                timeout=30, max_idle=120, num_workers=1, open=True,
+                timeout=10, max_idle=120, num_workers=1, open=True,
                 check=ConnectionPool.check_connection,
-                # Hard network + query timeouts. Without these a psycopg
-                # connection has NO socket read timeout, and Neon suspends idle
-                # compute — so a stale half-open connection makes a query hang
-                # forever instead of failing. One such connection is enough to
-                # wedge an admin page at "Loading..." permanently.
+                # Only libpq CONNECTION parameters here. Neon's pooled endpoint
+                # is PgBouncer, which rejects unknown startup parameters — an
+                # `options='-c statement_timeout=...'` string makes every
+                # connection fail and the pool time out ("couldn't get a
+                # connection after 30.00 sec"). TCP keepalives achieve the same
+                # protection against a dead half-open socket and are safe
+                # through a pooler.
                 kwargs={
                     'autocommit': True,
                     'connect_timeout': 10,
-                    'options': '-c statement_timeout=15000'
-                               ' -c idle_in_transaction_session_timeout=15000',
+                    'keepalives': 1,
+                    'keepalives_idle': 30,
+                    'keepalives_interval': 10,
+                    'keepalives_count': 3,
                 },
             )
             with self._pool.connection() as conn:
@@ -230,27 +258,48 @@ class Store:
             return True
         except Exception as e:
             self.last_error = str(e)
-            self._pool = None
+            # CLOSE the pool before dropping it. A ConnectionPool runs a
+            # background worker that keeps opening connections; discarding the
+            # reference leaks that thread AND its server-side connections. With
+            # a retry loop that leaks a whole pool per attempt, which exhausts
+            # the database's connection allowance and turns a transient blip
+            # into a permanent "couldn't get a connection" failure.
+            self._discard_pool()
             logger.error(f"💾 Could not initialize persistence ({e}) — running in-memory. "
                          "Analyses and logins will NOT survive a restart.")
             return False
 
     def close(self):
-        if self._pool is not None:
-            try:
-                self._pool.close()
-            except Exception:
-                pass
-        self._pool = None
-        self.enabled = False
+        self._discard_pool()
 
     # ---- plumbing ------------------------------------------------------------
+
+    def _try_reinit(self) -> bool:
+        """Re-attempt startup if the boot attempt failed, at most once a minute.
+
+        Neon suspends idle compute, so a deploy can land while the database is
+        still waking and init() fails. Without this the store would stay dead
+        for the whole life of the process — persistence silently off until
+        somebody happened to restart it again.
+        """
+        if not database_url():
+            return False
+        now = time.monotonic()
+        with self._lock:
+            if self.enabled:
+                return True
+            if now - self._last_init_attempt < 60:
+                return False
+            self._last_init_attempt = now
+        logger.info("💾 Retrying durable storage startup...")
+        return self.init()
 
     def _run(self, fn, default=None, label='db'):
         """Execute fn(conn), swallowing every failure. The app must survive a
         database outage — degraded persistence beats a failed analysis."""
         if not self.enabled or self._pool is None:
-            return default
+            if not self._try_reinit():
+                return default
         try:
             with self._pool.connection() as conn:
                 return fn(conn)
@@ -316,6 +365,12 @@ class Store:
         """
         if not self.enabled:
             return {'ok': False, 'reason': 'disabled', 'error': self.last_error}
+        # Cache briefly: the admin dashboard calls this on every load, and a
+        # write per page view is needless traffic against the connection budget.
+        now = time.monotonic()
+        cached = self._self_test_cache
+        if cached and now - cached[0] < 30:
+            return cached[1]
         key = '__write_check__'
         stamp = datetime.now(timezone.utc).isoformat()
         if not self.set_setting(key, {'at': stamp}):
@@ -323,7 +378,9 @@ class Store:
         value = self.get_setting(key) or {}
         if value.get('at') != stamp:
             return {'ok': False, 'reason': 'readback_mismatch', 'error': self.last_error}
-        return {'ok': True}
+        result = {'ok': True}
+        self._self_test_cache = (now, result)
+        return result
 
     def count_analyses(self) -> int:
         """Total stored analyses — the truth about how much history exists,
