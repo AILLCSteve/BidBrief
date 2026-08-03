@@ -73,6 +73,36 @@ results path and the Excel export inherit them with zero per-route wiring.
 
 ---
 
+## 2026-08-02 — "Module never loaded" was my wait condition, twice (web 2.4.1)
+
+**Symptom:** after rewriting `bb-results.js`, a Playwright check reported `BB.results` was
+`undefined`. `window.BB` held only the first 8 modules — everything from `bb-analyze.js`
+onward was missing — with **zero console errors**. That reads exactly like a module throwing
+at load time.
+
+**It wasn't.** Two separate false alarms stacked:
+1. The first probe waited for `#bb-tabbar`, which is **static markup in `index.html`**, so it
+   resolves long before the ~16 classic scripts finish executing. I read `window.BB` mid-load
+   and saw a partial namespace.
+2. The retry waited on `window.BB.results && window.BB.boot` — but **`bb-boot.js` never
+   attaches a `BB.boot` key**. The condition could never be true, so it timed out and
+   "confirmed" the false diagnosis.
+
+**What actually proved innocence:** listing network responses (all 19 JS files → 200) and
+then `eval`ing each module's source in the page (all OK, `BB.results` became an object).
+
+**Rules:** (a) when waiting for a classic-script app to be ready, wait on **the module you
+are about to call**, never on static chrome; (b) before believing "the script threw", check
+the response status AND eval the source — no console error plus a partial namespace almost
+always means you looked too early; (c) verify a wait predicate's keys actually exist, or a
+timeout will masquerade as a product bug.
+
+**Related, same session:** `inner_text()` returns *rendered* text, so a heading styled
+`text-transform: uppercase` fails a case-sensitive `in` check. Compare case-insensitively or
+assert on `textContent`.
+
+---
+
 ## 2026-08-02 — Python Playwright ignores browsers cached by the MCP driver
 
 `%LOCALAPPDATA%\ms-playwright` had `chromium-1234` (installed by the Claude MCP playwright
