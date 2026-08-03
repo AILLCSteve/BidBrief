@@ -90,6 +90,30 @@ class BetaAccess:
 
     # ---- the registry ----------------------------------------------------
 
+    def restore(self, records: List[dict]) -> int:
+        """Reload testers from durable storage at boot.
+
+        Additive and idempotent: an existing in-memory record always wins, so a
+        restore can never clobber a tester minted since the process started.
+        Returns how many were added.
+        """
+        added = 0
+        with self._lock:
+            for record in records or []:
+                username = record.get('username')
+                if not username or username in self._testers:
+                    continue
+                self._testers[username] = {
+                    'username': username,
+                    'name': record.get('name') or '',
+                    'created_at': record.get('created_at') or datetime.now(),
+                    'last_seen': record.get('last_seen') or datetime.now(),
+                    'docs_used': int(record.get('docs_used', 0) or 0),
+                    'doc_limit': int(record.get('doc_limit', 0) or self._default_doc_limit),
+                }
+                added += 1
+        return added
+
     def mint(self, doc_limit: Optional[int] = None) -> dict:
         """Create a brand-new ephemeral tester and return a copy of its record."""
         now = datetime.now()

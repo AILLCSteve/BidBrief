@@ -39,6 +39,7 @@ from werkzeug.utils import secure_filename
 # Import HOTDOG orchestrator
 from services.hotdog import HotdogOrchestrator
 from services.beta_access import BetaAccess, is_beta_username, serialize_tester
+from services.persistence import store as persistence_store
 # Excel dashboard import moved to lazy load (only when endpoint is called)
 # This prevents app crash if openpyxl isn't installed
 import asyncio
@@ -340,6 +341,75 @@ logger.info(
     f"(doc limit {beta_access.default_doc_limit})"
 )
 
+# ============================================================================
+# DURABLE STORAGE (Neon / Postgres) — backend only, never surfaced in the UI
+# ----------------------------------------------------------------------------
+# Memory stays the hot path; Postgres is the durable mirror. Without
+# DATABASE_URL every store call is a no-op and the app behaves exactly as it did
+# before. See services/persistence.py for the design rules.
+# ============================================================================
+
+# Analyses recovered from the database on boot. These have NO orchestrator — the
+# live object cannot be serialized — so they are served from their stored
+# snapshot. Kept separate from active/completed/partial so the code can always
+# tell "restored, read-only" from "live in this process".
+restored_analyses: dict = {}
+
+
+def _restore_persisted_state():
+    """Pull durable state back into memory at boot. Failure-safe by design:
+    a database problem must degrade to in-memory operation, never block boot."""
+    if not persistence_store.init():
+        return
+
+    try:
+        interrupted = persistence_store.mark_interrupted_analyses()
+        if interrupted:
+            logger.info(f"💾 Marked {interrupted} in-flight analysis(es) as interrupted "
+                        "(their worker threads died with the previous process)")
+
+        sessions = persistence_store.load_auth_sessions()
+        active_sessions.update(sessions)
+        if sessions:
+            logger.info(f"💾 Restored {len(sessions)} signed-in session(s)")
+
+        for email in persistence_store.load_bonus_users():
+            bonus_feature_users.add(email)
+
+        testers = persistence_store.load_beta_testers()
+        if testers:
+            beta_access.restore(testers)
+            logger.info(f"💾 Restored {len(testers)} beta tester(s)")
+
+        # The beta switch now has a durable home, so an admin toggling it off no
+        # longer silently comes back on at the next deploy.
+        stored_switch = persistence_store.get_setting('beta_login_enabled')
+        if isinstance(stored_switch, bool):
+            beta_access.set_enabled(stored_switch)
+
+        index = persistence_store.list_analysis_index()
+        for row in index:
+            restored_analyses[row['session_id']] = {
+                'pdf_filename': row.get('pdf_filename') or 'Unknown.pdf',
+                'owner': row.get('owner'),
+                'mode': row.get('mode') or 'bid_spec',
+                'status': row.get('status') or 'completed',
+                'config_path': 'N/A',
+                'statistics': row.get('statistics') or {},
+                'completed_at': row.get('completed_at'),
+                'created_at': row.get('created_at'),
+                'restored': True,
+            }
+            session_timestamps[row['session_id']] = datetime.now()
+        if index:
+            logger.info(f"💾 Restored {len(index)} analysis(es) from durable storage")
+    except Exception as e:
+        logger.error(f"💾 State restore failed (continuing in-memory): {e}")
+
+
+_restore_persisted_state()
+
+
 # Log loaded users on startup
 logger.info("="*60)
 logger.info("AUTHORIZED USERS LOADED:")
@@ -394,6 +464,15 @@ def cleanup_expired_sessions():
         logger.error(f"❌ Session cleanup failed: {e}")
 
     # Reschedule cleanup in 15 minutes (900 seconds)
+    # Durable retention sweep rides the same 15-minute timer: drop analyses past
+    # BIDBRIEF_DB_RETENTION_DAYS and any expired auth tokens.
+    try:
+        purged = persistence_store.purge_expired()
+        if purged:
+            logger.info(f"💾 Retention sweep removed {purged} stored analysis(es)")
+    except Exception as e:
+        logger.warning(f"💾 Retention sweep failed (non-fatal): {e}")
+
     timer = threading.Timer(900, cleanup_expired_sessions)
     timer.daemon = True
     timer.start()
@@ -463,6 +542,124 @@ def _generate_analysis_dynamic_intel(legacy_result: dict, orchestrator, doc_cont
     except Exception as e:
         logger.error(f'Dynamic intelligence generation failed: {e}')
         return {'intelligence_focus': '', 'tables': []}
+
+
+def _build_analysis_snapshot(session_id, legacy_result, statistics, orchestrator=None,
+                             mode='bid_spec', pdf_filename='Unknown.pdf',
+                             doc_context='', is_partial=False):
+    """Everything a restored session needs, as plain JSON.
+
+    A completed analysis holds a live HotdogOrchestrator that cannot be
+    serialized, so we store what the API *derives* from it instead. This exact
+    dict is what /api/results, the Excel exports and Smart Analysis read after a
+    restart, so anything they need must be captured here.
+    """
+    snapshot = {
+        'version': 1,
+        'session_id': session_id,
+        'pdf_filename': pdf_filename,
+        'mode': mode,
+        'is_partial': bool(is_partial),
+        'result': legacy_result or {},
+        'statistics': statistics or {},
+        'doc_context': doc_context or '',
+        'key_details': {},
+        'key_details_list': [],
+        'document_type': '',
+        'document_type_label': '',
+        'bestprep_data': None,
+        'optimized_scan_data': None,
+    }
+
+    kde = getattr(orchestrator, 'key_details_extractor', None) if orchestrator else None
+    if kde is not None:
+        try:
+            snapshot['key_details'] = kde.get_summary_data() or {}
+            if hasattr(kde, 'get_details_list'):
+                snapshot['key_details_list'] = kde.get_details_list() or []
+            snapshot['document_type'] = kde.get_document_type() or ''
+            snapshot['document_type_label'] = kde.get_document_type_label() or ''
+        except Exception as e:
+            logger.warning(f"Snapshot: key details capture failed (non-fatal): {e}")
+
+    if orchestrator is not None:
+        try:
+            snapshot['bestprep_data'] = _extract_bestprep_data(orchestrator)
+        except Exception:
+            pass
+        scan = getattr(orchestrator, 'optimized_scan_data', None)
+        if scan:
+            snapshot['optimized_scan_data'] = scan
+
+    return snapshot
+
+
+def _persist_analysis(session_id, snapshot, owner, status, completed_at=None):
+    """Write a snapshot to durable storage. Never raises — a database problem
+    must not fail an analysis that already succeeded."""
+    try:
+        persistence_store.save_analysis(
+            session_id,
+            owner=owner,
+            pdf_filename=snapshot.get('pdf_filename', 'Unknown.pdf'),
+            mode=snapshot.get('mode', 'bid_spec'),
+            status=status,
+            snapshot=snapshot,
+            completed_at=completed_at or datetime.now(),
+        )
+    except Exception as e:
+        logger.warning(f"💾 Could not persist analysis {session_id[:12]}: {e}")
+
+
+def _persist_partial_analysis(session_id, status):
+    """Snapshot a stopped or failed run from whatever it accumulated.
+
+    Runs off the partial_analyses entry (its orchestrator is still alive in this
+    process), so a user who stopped an analysis still has their partial results
+    after a restart instead of an empty session.
+    """
+    try:
+        with session_lock:
+            session_data = partial_analyses.get(session_id)
+        if not session_data:
+            return
+        orchestrator = session_data.get('orchestrator')
+        if not orchestrator:
+            return
+
+        parsed_config = orchestrator.cached_config
+        if not parsed_config:
+            return
+        accumulated = orchestrator.layer4_accumulator.get_accumulated_answers() \
+            if orchestrator.layer4_accumulator else {}
+        browser_output = orchestrator._build_partial_browser_output(accumulated, parsed_config)
+        legacy_result = _transform_to_legacy_format(browser_output)
+
+        snapshot = _build_analysis_snapshot(
+            session_id, legacy_result,
+            {
+                'processing_time': 0,
+                'total_tokens': orchestrator.layer5_token_manager.total_tokens_used,
+                'estimated_cost': 'Stopped',
+                'questions_answered': legacy_result.get('questions_answered', 0),
+                'total_questions': parsed_config.total_questions,
+                'average_confidence': 'Partial',
+            },
+            orchestrator=orchestrator,
+            mode=session_data.get('mode', 'bid_spec'),
+            pdf_filename=session_data.get('pdf_filename', 'Unknown.pdf'),
+            doc_context=session_data.get('doc_context', ''),
+            is_partial=True)
+        _persist_analysis(session_id, snapshot, session_data.get('owner'), status)
+    except Exception as e:
+        logger.warning(f"💾 Could not persist partial analysis {session_id[:12]}: {e}")
+
+
+def _restored_snapshot(session_id):
+    """Load a restored session's snapshot, or None if this isn't one."""
+    if session_id not in restored_analyses:
+        return None
+    return persistence_store.load_analysis(session_id)
 
 
 def _transform_to_legacy_format(hotdog_output: dict) -> dict:
@@ -685,6 +882,10 @@ def _is_authorized_for_session(session_id: str) -> bool:
             session_data = active_analyses[session_id]
         elif session_id in analysis_results:
             session_data = analysis_results[session_id]
+        elif session_id in restored_analyses:
+            # Recovered from durable storage after a restart — ownership still
+            # applies, it just comes from the stored row rather than memory.
+            session_data = restored_analyses[session_id]
         else:
             logger.warning(
                 f"[AUTH-403] Session {session_id[:12]} not found in any dict. "
@@ -772,13 +973,16 @@ def _issue_session(username, name, role, is_beta=False):
     for what a session record contains — form login, API login and beta login all
     go through here so the shape can never drift between them."""
     token = secrets.token_urlsafe(32)
-    active_sessions[token] = {
+    record = {
         'username': username,
         'name': name,
         'role': role,
         'is_beta': bool(is_beta),
         'expires_at': datetime.now() + timedelta(hours=24)
     }
+    active_sessions[token] = record
+    # Durable so a deploy no longer signs everyone out mid-session.
+    persistence_store.save_auth_session(token, record)
     return token
 
 
@@ -826,6 +1030,7 @@ def beta_login():
         }), 403
 
     tester = beta_access.mint()
+    persistence_store.save_beta_tester(tester)
     token = _issue_session(tester['username'], tester['name'], 'user', is_beta=True)
 
     logger.info(f"🧪 Beta session started: {tester['username']} (limit {tester['doc_limit']} docs)")
@@ -851,6 +1056,8 @@ def logout():
         session = active_sessions.pop(token, None)
         if session:
             username = session.get('username')
+        # A logout must revoke the token everywhere, not just in this process.
+        persistence_store.delete_auth_session(token)
         logger.info(f"User logged out: {username}")
         audit_log('logout', username)
 
@@ -869,7 +1076,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.4.1'
+        'version': '2.5.0'
     })
 
 @app.route('/pics/<path:filename>')
@@ -1440,6 +1647,26 @@ def analyze_document():
                         session_timestamps[session_id] = datetime.now()
                         logger.info(f"✅ Session moved to completed_analyses: {session_id[:12]}... (mode: {analysis_mode})")
 
+                # Durable snapshot: this is what survives a restart and serves
+                # /api/results, the exports and Smart Analysis afterwards.
+                _persist_analysis(
+                    session_id,
+                    _build_analysis_snapshot(
+                        session_id, legacy_result,
+                        {
+                            'processing_time': result.processing_time_seconds,
+                            'total_tokens': result.total_tokens,
+                            'estimated_cost': f"${result.estimated_cost:.4f}",
+                            'questions_answered': result.questions_answered,
+                            'total_questions': parsed_config.total_questions,
+                            'average_confidence': f"{result.average_confidence:.0%}",
+                            'total_pages': getattr(result, 'total_pages', 0),
+                        },
+                        orchestrator=orchestrator, mode=analysis_mode,
+                        pdf_filename=pdf_filename,
+                        doc_context=doc_ctx_for_intel),
+                    owner, 'completed')
+
                 # Signal done
                 progress_q.put(('done', {}))
 
@@ -1486,6 +1713,10 @@ def analyze_document():
                         session_timestamps[session_id] = datetime.now()
                         logger.info(f"✅ Session moved to partial_analyses: {session_id[:12]}...")
 
+                # Persist whatever the run managed to accumulate before the stop,
+                # so a partial result is still there after a restart.
+                _persist_partial_analysis(session_id, 'stopped')
+
                 # Audit log user stop
                 audit_log('analyze_stopped', username, {
                     'session_id': session_id
@@ -1512,6 +1743,8 @@ def analyze_document():
                         session_timestamps[session_id] = datetime.now()
                         logger.info(f"Session moved to partial_analyses (error): {session_id[:12]}...")
 
+                _persist_partial_analysis(session_id, 'error')
+
                 # Audit log failure (don't include full error message - may contain sensitive info)
                 audit_log('analyze_failed', username, {
                     'session_id': session_id,
@@ -1533,6 +1766,9 @@ def analyze_document():
         allowed, beta_remaining = beta_access.consume_document(owner)
         if not allowed:
             return _beta_quota_exhausted(owner)
+        # Persist the spend immediately: a restart must not hand back free
+        # documents a tester has already used.
+        persistence_store.save_beta_tester(beta_access.get(owner) or {})
         logger.info(f"🧪 Beta document consumed by {owner} — {beta_remaining} remaining")
 
     # Pre-extract doc context while PDF is still on disk. Stored here so Smart Analysis
@@ -1654,6 +1890,9 @@ def get_results(session_id):
         elif session_id in active_analyses:
             session_data = active_analyses[session_id]
             session_type = 'active'
+        elif session_id in restored_analyses:
+            session_data = restored_analyses[session_id]
+            session_type = 'restored'
         else:
             # Session not found in any dict
             logger.warning(f"Session not found: {session_id}")
@@ -1676,6 +1915,34 @@ def get_results(session_id):
         'session_id': session_id,
         'session_type': session_type
     })
+
+    # Restored sessions have no orchestrator — serve the stored snapshot. This
+    # is the whole point of persistence: results outlive the process that made
+    # them. Must come before the orchestrator-based branches below.
+    if session_type == 'restored':
+        snapshot = _restored_snapshot(session_id)
+        if not snapshot:
+            return jsonify({
+                'success': False, 'error': 'Session not found',
+                'message': 'Analysis session does not exist or has been cleaned up'
+            }), 404
+        response = {
+            'success': True,
+            'result': snapshot.get('result', {}),
+            'mode': snapshot.get('mode', 'bid_spec'),
+            'statistics': snapshot.get('statistics', {}),
+            'restored': True,
+        }
+        if snapshot.get('is_partial'):
+            response['partial'] = True
+        if snapshot.get('key_details'):
+            response['key_requirements'] = snapshot['key_details']
+        if snapshot.get('bestprep_data'):
+            response['bestprep_data'] = snapshot['bestprep_data']
+        if snapshot.get('optimized_scan_data'):
+            response['optimized_scan_data'] = snapshot['optimized_scan_data']
+            response['use_pipeline_v2'] = True
+        return jsonify(response)
 
     # Process results based on session type (outside lock to avoid long hold)
     from services.hotdog.layers import ConfigurationLoader
@@ -1960,6 +2227,50 @@ def get_results(session_id):
 # EXCEL DASHBOARD EXPORT
 # ============================================================================
 
+def _excel_from_snapshot(session_id, snapshot):
+    """Regenerate the Excel workbook for a session recovered from storage.
+
+    The generator takes the legacy result dict, not the orchestrator, so a
+    restored analysis exports byte-for-byte the same sheets it would have
+    exported before the restart — including Visual Intelligence.
+    """
+    try:
+        from services.excel_dashboard import ExcelDashboardGenerator
+        import re as _re
+
+        legacy_result = dict(snapshot.get('result') or {})
+        generator = ExcelDashboardGenerator(
+            legacy_result,
+            is_partial=bool(snapshot.get('is_partial')),
+            api_key_requirements=snapshot.get('key_details') or {},
+            optimized_scan_data=snapshot.get('optimized_scan_data'),
+        )
+        excel_file = generator.generate()
+
+        project_name = (snapshot.get('key_details') or {}).get('project_name') \
+            or legacy_result.get('document_name') \
+            or snapshot.get('pdf_filename', 'Analysis')
+        project_name = _re.sub(r'\.pdf$', '', str(project_name), flags=_re.IGNORECASE)
+        project_name = _re.sub(r'<PDF pg[^>]+>', '', project_name)
+        project_name = _re.sub(r'[^\w\s-]', '', project_name).strip()
+        project_name = _re.sub(r'\s+', '_', project_name)[:50] or 'Analysis'
+
+        filename = (f"{project_name}_{datetime.now().strftime('%Y-%m-%d')}_bidspec"
+                    f"{'_PARTIAL' if snapshot.get('is_partial') else ''}.xlsx")
+
+        username, _ = _current_user_info()
+        audit_log('export_excel_dashboard', username,
+                  {'session_id': session_id, 'filename': filename, 'restored': True})
+
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True, download_name=filename)
+    except Exception as e:
+        logger.error(f"Excel export from snapshot failed: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/export/excel-dashboard/<session_id>', methods=['GET'])
 def export_excel_dashboard(session_id):
     """Generate executive Excel dashboard with charts (supports partial results)"""
@@ -1970,6 +2281,15 @@ def export_excel_dashboard(session_id):
     # Authorization check
     if not _is_authorized_for_session(session_id):
         return jsonify({'success': False, 'error': 'Unauthorized access to export'}), 403
+
+    # Restored from durable storage: no orchestrator, so build the workbook
+    # straight from the stored payload. ExcelDashboardGenerator consumes the
+    # legacy dict, which is exactly what the snapshot holds.
+    if session_id in restored_analyses and session_id not in completed_analyses:
+        snapshot = _restored_snapshot(session_id)
+        if not snapshot:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+        return _excel_from_snapshot(session_id, snapshot)
 
     # Check completed_analyses first (NEW - primary storage)
     if session_id in completed_analyses:
@@ -2401,6 +2721,18 @@ def run_second_pass_on_selected(session_id):
     import asyncio
     from openai import AsyncOpenAI
 
+    # A restored analysis has no cached windows or experts — those died with the
+    # process that made it — so another pass is impossible. Say so plainly
+    # instead of failing with a confusing 404.
+    if session_id in restored_analyses and session_id not in completed_analyses             and session_id not in partial_analyses:
+        return jsonify({
+            'success': False,
+            'error': 'This analysis was restored from storage after a server restart. '
+                     'Additional passes need the original in-memory analysis state — '
+                     're-run the document to use this feature.',
+            'restored': True,
+        }), 409
+
     data = request.get_json()
     question_ids = data.get('question_ids', [])
 
@@ -2489,6 +2821,18 @@ def run_deep_rag_on_selected(session_id):
     """
     import asyncio
     from openai import AsyncOpenAI
+
+    # A restored analysis has no cached windows or experts — those died with the
+    # process that made it — so another pass is impossible. Say so plainly
+    # instead of failing with a confusing 404.
+    if session_id in restored_analyses and session_id not in completed_analyses             and session_id not in partial_analyses:
+        return jsonify({
+            'success': False,
+            'error': 'This analysis was restored from storage after a server restart. '
+                     'Additional passes need the original in-memory analysis state — '
+                     're-run the document to use this feature.',
+            'restored': True,
+        }), 409
 
     data = request.get_json()
     question_ids = data.get('question_ids', [])
@@ -2633,6 +2977,7 @@ def set_bonus_features():
         bonus_feature_users.add(email)
     else:
         bonus_feature_users.discard(email)
+    persistence_store.set_bonus_user(email, enabled)
 
     admin_user, _ = _current_user_info()
     audit_log('bonus_features_change', admin_user, {'target': email, 'enabled': enabled})
@@ -2675,6 +3020,21 @@ def format_session_info(session_id, session_data, status):
             info['total_pages'] = getattr(result, 'total_pages', 'N/A')
             info['total_tokens'] = getattr(result, 'total_tokens', 'N/A')
             info['processing_time'] = getattr(result, 'processing_time_seconds', 'N/A')
+        elif session_data.get('statistics'):
+            # Recovered rows have no live result object; their stats were
+            # captured in the snapshot. Same keys, so admin views can't drift.
+            stats = session_data['statistics'] or {}
+            info['questions_answered'] = stats.get('questions_answered', 'N/A')
+            info['total_pages'] = stats.get('total_pages', 'N/A')
+            info['total_tokens'] = stats.get('total_tokens', 'N/A')
+            info['processing_time'] = stats.get('processing_time', 'N/A')
+            info['restored'] = True
+
+        # Timestamps recovered from storage arrive as datetimes or ISO strings
+        for key in ('completed_at', 'created_at'):
+            value = session_data.get(key)
+            if key not in info and value is not None:
+                info[key] = value.isoformat() if hasattr(value, 'isoformat') else str(value)
 
         return info
     except Exception as e:
@@ -2704,7 +3064,7 @@ def _snapshot_sessions_by_bucket():
         for sid in all_session_ids:
             session_timestamps[sid] = datetime.now()
 
-        return {
+        buckets = {
             'active': [format_session_info(sid, data, 'active')
                        for sid, data in active_analyses.items()],
             'completed': [format_session_info(sid, data, 'completed')
@@ -2715,6 +3075,22 @@ def _snapshot_sessions_by_bucket():
                        for sid, data in analysis_results.items()],
         }
 
+        # Sessions recovered from storage fold into the bucket their status
+        # already describes rather than adding a fifth one — the bucket names are
+        # a client contract (the iOS dashboard decodes exactly these four), and a
+        # recovered completed analysis IS a completed analysis. Rows carry
+        # restored=True for anyone who needs to tell them apart.
+        live_ids = set(active_analyses) | set(completed_analyses) \
+            | set(partial_analyses) | set(analysis_results)
+        for sid, data in restored_analyses.items():
+            if sid in live_ids:
+                continue  # a re-run in this process always wins
+            status = (data.get('status') or 'completed').lower()
+            bucket = 'partial' if status in ('stopped', 'error', 'interrupted') else 'completed'
+            buckets[bucket].append(format_session_info(sid, data, status))
+
+        return buckets
+
 
 # ---- Free Beta Testing administration ---------------------------------------
 
@@ -2723,6 +3099,9 @@ def _revoke_sessions_for(username: str) -> int:
     tokens = [t for t, s in active_sessions.items() if s.get('username') == username]
     for token in tokens:
         active_sessions.pop(token, None)
+    # Revocation must outlive this process, or a restart would resurrect the
+    # tokens of a deleted tester from durable storage.
+    persistence_store.delete_auth_sessions_for(username)
     return len(tokens)
 
 
@@ -2780,6 +3159,8 @@ def set_beta_enabled():
         return jsonify({'success': False, 'error': 'enabled is required'}), 400
 
     enabled = beta_access.set_enabled(bool(data.get('enabled')))
+    # Durable, so the switch no longer reverts to BETA_LOGIN_ENABLED on deploy.
+    persistence_store.set_setting('beta_login_enabled', enabled)
     admin_user, _ = _current_user_info()
     audit_log('beta_access_change', admin_user, {'enabled': enabled})
     logger.info(f"🧪 Free Beta Testing {'ENABLED' if enabled else 'DISABLED'} by {admin_user}")
@@ -2820,6 +3201,7 @@ def update_beta_tester(username):
     if not record:
         return jsonify({'success': False, 'error': 'Unknown beta tester'}), 404
 
+    persistence_store.save_beta_tester(record)
     admin_user, _ = _current_user_info()
     audit_log('beta_tester_update', admin_user, {'target': username, 'action': action})
     logger.info(f"🧪 Beta tester {username} updated by {admin_user} ({action})")
@@ -2838,6 +3220,7 @@ def delete_beta_tester(username):
     if not record:
         return jsonify({'success': False, 'error': 'Unknown beta tester'}), 404
 
+    persistence_store.delete_beta_tester(username)
     revoked = _revoke_sessions_for(username)
     admin_user, _ = _current_user_info()
     audit_log('beta_tester_delete', admin_user, {'target': username, 'sessions_revoked': revoked})
@@ -2887,7 +3270,10 @@ def get_all_sessions():
         'diagnostics': {
             'module_id': MODULE_LOAD_ID,
             'pid': os.getpid(),
-            'module_uptime': round(time.time() - MODULE_LOAD_TIME, 2)
+            'module_uptime': round(time.time() - MODULE_LOAD_TIME, 2),
+            # Admin-only: whether state is surviving restarts. Deliberately NOT
+            # on the public /health — infrastructure detail stays behind auth.
+            'persistence': persistence_store.health(),
         }
     })
 
@@ -5445,6 +5831,24 @@ def _build_smart_analysis_data(session_id: str):
     """
     from services.hotdog.layers import ConfigurationLoader
 
+    # Restored sessions carry everything Smart Analysis needs in their snapshot
+    # (the payload, key details and document type), so it still runs after a
+    # restart. Checked first — these have no orchestrator to fall back on.
+    if session_id in restored_analyses and session_id not in completed_analyses:
+        snapshot = _restored_snapshot(session_id)
+        if not snapshot:
+            return None, (jsonify({'success': False, 'error': 'Session not found'}), 404)
+        return {
+            'is_partial': bool(snapshot.get('is_partial')),
+            'mode': snapshot.get('mode', 'bid_spec'),
+            'pdf_filename': snapshot.get('pdf_filename', 'Unknown.pdf'),
+            'result': snapshot.get('result', {}),
+            'key_details': snapshot.get('key_details', {}),
+            'key_details_list': snapshot.get('key_details_list', []),
+            'document_type': snapshot.get('document_type', ''),
+            'document_type_label': snapshot.get('document_type_label', ''),
+        }, None
+
     if session_id in completed_analyses:
         session_data = completed_analyses[session_id]
         orchestrator = session_data['orchestrator']
@@ -5562,6 +5966,9 @@ def run_smart_analysis(session_id: str):
         )
         smart_analysis_results[session_id] = result
         session_timestamps[session_id] = datetime.now()
+        # Smart Analysis is expensive (5 AI calls) — persist it so a restart
+        # doesn't silently charge the user for it a second time.
+        persistence_store.save_smart_analysis(session_id, result.to_dict())
         audit_log('smart_analysis_run', username, {'session_id': session_id, 'tier': model_tier(sa_model)})
         return jsonify({'success': True, 'result': result.to_dict(), 'model_tier': model_tier(sa_model)})
 
@@ -5577,6 +5984,11 @@ def get_smart_analysis(session_id: str):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
     if session_id not in smart_analysis_results:
+        # Fall back to durable storage: a Smart Analysis run before a restart is
+        # still valid, and re-running it would cost five more AI calls.
+        stored = persistence_store.load_smart_analysis(session_id)
+        if stored:
+            return jsonify({'success': True, 'result': stored, 'restored': True})
         return jsonify({'success': False, 'error': 'No Smart Analysis result for this session'}), 404
 
     return jsonify({'success': True, 'result': smart_analysis_results[session_id].to_dict()})

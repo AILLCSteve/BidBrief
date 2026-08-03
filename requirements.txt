@@ -26,6 +26,11 @@ striprtf>=0.0.26
 # Environment Management
 python-dotenv>=1.0.0,<2.0.0
 
+# Durable session storage (Neon / Postgres). Optional at runtime: without
+# DATABASE_URL the app runs entirely in memory exactly as it did before.
+psycopg[binary]>=3.1,<4.0
+psycopg-pool>=3.2,<4.0
+
 # Security - Encryption for ephemeral upload storage
 cryptography>=42.0.0,<44.0.0
 
