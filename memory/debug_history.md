@@ -53,6 +53,37 @@ in the same script that does the split.
 
 ---
 
+## 2026-08-02 — Calibrate visual-page heuristics against a REAL PDF, not just unit fixtures (2.4.0)
+
+**What happened:** the Visual Intelligence page-selection heuristic (`score_page` in
+`services/hotdog/visual_intelligence.py`) passed all its hand-written unit tests, then missed an
+actual drawing page in a PyMuPDF-generated test PDF: a near-textless page with a 60-line vector
+diagram scored 0.075 against a 0.35 threshold, because the "vector CAD sheet" fixture had been
+imagined at 600 paths. Real simple diagrams are an order of magnitude lighter.
+
+**Fix:** added a sparse-page rule (`text < 600 chars AND drawing_count >= 40` ⇒ bonus) and kept a
+real-fitz round-trip in the session before shipping. **Rule:** any content-detection heuristic
+gets at least one assertion built from a REAL artifact of the library that will feed it —
+hand-picked fixture numbers encode your guess, not the distribution.
+
+**Also this round (facts, not bugs):** the vision pass appends `[VISUAL CONTENT]` blocks to
+`PageData.text` BEFORE `create_windows` — PageData is `frozen=True`, so pages are REPLACED, not
+mutated. `visual_findings` ride `get_browser_output`/`_build_partial_browser_output`, so every
+results path and the Excel export inherit them with zero per-route wiring.
+
+---
+
+## 2026-08-02 — Python Playwright ignores browsers cached by the MCP driver
+
+`%LOCALAPPDATA%\ms-playwright` had `chromium-1234` (installed by the Claude MCP playwright
+plugin) but Python's `playwright` package wanted `chromium_headless_shell-1208` — each driver
+pins its own build directory, so a populated cache does NOT mean YOUR driver can launch.
+`python -m playwright install chromium` (no admin needed) fixes it in ~1 min. Recognize the
+symptom: `Executable doesn't exist at ...chromium_headless_shell-<N>...` while `ls` shows other
+chromium directories right next to it.
+
+---
+
 ## 2026-07-26 — Flask registers two `/health` routes; only the first answers
 
 `app.py` defines `/health` twice (`health` at ~line 774 with the version payload, `health_check` at
