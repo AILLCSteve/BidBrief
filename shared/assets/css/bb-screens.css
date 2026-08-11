@@ -1,3 +1,10 @@
+/* Brand headings use Clash Display (see bb-theme.css). Scoped to headings and
+   the hub titles so body copy and controls stay on Satoshi. */
+.bb-stage-header h1, .bb-stage-header h2, .bb-hub-title {
+  font-family: var(--bb-font-display);
+  font-weight: 600;
+}
+
 /* Screen layout for the BidBrief web app. The app is a centred column over the
    planet field, with the floating tab bar clearing the bottom. */
 

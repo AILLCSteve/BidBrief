@@ -5,6 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="color-scheme" content="dark">
     <title>BidBrief - AI Document Analysis</title>
+    <meta name="description" content="BidBrief reads a full engineering or construction document set — and legal, medical, real-estate and diligence documents too — answering questions with every answer cited back to the page.">
+
+    <!-- Same card as /login, so a shared link looks identical whether or not the
+         person sharing it happens to be signed in. Absolute URLs required. -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="BidBrief">
+    <meta property="og:title" content="BidBrief — read the whole spec before you price it">
+    <meta property="og:description" content="Upload the document set. Ask questions in plain language. Every answer cited back to the page.">
+    <meta property="og:url" content="https://bidbrief.onrender.com/">
+    <meta property="og:image" content="https://bidbrief.onrender.com/pics/og-bidbrief.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="BidBrief — AI document intelligence.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="BidBrief — read the whole spec before you price it">
+    <meta name="twitter:description" content="Upload the document set. Ask questions. Get cited answers.">
+    <meta name="twitter:image" content="https://bidbrief.onrender.com/pics/og-bidbrief.png">
+
     <link rel="icon" type="image/png" href="/pics/AILLCfavicon.png">
     <link rel="stylesheet" href="/shared/assets/css/bb-theme.css">
     <link rel="stylesheet" href="/shared/assets/css/bb-orb.css">
@@ -16,7 +34,30 @@
         <canvas class="bb-orb-stars"></canvas>
         <div class="bb-orb-halo"></div>
         <div class="bb-orb-planet"></div>
-        <img class="bb-orb-mark" src="/pics/brand/btools-iconlogo-transparent.png" alt="">
+        <svg class="bb-orb-mark" viewBox="0 0 120 120" aria-hidden="true">
+      <defs>
+        <radialGradient id="bbOrbCore" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#EAF7FF"/><stop offset="45%" stop-color="#45B4F2"/>
+          <stop offset="100%" stop-color="#5E86D0" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="bbOrbBlade" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#A8D8F5"/><stop offset="100%" stop-color="#1F5FA8"/>
+        </linearGradient>
+      </defs>
+      <g fill="url(#bbOrbBlade)">
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(0 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(40 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(80 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(120 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(160 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(200 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(240 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(280 60 60)"/>
+        <path d="M60 60 L60 14 L67 22 L64 58 Z" transform="rotate(320 60 60)"/>
+      </g>
+      <circle cx="60" cy="60" r="17" fill="url(#bbOrbCore)"/>
+      <circle cx="60" cy="60" r="6" fill="#EAF7FF"/>
+    </svg>
         <div class="bb-orb-gleam"></div>
         <div class="bb-orb-ring"></div>
         <div class="bb-orb-moon"></div>

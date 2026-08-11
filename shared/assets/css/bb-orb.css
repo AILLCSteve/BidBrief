@@ -34,8 +34,11 @@
 /* Engraved into the planet's upper face: small and dim enough that screen
    content always reads over it (the iOS proportion is phone-width; a desktop
    viewport needs a smaller mark or it fights the foreground). */
+/* Inline SVG now rather than an <img>. `height: auto` is unreliable for inline
+   SVG (it can collapse to 0 or to the viewBox default), so the box is pinned
+   square to the same dimension the width uses. */
 .bb-orb-mark {
-  width: calc(var(--bb-orb-size) * .15); height: auto;
+  width: calc(var(--bb-orb-size) * .15); height: calc(var(--bb-orb-size) * .15);
   left: var(--bb-orb-x);
   top: calc(var(--bb-orb-y) - var(--bb-orb-size) * .30);
   transform: translate(-50%, -50%);
