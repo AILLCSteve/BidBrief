@@ -18,7 +18,7 @@
   font-family: var(--bb-font-display);
   font-size: 21px; font-weight: 600; letter-spacing: -0.02em; line-height: 1;
 }
-.bb-login-card .bb-lockup-ai { color: var(--bb-glow-ice); }
+.bb-login-card .bb-lockup-ai { color: var(--bb-parent-accent); }
 
 .bb-login-card h1 {
   font-family: var(--bb-font-display);
