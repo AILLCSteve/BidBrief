@@ -307,7 +307,7 @@
 
     children.push(ui.el('div', { class: 'bb-center' }, [
       ui.el('span', { class: 'bb-eyebrow' }, 'Analysis Report'),
-      ui.el('h1', { style: 'font-size:24px;font-weight:700;text-shadow:0 0 14px rgba(94,134,208,.55)' },
+      ui.el('h1', { style: 'font-size:24px;font-weight:700;text-shadow:0 0 14px rgba(201, 162, 39,.55)' },
         payload.document_name || BB.state.analysis.filename || 'Results')
     ]));
 
@@ -800,10 +800,10 @@
     var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
       '<title>BidBrief Analysis Report</title><style>' +
       'body{font-family:Calibri,Arial,sans-serif;font-size:12pt;margin:40px;}' +
-      'h1{color:#104090;border-bottom:4px solid #5E86D0;padding-bottom:12px;}' +
-      'h2{color:#104090;margin-top:36px;}' +
+      'h1{color:#2A2312;border-bottom:4px solid #C9A227;padding-bottom:12px;}' +
+      'h2{color:#2A2312;margin-top:36px;}' +
       'table{width:100%;border-collapse:collapse;margin-top:20px;}' +
-      'th{background:#104090;color:#fff;padding:10px;text-align:left;}' +
+      'th{background:#2A2312;color:#fff;padding:10px;text-align:left;}' +
       'td{padding:9px;border:1px solid #ddd;vertical-align:top;}' +
       '</style></head><body><h1>' + ui.escapeHtml(payload.document_name || 'Document Analysis') +
       '</h1><p>Generated: ' + new Date().toLocaleString() + '</p><table><thead><tr>' +

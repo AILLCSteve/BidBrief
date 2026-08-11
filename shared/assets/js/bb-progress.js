@@ -47,7 +47,7 @@
     grad.setAttribute('id', 'bb-ring-grad');
     grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
     grad.setAttribute('x2', '1'); grad.setAttribute('y2', '1');
-    [['0%', '#5E86D0'], ['100%', '#45B4F2']].forEach(function (stop) {
+    [['0%', '#C9A227'], ['100%', '#ECC766']].forEach(function (stop) {
       var s = window.document.createElementNS(svgNS, 'stop');
       s.setAttribute('offset', stop[0]);
       s.setAttribute('stop-color', stop[1]);

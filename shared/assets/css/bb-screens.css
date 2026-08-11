@@ -31,9 +31,9 @@
 .bb-upload-orb {
   width: 132px; height: 132px; border-radius: 50%; cursor: pointer;
   display: grid; place-items: center; font-size: 42px; color: #fff;
-  border: 1px solid rgba(69, 180, 242, .5);
+  border: 1px solid rgba(236, 199, 102, .5);
   background: radial-gradient(circle at 35% 30%,
-    rgba(69, 180, 242, .9) 0%, var(--bb-periwinkle) 45%, var(--bb-brand-navy) 100%);
+    rgba(236, 199, 102, .9) 0%, var(--bb-periwinkle) 45%, var(--bb-brand-navy) 100%);
   animation: bb-breathe 2.2s ease-in-out infinite;
 }
 .bb-upload-orb.bb-dragover { outline: 2px dashed var(--bb-glow-ice); outline-offset: 8px; }
@@ -61,22 +61,22 @@
 .bb-orb-ring-fill {
   fill: none; stroke: url(#bb-ring-grad); stroke-width: 6; stroke-linecap: round;
   transition: stroke-dashoffset .6s ease;
-  filter: drop-shadow(0 0 10px rgba(69, 180, 242, .95));
+  filter: drop-shadow(0 0 10px rgba(236, 199, 102, .95));
 }
 .bb-orb-ring-core {
   position: absolute; inset: 26px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%,
-    rgba(69, 180, 242, .9) 0%, var(--bb-periwinkle) 45%, var(--bb-brand-navy) 100%);
+    rgba(236, 199, 102, .9) 0%, var(--bb-periwinkle) 45%, var(--bb-brand-navy) 100%);
   animation: bb-breathe 2.6s ease-in-out infinite;
 }
 .bb-orb-ring-pct {
   position: absolute; inset: 0; display: grid; place-items: center;
   font: 700 22px/1 var(--bb-font); color: #fff;
-  font-variant-numeric: tabular-nums; text-shadow: 0 2px 8px rgba(5,14,36,.7);
+  font-variant-numeric: tabular-nums; text-shadow: 0 2px 8px rgba(5, 6, 9,.7);
 }
 .bb-progress-title {
   font-size: 22px; font-weight: 700; margin-top: 16px;
-  text-shadow: 0 0 14px rgba(94, 134, 208, .55);
+  text-shadow: 0 0 14px rgba(201, 162, 39, .55);
 }
 .bb-progress-detail { font-size: 14px; color: var(--bb-text-secondary); text-align: center; max-width: 46ch; }
 .bb-progress-elapsed { font-size: 12px; color: var(--bb-text-tertiary); font-variant-numeric: tabular-nums; }
@@ -93,7 +93,7 @@
   color: var(--bb-glow-ice); border-color: var(--bb-periwinkle);
 }
 .bb-phase-step.bb-current .bb-phase-dot {
-  background: rgba(94, 134, 208, .35);
+  background: rgba(201, 162, 39, .35);
   animation: bb-breathe 2.2s ease-in-out infinite;
 }
 .bb-phase-label { font-size: 9px; font-weight: 600; color: var(--bb-text-tertiary); }
@@ -111,7 +111,7 @@
 }
 .bb-feed-icon {
   flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-  background: rgba(16, 64, 144, .55); color: var(--bb-glow-ice); font-size: 12px;
+  background: rgba(42, 35, 18, .55); color: var(--bb-glow-ice); font-size: 12px;
 }
 .bb-feed-text { flex: 1; font-size: 14px; }
 .bb-feed-time { font-size: 11px; color: var(--bb-text-tertiary); font-variant-numeric: tabular-nums; }
@@ -138,7 +138,7 @@
 .bb-list-row + .bb-list-row { border-top: 1px solid var(--bb-glass-stroke); }
 .bb-list-title { font-size: 14px; font-weight: 600; }
 .bb-list-sub { font-size: 12px; color: var(--bb-text-secondary); }
-.bb-list-why { font-size: 12px; font-style: italic; color: rgba(69, 180, 242, .85); }
+.bb-list-why { font-size: 12px; font-style: italic; color: rgba(236, 199, 102, .85); }
 .bb-list-chevron { margin-left: auto; color: var(--bb-text-tertiary); }
 
 .bb-question { display: flex; flex-direction: column; gap: 6px; }
@@ -152,7 +152,7 @@
 /* L6.5 AnswerSummarizer output - between the answer and the page citations. */
 .bb-answer-summary {
   padding: 10px; border-radius: 10px;
-  background: rgba(94, 134, 208, .12); border: 1px solid rgba(94, 134, 208, .35);
+  background: rgba(201, 162, 39, .12); border: 1px solid rgba(201, 162, 39, .35);
 }
 .bb-answer-summary-label {
   font-size: 11px; font-weight: 700; color: var(--bb-glow-ice);
@@ -172,7 +172,7 @@
 .bb-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
 .bb-table th {
   position: sticky; top: 0; z-index: 1; text-align: left; padding: 10px 12px;
-  background: rgba(16, 64, 144, .85); color: #fff; font-weight: 600;
+  background: rgba(42, 35, 18, .85); color: #fff; font-weight: 600;
   border-bottom: 1px solid var(--bb-glass-stroke);
   backdrop-filter: blur(8px);
 }
@@ -201,14 +201,14 @@
 .bb-sheet-tab:hover { color: var(--bb-text-primary); background: rgba(255, 255, 255, .05); }
 .bb-sheet-tab.bb-active {
   color: var(--bb-text-primary);
-  background: rgba(94, 134, 208, .16);
+  background: rgba(201, 162, 39, .16);
   border-color: var(--bb-glass-stroke);
-  box-shadow: 0 -6px 18px rgba(94, 134, 208, .18);
+  box-shadow: 0 -6px 18px rgba(201, 162, 39, .18);
 }
 .bb-sheet-body { padding: 16px; }
 .bb-section-band {
   padding: 9px 12px; margin: 14px 0 10px; border-radius: 10px;
-  background: rgba(16, 64, 144, .55); border: 1px solid rgba(94, 134, 208, .35);
+  background: rgba(42, 35, 18, .55); border: 1px solid rgba(201, 162, 39, .35);
   font-size: 13px; font-weight: 700; letter-spacing: .3px;
   color: var(--bb-text-primary);
 }
@@ -240,7 +240,7 @@
   margin-top: 8px; padding: 10px; border-radius: 10px; font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--bb-text-secondary); white-space: pre-wrap;
-  background: rgba(16, 64, 144, .25); border: 1px solid rgba(94, 134, 208, .3);
+  background: rgba(42, 35, 18, .25); border: 1px solid rgba(201, 162, 39, .3);
 }
 .bb-visual-facts { margin: 8px 0 0 18px; font-size: 13px; color: var(--bb-text-secondary); }
 .bb-visual-facts li { margin-bottom: 3px; }
@@ -258,8 +258,8 @@
 .bb-vis-badge {
   display: inline-block; padding: 2px 8px; border-radius: 999px;
   font-size: 11px; font-weight: 700; white-space: nowrap; cursor: help;
-  background: rgba(69, 180, 242, .16); color: var(--bb-glow-ice);
-  border: 1px solid rgba(69, 180, 242, .38);
+  background: rgba(236, 199, 102, .16); color: var(--bb-glow-ice);
+  border: 1px solid rgba(236, 199, 102, .38);
 }
 
 /* ---- Question hub ---- */
@@ -310,7 +310,7 @@
   font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   border: 1px solid var(--bb-glass-stroke); color: var(--bb-text-tertiary);
 }
-.bb-chip-live { color: var(--bb-glow-ice); border-color: rgba(69, 180, 242, .45); }
+.bb-chip-live { color: var(--bb-glow-ice); border-color: rgba(236, 199, 102, .45); }
 .bb-chip-ok   { color: var(--bb-success); border-color: rgba(34, 197, 94, .40); }
 .bb-chip-warn { color: var(--bb-warn); border-color: rgba(255, 152, 0, .45); }
 
@@ -336,7 +336,7 @@
 .bb-beta-question { font-size: 13.5px; font-weight: 600; }
 .bb-beta-summary {
   padding: 8px 10px; border-radius: 10px; font-size: 12.5px; line-height: 1.55;
-  background: rgba(69, 180, 242, .10); border: 1px solid rgba(69, 180, 242, .22);
+  background: rgba(236, 199, 102, .10); border: 1px solid rgba(236, 199, 102, .22);
   color: var(--bb-text-secondary);
 }
 

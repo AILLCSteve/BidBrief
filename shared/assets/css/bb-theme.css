@@ -1,5 +1,13 @@
-/* BidBrief design system - ported from the iOS app (BBTheme + Components).
-   Every colour here is the exact hex used by Sources/DesignSystem/Theme.swift. */
+/* BidBrief design system - structure ported from the iOS app.
+
+   COLOUR PARITY WITH iOS IS INTENTIONALLY BROKEN as of 2026-08-11. The web
+   app now uses the btools.ai brass/gold palette so the product matches the
+   parent brand; Sources/DesignSystem/Theme.swift is still ice-blue. Re-theme
+   iOS to match, or expect web and iOS BidBrief to look like different apps.
+
+   The gold values below are the mapping already specified in
+   BIDBRIEF_DESIGN_SYSTEM_HANDOFF.md §2 - same roles, same relative luminance
+   steps, only the hue moves. */
 
 /* ---- Brand typography (self-hosted) ----
    Clash Display + Satoshi, matched to btools.ai so the product and the parent
@@ -34,28 +42,32 @@
 }
 
 :root {
-  --bb-space-deep: #050E24;
-  --bb-space-navy: #0A1F55;
-  --bb-brand-navy: #104090;
-  --bb-periwinkle: #5E86D0;
-  --bb-glow-ice: #45B4F2;
+  --bb-space-deep: #050609;
+  --bb-space-navy: #12100A;
+  --bb-brand-navy: #2A2312;
+  --bb-periwinkle: #C9A227;
+  --bb-glow-ice: #ECC766;
   --bb-success: #22C55E;
-  --bb-warn: #FF9800;
+  --bb-warn: #FF7A18;   /* pushed oranger: #FF9800 was too close to the gold accent */
   --bb-danger: #DC2626;
-  --bb-glass-fill: rgba(255, 255, 255, 0.08);
-  --bb-glass-strong: rgba(255, 255, 255, 0.14);
-  --bb-glass-stroke: rgba(255, 255, 255, 0.18);
-  --bb-text-primary: #FFFFFF;
-  --bb-text-secondary: rgba(255, 255, 255, 0.65);
-  --bb-text-tertiary: rgba(255, 255, 255, 0.40);
+  /* ~25% weaker than the blue set: white glass over near-black reads
+     brighter than the same fill over navy, and at 0.08 cards go milky. */
+  --bb-glass-fill: rgba(255, 255, 255, 0.06);
+  --bb-glass-strong: rgba(255, 255, 255, 0.11);
+  /* The stroke carries the gold. A white hairline on near-black reads as a
+     grey outline; gold at low alpha keeps the "lit edge" quality. */
+  --bb-glass-stroke: rgba(236, 199, 102, 0.16);
+  --bb-text-primary: #F7F6F2;   /* warm off-white, not pure white */
+  --bb-text-secondary: rgba(247, 246, 242, 0.65);
+  --bb-text-tertiary: rgba(247, 246, 242, 0.40);
   --bb-radius-card: 18px;
   --bb-radius-hub: 20px;
   /* Satoshi for body/UI, Clash Display for the brand lockup and headings.
      The system stack stays as the fallback, so a failed font load degrades to
      exactly the previous look rather than to a serif. */
-  /* The btools.ai parent mark keeps its own brass accent on top of the blue
-     product UI — a parent logo carries its own colour, the way an imprint does.
-     Only the lockup uses this; nothing else in the app should. */
+  /* The btools.ai parent mark. Now the same hue as the accent because the whole
+     app is gold, but kept as its own token: it is the PARENT's colour, and it
+     should not follow if this app is ever re-themed again. */
   --bb-parent-accent: #ECC766;
   --bb-font: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --bb-font-display: 'Clash Display', var(--bb-font);
@@ -80,13 +92,13 @@ a { color: var(--bb-glow-ice); }
   padding: 16px;
   border-radius: var(--bb-radius-card);
   background:
-    linear-gradient(rgba(16, 64, 144, 0.18), rgba(16, 64, 144, 0.18)),
+    linear-gradient(rgba(42, 35, 18, 0.18), rgba(42, 35, 18, 0.18)),
     rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   border: 1px solid var(--bb-glass-stroke);
-  box-shadow: 0 10px 16px rgba(5, 14, 36, 0.60),
-              0 4px 24px rgba(94, 134, 208, 0.18);
+  box-shadow: 0 10px 16px rgba(5, 6, 9, 0.60),
+              0 4px 24px rgba(201, 162, 39, 0.18);
   position: relative;
 }
 /* The lit top edge, as a gradient border overlay (border-image kills radii). */
@@ -94,7 +106,7 @@ a { color: var(--bb-glow-ice); }
   content: ''; position: absolute; inset: 0; pointer-events: none;
   border-radius: inherit; padding: 1px;
   background: linear-gradient(135deg,
-      rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.06), rgba(94, 134, 208, 0.30));
+      rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.06), rgba(201, 162, 39, 0.30));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
 }
@@ -115,12 +127,18 @@ a { color: var(--bb-glow-ice); }
   display: flex; align-items: center; justify-content: center; gap: 8px;
   width: 100%; padding: 14px 22px; border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 999px; cursor: pointer;
-  font: 600 16px/1.2 var(--bb-font); color: #fff;
-  background: linear-gradient(135deg, rgba(69, 180, 242, 0.9), var(--bb-periwinkle), var(--bb-brand-navy));
-  box-shadow: 0 6px 18px rgba(94, 134, 208, 0.6);
+  /* Dark text on a light-gold gradient, not white on a light-to-dark one.
+     The blue original ran ice -> periwinkle -> navy and carried white text
+     fine, but the same gradient in gold starts far too luminous: white on
+     #ECC766 is about 1.7:1, which fails legibility outright. Keeping the whole
+     ramp in the light golds and flipping the text dark gives ~11:1 and matches
+     btools.ai's own primary button. */
+  font: 600 16px/1.2 var(--bb-font); color: #1A1405;
+  background: linear-gradient(135deg, #F5DFA0, var(--bb-glow-ice) 45%, var(--bb-periwinkle));
+  box-shadow: 0 6px 18px rgba(201, 162, 39, 0.45);
   transition: transform .12s ease, box-shadow .2s ease, opacity .2s ease;
 }
-.bb-btn-glow:hover:not(:disabled) { box-shadow: 0 8px 30px rgba(94, 134, 208, 0.8); }
+.bb-btn-glow:hover:not(:disabled) { box-shadow: 0 8px 30px rgba(201, 162, 39, 0.8); }
 .bb-btn-glow:active:not(:disabled) { transform: scale(.97); }
 .bb-btn-glow:disabled { opacity: .5; cursor: not-allowed; }
 .bb-btn-glow.bb-pulses:not(:disabled) { animation: bb-breathe 2.2s ease-in-out infinite; }
@@ -130,7 +148,7 @@ a { color: var(--bb-glow-ice); }
   padding: 11px 18px; border-radius: 999px; cursor: pointer;
   font: 500 14px/1.2 var(--bb-font);
   color: var(--bb-glow-ice); background: var(--bb-glass-fill);
-  border: 1px solid rgba(69, 180, 242, 0.35);
+  border: 1px solid rgba(236, 199, 102, 0.35);
   transition: transform .12s ease, background .2s ease;
 }
 .bb-btn-ghost:hover:not(:disabled) { background: var(--bb-glass-strong); }
@@ -146,20 +164,20 @@ a { color: var(--bb-glow-ice); }
   display: flex; align-items: center; gap: 16px; width: 100%; text-align: left;
   padding: 18px; border-radius: var(--bb-radius-hub); cursor: pointer;
   background:
-    linear-gradient(rgba(16, 64, 144, 0.22), rgba(16, 64, 144, 0.22)),
+    linear-gradient(rgba(42, 35, 18, 0.22), rgba(42, 35, 18, 0.22)),
     rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(69, 180, 242, 0.45);
-  box-shadow: 0 9px 14px rgba(5, 14, 36, 0.6);
+  border: 1px solid rgba(236, 199, 102, 0.45);
+  box-shadow: 0 9px 14px rgba(5, 6, 9, 0.6);
   color: var(--bb-text-primary);
   animation: bb-breathe 2.2s ease-in-out infinite;
 }
 .bb-hub-btn .bb-hub-icon {
   flex: 0 0 44px; height: 44px; border-radius: 50%;
   display: grid; place-items: center; font-size: 19px;
-  color: var(--bb-glow-ice); background: rgba(16, 64, 144, 0.6);
-  border: 1px solid rgba(69, 180, 242, 0.45);
+  color: var(--bb-glow-ice); background: rgba(42, 35, 18, 0.6);
+  border: 1px solid rgba(236, 199, 102, 0.45);
 }
 
 /* Emoji glyphs stand in for SF Symbols. Desaturating them keeps the palette
@@ -178,13 +196,13 @@ a { color: var(--bb-glow-ice); }
 .bb-hub-btn .bb-hub-title { font-size: 16px; font-weight: 600; }
 .bb-hub-btn .bb-hub-sub { font-size: 12px; color: var(--bb-text-secondary); }
 .bb-hub-btn .bb-hub-chevron { margin-left: auto; color: var(--bb-text-tertiary); font-size: 20px; }
-.bb-hub-btn.bb-primary { transform: scale(1.04); box-shadow: 0 0 22px rgba(69, 180, 242, 0.55); }
+.bb-hub-btn.bb-primary { transform: scale(1.04); box-shadow: 0 0 22px rgba(236, 199, 102, 0.55); }
 
 /* ---- Stage chrome ---- */
 .bb-stage-header { text-align: center; animation: bb-rise .6s ease-out both; }
 .bb-stage-header h1 {
   font-size: 34px; font-weight: 700; letter-spacing: -0.5px;
-  text-shadow: 0 0 18px rgba(94, 134, 208, 0.55);
+  text-shadow: 0 0 18px rgba(201, 162, 39, 0.55);
 }
 .bb-stage-header p {
   margin: 6px auto 0; font-size: 14px; color: var(--bb-text-secondary); max-width: 46ch;
@@ -217,8 +235,8 @@ a { color: var(--bb-glow-ice); }
   transition: background .2s ease, color .2s ease;
 }
 .bb-segmented button.bb-active {
-  background: rgba(94, 134, 208, .35); color: #fff;
-  box-shadow: 0 0 10px rgba(94, 134, 208, .45);
+  background: rgba(201, 162, 39, .35); color: #fff;
+  box-shadow: 0 0 10px rgba(201, 162, 39, .45);
 }
 
 /* ---- Toggle (iOS switch) ---- */
@@ -258,7 +276,7 @@ a { color: var(--bb-glow-ice); }
 .bb-tabbar {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: 10px;
   z-index: 2500; display: flex; gap: 4px; padding: 5px;
-  border-radius: 999px; background: rgba(10, 31, 85, 0.72);
+  border-radius: 999px; background: rgba(18, 16, 10, 0.72);
   border: 1px solid var(--bb-glass-stroke);
   backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
   width: min(520px, calc(100% - 48px));
@@ -272,8 +290,8 @@ a { color: var(--bb-glow-ice); }
 }
 .bb-tab .bb-tab-icon { font-size: 17px; line-height: 1; }
 .bb-tab.bb-active {
-  color: var(--bb-glow-ice); background: rgba(94, 134, 208, 0.22);
-  box-shadow: 0 0 10px rgba(94, 134, 208, 0.55);
+  color: var(--bb-glow-ice); background: rgba(201, 162, 39, 0.22);
+  box-shadow: 0 0 10px rgba(201, 162, 39, 0.55);
 }
 .bb-tab.bb-nudged { color: var(--bb-glow-ice); }
 .bb-next-chip {
@@ -286,15 +304,15 @@ a { color: var(--bb-glow-ice); }
 .bb-modal {
   position: fixed; inset: 0; z-index: 3200; display: none;
   align-items: center; justify-content: center; padding: 20px;
-  background: rgba(5, 14, 36, .78); backdrop-filter: blur(6px);
+  background: rgba(5, 6, 9, .78); backdrop-filter: blur(6px);
 }
 .bb-modal.bb-open { display: flex; }
 .bb-modal-card {
   width: min(880px, 100%); max-height: 86vh; display: flex; flex-direction: column;
   border-radius: var(--bb-radius-card); overflow: hidden;
-  background: linear-gradient(rgba(16, 64, 144, .28), rgba(16, 64, 144, .28)), rgba(10, 31, 85, .92);
+  background: linear-gradient(rgba(42, 35, 18, .28), rgba(42, 35, 18, .28)), rgba(18, 16, 10, .92);
   border: 1px solid var(--bb-glass-stroke);
-  box-shadow: 0 24px 60px rgba(5, 14, 36, .8);
+  box-shadow: 0 24px 60px rgba(5, 6, 9, .8);
   animation: bb-fade-scale .25s ease-out both;
 }
 .bb-modal-head {
@@ -310,14 +328,14 @@ a { color: var(--bb-glow-ice); }
 
 /* ---- Animations ---- */
 @keyframes bb-breathe {
-  0%, 100% { transform: scale(1);     box-shadow: 0 0 14px rgba(94, 134, 208, .30); }
-  50%      { transform: scale(1.035); box-shadow: 0 0 30px rgba(94, 134, 208, .75); }
+  0%, 100% { transform: scale(1);     box-shadow: 0 0 14px rgba(201, 162, 39, .30); }
+  50%      { transform: scale(1.035); box-shadow: 0 0 30px rgba(201, 162, 39, .75); }
 }
 @keyframes bb-throb {
   0%, 100% { transform: scale(1);    opacity: .86;
-             box-shadow: 0 0 8px rgba(69, 180, 242, .35); }
+             box-shadow: 0 0 8px rgba(236, 199, 102, .35); }
   50%      { transform: scale(1.09); opacity: 1;
-             box-shadow: 0 0 22px rgba(69, 180, 242, .95), 0 0 40px rgba(69, 180, 242, .5); }
+             box-shadow: 0 0 22px rgba(236, 199, 102, .95), 0 0 40px rgba(236, 199, 102, .5); }
 }
 @keyframes bb-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes bb-fade-scale { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
