@@ -18,6 +18,7 @@
   var draft = {
     userText: '',
     contextFile: null,
+    grounding: null,
     questionsSourceFile: null,
     questionsSourceText: '',
     sourceIntent: '',
@@ -149,6 +150,7 @@
     draft.generatedOnce = false;
     draft.personas = [];
     draft.documentReading = '';
+    draft.grounding = null;
     draft.suggestions = [];
     draft.selectedSuggestions = {};
     draft.suggesting = false;
@@ -399,12 +401,27 @@
       }
       draft.personas = data.generation_personas || [];
       draft.documentReading = data.document_reading || '';
+      draft.grounding = data.grounding || null;
       draft.generatedOnce = true;
       draft.generating = false;
       return BB.questionHub.save().then(function () {
         var summary = BB.state.questionHub.loadedSetSummary();
-        ui.banner('info', 'Imported ' + summary.questions + ' questions across ' +
-          summary.sections + ' sections.');
+        /* Say plainly whether the document was actually read. Ungrounded
+           questions used to look exactly like grounded ones — same UI, same
+           success banner — so the only signal was noticing the questions were
+           generic, which costs a full generation to discover. */
+        var g = draft.grounding;
+        if (g && g.warning) {
+          ui.banner('error', g.warning);
+        } else if (g && g.grounded) {
+          ui.banner('info', 'Imported ' + summary.questions + ' questions across ' +
+            summary.sections + ' sections · grounded in ' +
+            (g.files[0] || 'your document') + ' (' +
+            g.chars.toLocaleString() + ' characters read).');
+        } else {
+          ui.banner('info', 'Imported ' + summary.questions + ' questions across ' +
+            summary.sections + ' sections.');
+        }
         render(host, onBack);
       });
     }).catch(function (error) {

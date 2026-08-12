@@ -1278,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.16'
+        'version': '2.5.17'
     })
 
 @app.route('/pics/<path:filename>')
@@ -4051,6 +4051,52 @@ def add_question():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _grounding_report(uploaded_file, context_file, grounding_text,
+                      questions_source_text, source_kind) -> dict:
+    """What the model ACTUALLY read, reported to the caller every time.
+
+    "The questions ignore my document" has exactly two causes, and they are
+    indistinguishable from the output alone:
+      1. no file reached this endpoint (a client-side detachment), or
+      2. a file arrived and yielded NO TEXT.
+
+    (2) is the quiet one. _extract_doc_context is pure text extraction with no
+    OCR, so a SCANNED pdf — patent assignments, recorded deeds, faxed
+    addenda — extracts to an empty string, and generation then falls back to
+    generic domain questions with no indication anything was wrong. Identical
+    output every run, because the input really is identical: nothing.
+
+    Reporting characters read turns both cases into a statement of fact.
+    """
+    names = [f.filename for f in (uploaded_file, context_file)
+             if f is not None and getattr(f, 'filename', '')]
+    report = {
+        'chars': len(grounding_text),
+        'questions_source_chars': len(questions_source_text),
+        'source_kind': source_kind,
+        'files': names,
+        'grounded': bool(grounding_text),
+    }
+    if not grounding_text and not questions_source_text:
+        if names:
+            report['warning'] = (
+                'No readable text could be extracted from ' + ', '.join(names) +
+                '. This is normally a scanned or image-only PDF: it has pictures of '
+                'words, not words. The questions below are therefore NOT based on '
+                'your document. Use a text-based PDF, or run the file through OCR '
+                'first.')
+            report['reason'] = 'no_text_in_file'
+        else:
+            report['warning'] = (
+                'No document reached question generation, so the questions below are '
+                'NOT based on your document. Attach it in the Document Context slot '
+                'and generate again.')
+            report['reason'] = 'no_file_sent'
+        logger.warning(f"🗂️ Q-gen produced UNGROUNDED questions: {report['reason']} "
+                       f"(files={names or 'none'})")
+    return report
+
+
 def _extract_doc_context(pdf_path: str, max_chars: int = 4000) -> str:
     """
     Lightly extract context from a PDF for question generation guidance.
@@ -4446,7 +4492,15 @@ def generate_question_set():
             },
             # The bespoke expert panel that authored this set (may be []).
             'generation_personas': generation_personas,
-            'document_reading': document_reading
+            'document_reading': document_reading,
+            # PROOF of what the model actually read. "Ungrounded questions" is
+            # almost always "no document reached this endpoint", and until now
+            # that fact lived only in a Render log line nobody can see — so a
+            # client-side detachment was indistinguishable from a bad prompt.
+            # Now the caller is told, every time, in characters.
+            'grounding': _grounding_report(uploaded_file, context_file,
+                                           grounding_text, questions_source_text,
+                                           source_kind)
         })
 
     except json.JSONDecodeError as e:

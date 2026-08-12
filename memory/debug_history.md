@@ -5,6 +5,47 @@ Read this before debugging anything in this repo. Also read
 
 ---
 
+## 2026-08-12 (e) — "Q-gen ignores my document" has TWO causes, and the second is silent (2.5.17)
+
+**Symptom:** the same EXACT 3 generic bid questions for a patent assignment PDF,
+every time. Minutes later the SAME build grounded perfectly on a bank statement.
+
+**Not a regression — the document.** `Assign_Of_PA_63 886093.pdf` is a USPTO
+patent assignment: a SCANNED image PDF. `_extract_doc_context` is pure text
+extraction (PyMuPDF, pdfplumber fallback) with **no OCR** and a bare
+`except: return ''`. A scan therefore yields an empty string, generation falls
+back to its bid-domain framing, and GPT-5.x with no temperature is deterministic
+— so identical input (nothing) produces byte-identical questions every run.
+**"Exactly the same output every time" is the fingerprint of an empty input, not
+a weak model.**
+
+**The recorded rule was half right.** CLAUDE.md/debug history said: ungrounded
+questions mean "no document reached the endpoint". There are actually TWO
+causes, indistinguishable from the output AND from the logs:
+  1. no file was sent (client-side detachment), or
+  2. **a file arrived and extracted to zero text** (scanned/image-only PDF).
+Both produce: no `🗂️ Q-gen material` line (it is gated on having text),
+`personas: 0`, and generic questions. Confirming "the file was uploaded" proves
+nothing — `/api/upload` succeeding says the bytes arrived, not that they contain
+readable words.
+
+**Fix (observability, not logic):** `_grounding_report()` rides every generate
+response — characters read, filenames received, and an explicit warning naming
+which of the two causes applies. The Create screen now says "grounded in X
+(12,431 characters read)" on success, or a red banner explaining that a scanned
+PDF has pictures of words, not words. A silent generic answer becomes a stated
+fact.
+
+**Diagnostic order for any "the AI ignored my document":** (1) is there a
+grounding char count > 0? (2) if a file was received but chars = 0, it is a
+scan — OCR it. Never touch the prompt; it has been stable for months.
+
+**Open opportunity:** this app already ships a vision pipeline
+(`BIDBRIEF_MODEL_VISION`, Visual Intelligence). A scanned PDF could be read for
+Q-gen grounding through the same model instead of being refused.
+
+---
+
 ## 2026-08-12 (d) — DI missing ONLY on the completion view: a rule we had already written, broken again (2.5.16)
 
 **STORAGE IS WORKING** as of this round — E2E green and a real analysis landed
