@@ -414,10 +414,16 @@
         if (g && g.warning) {
           ui.banner('error', g.warning);
         } else if (g && g.grounded) {
+          /* Name the page images when a scan had to be READ rather than parsed —
+             the user should know the grounding came from vision, not a text
+             layer, because that is the one case worth spot-checking. */
+          var via = (g.vision_pages && g.vision_pages.length)
+            ? ' · page ' + g.vision_pages.join(', ') + ' read from the page image'
+            : '';
           ui.banner('info', 'Imported ' + summary.questions + ' questions across ' +
             summary.sections + ' sections · grounded in ' +
             (g.files[0] || 'your document') + ' (' +
-            g.chars.toLocaleString() + ' characters read).');
+            g.chars.toLocaleString() + ' characters read)' + via + '.');
         } else {
           ui.banner('info', 'Imported ' + summary.questions + ' questions across ' +
             summary.sections + ' sections.');

@@ -1278,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.17'
+        'version': '2.5.18'
     })
 
 @app.route('/pics/<path:filename>')
@@ -4052,7 +4052,8 @@ def add_question():
 
 
 def _grounding_report(uploaded_file, context_file, grounding_text,
-                      questions_source_text, source_kind) -> dict:
+                      questions_source_text, source_kind,
+                      vision_stats: dict = None) -> dict:
     """What the model ACTUALLY read, reported to the caller every time.
 
     "The questions ignore my document" has exactly two causes, and they are
@@ -4077,14 +4078,15 @@ def _grounding_report(uploaded_file, context_file, grounding_text,
         'files': names,
         'grounded': bool(grounding_text),
     }
+    vision_pages = list((vision_stats or {}).get('pages') or [])
+    report['vision_pages'] = vision_pages
     if not grounding_text and not questions_source_text:
         if names:
             report['warning'] = (
                 'No readable text could be extracted from ' + ', '.join(names) +
-                '. This is normally a scanned or image-only PDF: it has pictures of '
-                'words, not words. The questions below are therefore NOT based on '
-                'your document. Use a text-based PDF, or run the file through OCR '
-                'first.')
+                ', and reading the page images did not succeed either. The questions '
+                'below are therefore NOT based on your document. If this is a scan, '
+                'try a clearer copy or run it through OCR first.')
             report['reason'] = 'no_text_in_file'
         else:
             report['warning'] = (
@@ -4097,7 +4099,82 @@ def _grounding_report(uploaded_file, context_file, grounding_text,
     return report
 
 
-def _extract_doc_context(pdf_path: str, max_chars: int = 4000) -> str:
+def _qgen_vision_max_pages() -> int:
+    """How many text-less pages the Q-gen context scan may READ with vision.
+
+    Deliberately small. The context scan is the light pass that decides what a
+    document IS — it is not the analysis. Four pages is enough to identify a
+    scanned assignment, deed or addendum and ground questions in it, while
+    keeping cost and latency close to the text-only path.
+    """
+    try:
+        return max(0, int(os.environ.get('BIDBRIEF_QGEN_VISION_MAX_PAGES', '4')))
+    except ValueError:
+        return 4
+
+
+_QGEN_VISION_PROMPT = (
+    'Transcribe this document page for a downstream system that will write '
+    'analysis questions about it. Output PLAIN TEXT only, no commentary and no '
+    'markdown. Include the title, headings, party names, dates, reference and '
+    'recording numbers, and the substantive body text, preserving reading order. '
+    'If the page is a form, keep each label with its value. If a region is '
+    'illegible, write [illegible] rather than guessing. Do not summarise, '
+    'interpret, or add anything that is not printed on the page.'
+)
+
+
+def _vision_read_page(http_requests, api_key: str, model: str, pdf_path: str,
+                      page_index: int, max_chars: int = 2500) -> str:
+    """Read ONE text-less page with the vision model. Never raises.
+
+    A scanned PDF holds pictures of words. Text extraction returns nothing and
+    question generation silently falls back to generic domain questions — so
+    the page is transcribed here instead, using the same model family and the
+    same render sizing the analysis pipeline's visual pass uses.
+    """
+    try:
+        from services.hotdog.visual_intelligence import render_page_b64, visual_model
+        b64 = render_page_b64(pdf_path, page_index)
+        if not b64:
+            return ''
+        from services.ai_models import completion_params
+        payload = {
+            'messages': [{
+                'role': 'user',
+                'content': [
+                    {'type': 'text', 'text': _QGEN_VISION_PROMPT},
+                    {'type': 'image_url',
+                     'image_url': {'url': f'data:image/png;base64,{b64}',
+                                   'detail': 'high'}},
+                ],
+            }],
+            # BIDBRIEF_MODEL_VISION overrides ops-side without a deploy; falls
+            # back to the model the caller is already using.
+            **completion_params(visual_model() or model, 1600, temperature=0.2,
+                                reasoning_effort='low'),
+        }
+        resp = http_requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={'Authorization': f'Bearer {api_key}',
+                     'Content-Type': 'application/json'},
+            json=payload, timeout=90)
+        if resp.status_code != 200:
+            logger.warning(f'👁️ Q-gen vision read failed for page {page_index + 1}: '
+                           f'HTTP {resp.status_code} {resp.text[:180]}')
+            return ''
+        text = (resp.json()['choices'][0]['message']['content'] or '').strip()
+        return text[:max_chars]
+    except Exception as e:
+        # Non-fatal by design: a vision failure must degrade to the text-only
+        # behaviour, never break question generation.
+        logger.warning(f'👁️ Q-gen vision read errored for page {page_index + 1}: {e}')
+        return ''
+
+
+def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
+                         http_requests=None, api_key: str = '',
+                         model: str = '', vision_stats: dict = None) -> str:
     """
     Lightly extract context from a PDF for question generation guidance.
     Pulls title page, first few pages, and scans for TOC / glossary / appendix pages.
@@ -4114,6 +4191,7 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000) -> str:
                 # First 4 pages + last 3 pages
                 indices = list(range(min(4, total))) + list(range(max(0, total - 3), total))
                 seen = set()
+                budget = _qgen_vision_max_pages() if (http_requests and api_key) else 0
                 for i in indices:
                     if i in seen:
                         continue
@@ -4121,6 +4199,14 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000) -> str:
                     t = pdf.pages[i].extract_text() or ''
                     if t.strip():
                         pages_text.append(f"[Page {i+1}]\n{t.strip()}")
+                    elif budget > 0:
+                        # Same scanned-page fallback as the PyMuPDF path.
+                        seen_text = _vision_read_page(http_requests, api_key, model,
+                                                      pdf_path, i)
+                        if seen_text:
+                            budget -= 1
+                            pages_text.append(
+                                f"[Page {i+1} - read from the page image]\n{seen_text}")
                 raw = '\n\n'.join(pages_text)
                 return raw[:max_chars]
         except Exception:
@@ -4157,13 +4243,34 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000) -> str:
                 if len(context_pages) >= 12:
                     break
 
+        # A scanned page has no text layer at all. Rather than skipping it —
+        # which is how a scanned assignment produced zero grounding and generic
+        # questions — read it with the vision model, bounded so the context scan
+        # stays the light pass it is meant to be.
+        selected = sorted(set(context_pages))
+        can_see = bool(http_requests and api_key and _qgen_vision_max_pages())
+        vision_budget = _qgen_vision_max_pages() if can_see else 0
+        vision_pages = []
+
         parts = []
-        for i in sorted(set(context_pages)):
+        for i in selected:
             t = doc[i].get_text('text').strip()
             if t:
                 parts.append(f"[Page {i+1}]\n{t}")
+            elif vision_budget > 0:
+                seen_text = _vision_read_page(http_requests, api_key, model, pdf_path, i)
+                if seen_text:
+                    vision_budget -= 1
+                    vision_pages.append(i + 1)
+                    parts.append(f"[Page {i+1} - read from the page image]\n{seen_text}")
 
         doc.close()
+        if vision_pages:
+            logger.info(f'👁️ Q-gen context scan read {len(vision_pages)} text-less '
+                        f'page(s) with vision: {vision_pages}')
+        if vision_stats is not None:
+            vision_stats['pages'] = vision_pages
+            vision_stats['scanned_pages'] = len(selected)
         raw = '\n\n'.join(parts)
         return raw[:max_chars]
     except Exception as e:
@@ -4315,9 +4422,16 @@ def generate_question_set():
     #   * `file`         — framed by source_kind: 'questions_source' = derive the
     #                      questions FROM it; 'context' = domain grounding.
     #   * `context_file` — the bid/analyzer document itself, ALWAYS grounding.
+    vision_stats = {}
+
     def _read_upload(f):
         """Return extracted text for an uploaded file (PDF via the doc-context
-        extractor, otherwise UTF-8 text). '' on any failure or absence."""
+        extractor, otherwise UTF-8 text). '' on any failure or absence.
+
+        The extractor is handed the OpenAI credentials so that any page with no
+        text layer can be READ from its image rather than skipped — otherwise a
+        scanned document grounds on nothing at all.
+        """
         if not f:
             return ''
         try:
@@ -4327,7 +4441,9 @@ def generate_question_set():
                     f.save(tmp.name)
                     tmp_path = tmp.name
                 try:
-                    return _extract_doc_context(tmp_path) or ''
+                    return _extract_doc_context(
+                        tmp_path, http_requests=http_requests, api_key=api_key,
+                        model=gen_model, vision_stats=vision_stats) or ''
                 finally:
                     try:
                         os.unlink(tmp_path)
@@ -4500,7 +4616,7 @@ def generate_question_set():
             # Now the caller is told, every time, in characters.
             'grounding': _grounding_report(uploaded_file, context_file,
                                            grounding_text, questions_source_text,
-                                           source_kind)
+                                           source_kind, vision_stats)
         })
 
     except json.JSONDecodeError as e:

@@ -43,6 +43,30 @@ _MAX_RENDER_EDGE = 1568
 _SPARSE_TEXT_CHARS = 600
 
 
+def render_page_b64(pdf_path: str, page_index: int) -> Optional[str]:
+    """One page as a base64 PNG, capped at the vision model's useful edge.
+
+    Module-level so callers outside the orchestrator — notably the Q-gen context
+    scan, which is synchronous and has no VisualIntelligence instance — can read
+    a page that carries no text layer without duplicating the render or the
+    sizing rule. `page_index` is 0-based.
+    """
+    import fitz
+    try:
+        doc = fitz.open(pdf_path)
+        try:
+            page = doc[page_index]
+            edge = max(float(page.rect.width), float(page.rect.height), 1.0)
+            zoom = min(_MAX_RENDER_EDGE / edge, 3.0)
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+            return base64.b64encode(pix.tobytes('png')).decode('ascii')
+        finally:
+            doc.close()
+    except Exception as e:
+        logger.warning(f'Page render failed for page {page_index + 1}: {e}')
+        return None
+
+
 def visual_model() -> str:
     """Model used for vision calls. Defaults to the analysis model the caller
     passes in; BIDBRIEF_MODEL_VISION overrides it ops-side without a deploy."""
