@@ -1198,3 +1198,46 @@ it survives 16px on light and dark tab chrome) with 16/32 PNG fallbacks and a
 **Verified:** `pytest -q` → **266 passed**, `node --test` → **139 passed**
 (three stale assertions left by the brass/gold re-theme and the brand-footer
 rewrite repaired along the way). `/health` → **2.5.8**.
+
+---
+
+## Δ 2026-08-12 (b) — Storage that can say what is wrong; DI reaches every branch (2.5.9 → 2.5.12)
+
+**The diagnosis was the bug.** `couldn't get a connection after 10.00 sec` is
+psycopg_pool's generic PoolTimeout. Reproduced against a host that can never
+connect: the pool logs the REAL cause to its own logger and hands the caller a
+message carrying none of it. Auth failure, SSL, connection cap, a sleeping
+compute **and pool starvation** all read identically — which is why a week
+produced no actionable error. A handler on the `psycopg_pool` logger now keeps
+the real message, and `/api/admin/storage` reports the pool's own counters,
+because **two unrelated causes share that one string**: cannot-connect shows
+`connections_errors` climbing; starvation shows `pool_available` 0 and
+`requests_waiting` high with errors at ZERO.
+
+**Four independent ways an analysis was lost, all fixed:**
+1. the malformed INSERT (2.5.8) — `bb_analyses` could never take a row;
+2. **failed writes silently discarded** — `save_analysis()` returns False rather
+   than raising and `_persist_analysis` ignored it, so a finished 20-minute run
+   during a blip was gone permanently. Now queued and retried every 60s, with
+   `pending_writes` exposed; first write and retry share one `_write_snapshot()`;
+3. **a pool that could never rebuild** — `enabled` was cleared only inside
+   `init()`, so no runtime failure could trigger `_try_reinit()`; three
+   consecutive failures now discard the pool;
+4. **starvation** — pool capped at 4 while gunicorn runs `threads = 10`, with
+   `num_workers=1` serializing every connection open. Now 10 and 3.
+
+Ruled out by experiment: the pool's worker thread survives repeated failures.
+NOT proven: which failure was live — nothing could distinguish them before 2.5.9.
+
+**Document Intelligence.** One `buildWorkbook` serves both the Analyze tab and
+the admin modal and `sheetList` already listed the sheet, so the tab was missing
+because the DATA never arrived. The `restored` branch of `/api/results` returned
+without re-attaching the tables (the other four re-attach) — and that is the
+branch every analysis is read from after a deploy. Separately, Excel gates on
+plain truthiness while the browser gated on `.length`, `undefined` for a dict, so
+one payload produced an Excel sheet and no browser tab. Client now normalises
+array/dict/bare-object, and an empty tab states why. `tests/test_di_parity.py` +
+`tests/js/bb-di-parity.test.js` pin it.
+
+**Verified:** `pytest -q` → **284 passed**; `node --test` → **146 passed**;
+`/health` → **2.5.12**.

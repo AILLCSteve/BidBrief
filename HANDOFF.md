@@ -1,11 +1,63 @@
 # HANDOFF — BidBrief (Flask backend + web front-end)
 
-> Updated: 2026-08-12 — **2.5.8: durable storage actually stores now.** The
-> analysis INSERT had been malformed SQL since 2.5.3, so `bb_analyses` took zero
-> rows for six releases while every other table worked. Read
-> `memory/debug_history.md` § 2026-08-12 before touching `services/persistence.py`.
+> Updated: 2026-08-12 — **live on 2.5.12.** Four separate ways an analysis could
+> be lost are fixed, and the storage subsystem can finally say what is wrong.
+> Read `memory/debug_history.md` § 2026-08-12 (b) before touching
+> `services/persistence.py`.
 
-## 2.5.8 — the analysis write was broken the whole time (this round)
+## 2.5.9 → 2.5.12 — why storage looked intermittent for a week
+
+**The diagnosis problem came first.** `couldn't get a connection after 10.00 sec`
+is psycopg_pool's generic PoolTimeout — reproduced against a host that can never
+connect, it prints the REAL cause to its own logger and hands the caller a
+message containing none of it. Auth failure, SSL, connection cap, a sleeping
+compute **and pool starvation** are one identical sentence. The store was
+observable; the pool was blind.
+
+| Fix | What it was |
+|---|---|
+| pool logger captured | the real connection error now reaches `last_error` and the admin line |
+| `pool` counters on `/api/admin/storage` | separates **cannot connect** (`connections_errors` climbing) from **starved** (`pool_available` 0, `requests_waiting` high, errors ZERO) — nothing in the error text ever could |
+| pool 4 → 10, workers 1 → 3 | gunicorn runs `threads = 10`; six could wait on connections the pool was never allowed to open |
+| self-heal | `enabled` was cleared ONLY inside `init()`, so a pool that broke once stayed broken for the life of the process |
+| **queued write retries** | `save_analysis()` returns False rather than raising and the caller **ignored it** — a finished 20-minute run during a blip was gone for good. Now retried every 60s; `pending_writes` shows the depth |
+| `endpoint` reported | pooled vs direct Neon host, credentials never included |
+| probe writes nothing | `EXPLAIN` on the real INSERT resolves every column against the live schema without executing; probe-shaped ids are excluded from counts |
+
+**Ruled out by experiment:** the pool's connection-creating worker thread
+survives repeated failures, so "the worker died" is not a cause.
+
+**NOT proven — do not claim otherwise:** which of *cannot connect* or *starved*
+was the live failure. Until 2.5.9 nothing could tell them apart. The counters
+answer it in one reading.
+
+## Document Intelligence reaches the browser (2.5.9)
+
+The view was never at fault — one `buildWorkbook` serves the Analyze tab and the
+admin modal, and `sheetList` already listed the sheet. Two holes starved it:
+
+1. The **`restored`** branch of `/api/results` returned without re-attaching the
+   tables; the other four re-attach. That branch is what you read after every
+   deploy, so with storage working the tab would have vanished for essentially
+   every analysis while the Excel export kept its sheet.
+2. Excel gates on plain truthiness then iterates; the browser gated on
+   `.length`, which is `undefined` for a dict — the same payload rendered an
+   Excel sheet and no browser tab. The client now normalises array, dict and
+   bare-object shapes, and an empty tab states WHY instead of disappearing.
+
+`tests/test_di_parity.py` (fails on `restored` without the fix) and
+`tests/js/bb-di-parity.test.js` pin the export/browser agreement.
+
+**Verified:** `pytest -q` → **284 passed**; `node --test` → **146 passed**.
+
+### What only the user can confirm
+1. Run one analysis and watch for a row in `bb_analyses` — then the storage line.
+2. `pending_writes` above zero for over a minute = saves still failing.
+3. Whether `endpoint` reads `pooled` or `direct`.
+
+> Previous round below.
+
+## 2.5.8 — the analysis write was broken the whole time
 
 **One line.** `services/persistence.py` had `_aware_utc(completed_at)` inside the
 INSERT's **column list** — a Python call pasted into SQL by the 2.5.3 timezone
