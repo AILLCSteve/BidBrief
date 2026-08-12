@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="btools.ai">
+  <!-- The btools.ai aperture, re-cut for a favicon.
+
+       Same mark as the login lockup and the orb, NOT the same numbers. The
+       lockup's blades are ~9% of the mark's width, which is elegant at 26px and
+       sub-pixel mush at 16px, so the blades here are widened and the taper
+       stops short of the centre. Port the intent (a nine-blade brass aperture
+       around a lit core), never the constant.
+
+       The near-black disc is deliberate: a favicon has no control over the tab
+       colour behind it, and brass alone (#C9A227) sits at only ~2.4:1 on a white
+       tab strip. The disc is the same deep space ground the mark sits on
+       everywhere else in the product, so it reads identically on light and dark
+       browser chrome. -->
+  <defs>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFF6DF"/>
+      <stop offset="45%" stop-color="#ECC766"/>
+      <stop offset="100%" stop-color="#C9A227" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="blade" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F2D789"/>
+      <stop offset="100%" stop-color="#A3801E"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="32" cy="32" r="32" fill="#050609"/>
+  <circle cx="32" cy="32" r="30.25" fill="none" stroke="#C9A227" stroke-opacity=".45" stroke-width="1.5"/>
+
+  <g fill="url(#blade)">
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(0 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(40 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(80 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(120 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(160 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(200 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(240 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(280 32 32)"/>
+    <path d="M32 32 L32 7 L39 12 L36 30 Z" transform="rotate(320 32 32)"/>
+  </g>
+
+  <circle cx="32" cy="32" r="10" fill="url(#core)"/>
+  <circle cx="32" cy="32" r="3.6" fill="#FFF6DF"/>
+</svg>
