@@ -43,14 +43,13 @@ class _Cursor:
 
 
 class RecordingConnection:
-    """Captures SQL instead of running it. `params` is deliberately ignored:
-    this file judges the STATEMENT, and the parameters are proven elsewhere."""
+    """Captures SQL and its params instead of running them."""
 
     def __init__(self, sink):
         self._sink = sink
 
     def execute(self, sql, params=None):
-        self._sink.append(sql)
+        self._sink.append((sql, params))
         return _Cursor()
 
 
@@ -143,8 +142,26 @@ def test_every_operation_actually_emitted_sql():
 
 @pytest.mark.parametrize('operation', sorted(EMITTED))
 def test_operation_emits_valid_postgres(operation):
-    for sql in EMITTED[operation]:
+    for sql, _params in EMITTED[operation]:
         _assert_parses(sql, operation)
+
+
+@pytest.mark.parametrize('operation', sorted(EMITTED))
+def test_operation_survives_psycopg_placeholder_parsing(operation):
+    """The layer pglast CANNOT see, caught in production by the E2E button:
+    psycopg parses every % in a statement as a placeholder whenever params are
+    passed. A literal LIKE pattern ('%probe%') inlined into such a statement
+    dies with "only '%s', '%b', '%t' are allowed as placeholders, got '%p'" —
+    valid SQL, invalid psycopg. Run each statement WITH its real params through
+    psycopg's own query converter."""
+    psycopg = pytest.importorskip('psycopg')
+    from psycopg._queries import PostgresQuery
+    from psycopg.adapt import Transformer
+    for sql, params in EMITTED[operation]:
+        try:
+            PostgresQuery(Transformer()).convert(sql, params)
+        except Exception as e:
+            pytest.fail(f'{operation}: psycopg rejects the statement/params: {e}')
 
 
 def test_save_analysis_column_list_holds_only_column_names():
@@ -153,7 +170,7 @@ def test_save_analysis_column_list_holds_only_column_names():
     A parse failure is the general net; this is the specific one, so the next
     reader sees what went wrong rather than only that something did.
     """
-    sql = EMITTED['save_analysis'][0]
+    sql = EMITTED['save_analysis'][0][0]
     columns = sql.split('(', 1)[1].split(')', 1)[0]
     for column in (c.strip() for c in columns.split(',')):
         assert column.isidentifier(), \

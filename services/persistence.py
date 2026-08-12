@@ -99,6 +99,11 @@ CREATE TABLE IF NOT EXISTS bb_settings (
 );
 """
 
+# LIKE pattern matching diagnostic probe rows (escaped underscores are literal):
+# ids beginning with double underscore and containing "probe". Bound as a query
+# PARAMETER everywhere — inlined, its % signs collide with psycopg placeholders.
+_PROBE_PATTERN = r'\_\_%probe%'
+
 # The analysis upsert lives here rather than inline so save_analysis() and the
 # write probe in self_test() cannot drift apart. A probe that exercises a
 # DIFFERENT statement than production proves nothing about production: this one
@@ -626,10 +631,13 @@ class Store:
         def _op(conn):
             # Excludes any probe row a pre-2.5.12 build could have committed if
             # its rollback ever failed. A diagnostic must never be counted as a
-            # user's analysis.
+            # user's analysis. The pattern is a PARAMETER, never inline SQL:
+            # inline, its % signs read as psycopg placeholders the moment the
+            # statement also carries params ("got '%p'"), and whether that
+            # explodes depends on which sibling query you copied it into.
             row = conn.execute(
-                "SELECT COUNT(*) FROM bb_analyses WHERE session_id NOT LIKE '\\_\\_%probe%'"
-            ).fetchone()
+                'SELECT COUNT(*) FROM bb_analyses WHERE session_id NOT LIKE %s',
+                (_PROBE_PATTERN,)).fetchone()
             return int(row[0]) if row else 0
         return int(self._run(_op, default=0, label='count_analyses') or 0)
 
@@ -649,17 +657,15 @@ class Store:
 
         def _op(conn):
             rows = conn.execute(
-                # raw string: the LIKE pattern escapes underscores, and Python
-                # would otherwise read \_ as an invalid escape sequence.
-                r"""
+                """
                 SELECT session_id, owner, pdf_filename, mode, status,
                        created_at, completed_at,
                        snapshot -> 'statistics' AS statistics
                 FROM bb_analyses
-                WHERE session_id NOT LIKE '\_\_%probe%'
+                WHERE session_id NOT LIKE %s
                 ORDER BY updated_at DESC
                 LIMIT %s
-                """, (limit,)).fetchall()
+                """, (_PROBE_PATTERN, limit)).fetchall()
             out = []
             for r in rows:
                 stats = r[7]
