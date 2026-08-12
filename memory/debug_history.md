@@ -5,6 +5,81 @@ Read this before debugging anything in this repo. Also read
 
 ---
 
+## 2026-08-12 (b) — "couldn't get a connection" says NOTHING, and four ways to lose an analysis (2.5.9 → 2.5.12)
+
+After 2.5.8 fixed the malformed INSERT, storage still reported
+`write_failed: set_setting: couldn't get a connection after 10.00 sec`.
+The instinct was "Neon is asleep / over quota". It was not. Every defect below
+was ours, and the first one is why the week was unfalsifiable.
+
+### 1. PoolTimeout is a symptom with no diagnosis in it
+
+Reproduced against a host that can never connect:
+
+```
+error connecting in 'pool-1': connection timeout expired   <- the REAL cause
+PoolTimeout: couldn't get a connection after 10.00 sec     <- all the caller sees
+```
+
+**psycopg_pool opens connections on a background worker. When that fails it logs
+the real reason to its OWN logger and hands the caller a bare PoolTimeout.**
+Auth failure, SSL, connection cap, a sleeping compute and *pool starvation* are
+all one sentence. Fix: a `logging.Handler` on the `psycopg_pool` logger keeps the
+last real message; `last_error` appends it.
+
+**Worse — two unrelated causes wear that same string:**
+* connections cannot be ESTABLISHED (`connections_errors` climbing), or
+* the pool is STARVED (`pool_size` at max, `pool_available` 0,
+  `requests_waiting` high, `connections_errors` **zero**).
+
+Only `pool.get_stats()` separates them, so it is now on `/api/admin/storage`.
+Never debug a pool timeout without those counters again.
+
+### 2. The pool was sized for 4 while gunicorn runs 10 threads
+
+`gunicorn_config.py` sets `threads = 10`; `BIDBRIEF_DB_POOL_MAX` defaulted to
+**4**, with `num_workers=1` — a single thread opening every connection, so all
+ten serialize behind one `connect_timeout`. Now 10 and 3.
+
+### 3. A broken pool could never rebuild itself
+
+`enabled` was set False in exactly two places, both inside `init()`. No runtime
+failure ever cleared it, and `_try_reinit()` returns immediately when `enabled`
+is True. **A pool that broke once stayed broken for the life of the process** —
+"it worked, then it stopped, and it stayed stopped". Three consecutive failures
+now discard the pool so the next call rebuilds it.
+
+### 4. Failed writes were silently discarded (the one that actually loses data)
+
+`save_analysis()` returns **False** rather than raising, so a storage fault can
+never fail an analysis. `_persist_analysis` **ignored the return value** — the
+only signal there was. A 20-minute run finishing during a blip was gone for good.
+Failed snapshots are now queued and retried every 60s (`pending_writes` on the
+admin endpoint); first write and retry share one `_write_snapshot()`.
+
+### Ruled out by experiment, not by argument
+
+The pool's connection-creating worker thread **survives** repeated failures
+(checked `threading.enumerate()` after forced failures) — so "the worker died"
+is not a cause, however well it fits the symptom.
+
+### The probe that writes nothing
+
+`self_test()`'s analysis check now runs `EXPLAIN` on the real INSERT: it resolves
+every column against the live schema (which is what a Python call in the column
+list failed) while executing nothing. Paired with the settings round-trip, which
+proves the connection can genuinely write. `count_analyses`/`list_analysis_index`
+also exclude `__…probe…` ids so a diagnostic can never be counted as a user's
+analysis.
+
+### Still open, honestly
+
+Which of "cannot connect" or "starved" was the live failure is **not** proven —
+until 2.5.9 the system could not tell them apart. The counters answer it in one
+reading now. Do not claim it is solved from a green test suite.
+
+---
+
 ## 2026-08-12 — Every analysis write failed for six releases: a Python call inside SQL (2.5.8)
 
 **Symptom, as reported:** storage behaved erratically for over a week — "at times

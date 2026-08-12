@@ -509,20 +509,23 @@ class Store:
         return self._run(_op, default=None, label='load_analysis')
 
     def _analysis_write_probe(self) -> bool:
-        """Run the REAL analysis upsert, then roll it back.
+        """Check the REAL analysis upsert against the REAL table, writing nothing.
 
-        Rolled back, so it can never pollute history — but the statement it
-        exercises is byte-for-byte the one an analysis writes, which is the only
-        way this check can speak for that write path.
+        EXPLAIN parses and plans the statement — resolving every column against
+        the live schema, which is exactly what a Python call pasted into the
+        column list failed — but does not execute it. No transaction, no
+        rollback, and no way to leave a stray row behind on the hot path.
+
+        This is only half the question; EXPLAIN would also pass for a read-only
+        role. self_test() pairs it with a settings round-trip, which proves the
+        connection can genuinely write. Together they answer both halves without
+        touching bb_analyses.
         """
         def _op(conn):
-            import psycopg
-            with conn.transaction():
-                conn.execute(_INSERT_ANALYSIS, (
-                    '__write_probe__', None, 'probe.pdf', 'bid_spec', 'probe',
-                    _aware_utc(datetime.now(timezone.utc)),
-                    json.dumps({'probe': True})))
-                raise psycopg.Rollback  # swallowed by the block; nothing commits
+            conn.execute('EXPLAIN ' + _INSERT_ANALYSIS, (
+                '__probe__', None, 'probe.pdf', 'bid_spec', 'probe',
+                _aware_utc(datetime.now(timezone.utc)),
+                json.dumps({'probe': True})))
             return True
         return bool(self._run(_op, default=False, label='analysis_write_probe'))
 
@@ -563,7 +566,12 @@ class Store:
         """Total stored analyses — the truth about how much history exists,
         independent of how many the boot index loaded."""
         def _op(conn):
-            row = conn.execute('SELECT COUNT(*) FROM bb_analyses').fetchone()
+            # Excludes any probe row a pre-2.5.12 build could have committed if
+            # its rollback ever failed. A diagnostic must never be counted as a
+            # user's analysis.
+            row = conn.execute(
+                "SELECT COUNT(*) FROM bb_analyses WHERE session_id NOT LIKE '\\_\\_%probe%'"
+            ).fetchone()
             return int(row[0]) if row else 0
         return int(self._run(_op, default=0, label='count_analyses') or 0)
 
@@ -583,11 +591,14 @@ class Store:
 
         def _op(conn):
             rows = conn.execute(
-                """
+                # raw string: the LIKE pattern escapes underscores, and Python
+                # would otherwise read \_ as an invalid escape sequence.
+                r"""
                 SELECT session_id, owner, pdf_filename, mode, status,
                        created_at, completed_at,
                        snapshot -> 'statistics' AS statistics
                 FROM bb_analyses
+                WHERE session_id NOT LIKE '\_\_%probe%'
                 ORDER BY updated_at DESC
                 LIMIT %s
                 """, (limit,)).fetchall()
