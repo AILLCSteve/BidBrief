@@ -150,6 +150,37 @@ class TestTheStatusLineTellsTheTruthRightNow:
         assert result['reason'] == 'analysis_write_failed', \
             'a broken analysis write must never be reported as healthy storage'
 
+    def test_pool_stats_expose_what_the_error_text_cannot(self):
+        """A PoolTimeout means either 'cannot connect' or 'pool starved', and
+        the message is identical for both. These counters are what tell them
+        apart, so they must reach the admin panel."""
+        from services.persistence import Store
+        store = Store()
+        assert store.pool_stats() == {}, 'no pool means no stats, never a crash'
+
+        class Pool:
+            def get_stats(self):
+                return {'pool_size': 4, 'pool_available': 0, 'requests_waiting': 6,
+                        'connections_errors': 0, 'ignored': 'dropped'}
+        store._pool = Pool()
+        stats = store.pool_stats()
+        # Starvation reads unmistakably: full pool, nothing free, queue building,
+        # and zero connection errors.
+        assert stats['pool_available'] == 0 and stats['requests_waiting'] == 6
+        assert stats['connections_errors'] == 0
+        assert 'pool_max' in stats, 'the ceiling is needed to see saturation'
+        assert 'ignored' not in stats
+
+    def test_a_broken_pool_never_crashes_the_status_endpoint(self):
+        from services.persistence import Store
+        store = Store()
+
+        class Pool:
+            def get_stats(self):
+                raise RuntimeError('pool is gone')
+        store._pool = Pool()
+        assert store.pool_stats() == {}
+
     def test_the_probe_and_production_share_one_statement(self):
         """DRY here is a correctness property, not tidiness: a probe running a
         different INSERT than production proves nothing about production."""

@@ -1206,7 +1206,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.9'
+        'version': '2.5.10'
     })
 
 @app.route('/pics/<path:filename>')
@@ -3431,6 +3431,11 @@ def admin_storage_status():
         # which presents exactly like "couldn't get a connection"; the POOLED
         # host (…-pooler.…) is built for this. Never exposes the credentials.
         'endpoint': endpoint_kind(),
+        # Distinguishes "cannot connect" (connections_errors climbing) from
+        # "pool starved" (pool_size at max, requests_waiting high, no errors).
+        # Both raise the identical PoolTimeout, so without these two states are
+        # indistinguishable from the error text alone.
+        'pool': persistence_store.pool_stats(),
         # A round-trip write, so this answers "is history really being kept?"
         # rather than only "did a socket open?"
         'write_test': persistence_store.self_test(),

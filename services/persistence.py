@@ -154,10 +154,19 @@ def index_limit() -> int:
 
 
 def _pool_max() -> int:
+    """Max concurrent connections. Default 10, matching gunicorn's thread count.
+
+    It was 4 while gunicorn runs `threads = 10`, so six request threads could be
+    waiting on a connection that the pool was not allowed to create — and the
+    wait ends in the same PoolTimeout ("couldn't get a connection") that a
+    genuine connection failure produces, with nothing to tell them apart.
+    Sizing the pool to the threads that can ask for one removes that whole
+    failure mode. Neon's pooled endpoint is PgBouncer; ten is nothing to it.
+    """
     try:
-        return max(1, int(os.environ.get('BIDBRIEF_DB_POOL_MAX', '4')))
+        return max(1, int(os.environ.get('BIDBRIEF_DB_POOL_MAX', '10')))
     except ValueError:
-        return 4
+        return 10
 
 
 def _naive_local(value):
@@ -314,8 +323,12 @@ class Store:
                 # min_size stays 0 deliberately — holding a connection open to
                 # keep the pool warm would keep Neon awake and burn compute
                 # hours, which is a worse problem than a slow first query.
+                # num_workers=3, not 1: the workers are what actually OPEN
+                # connections, so a single one serializes every new connection
+                # behind the slowest connect_timeout. Ten request threads then
+                # queue behind one cold start and all time out together.
                 conninfo=url, min_size=0, max_size=_pool_max(),
-                timeout=20, max_idle=120, num_workers=1, open=True,
+                timeout=15, max_idle=120, num_workers=3, open=True,
                 check=ConnectionPool.check_connection,
                 # Only libpq CONNECTION parameters here. Neon's pooled endpoint
                 # is PgBouncer, which rejects unknown startup parameters — an
@@ -326,7 +339,7 @@ class Store:
                 # through a pooler.
                 kwargs={
                     'autocommit': True,
-                    'connect_timeout': 20,
+                    'connect_timeout': 15,
                     'keepalives': 1,
                     'keepalives_idle': 30,
                     'keepalives_interval': 10,
@@ -393,7 +406,7 @@ class Store:
         # it can lose the race. A second try turns that into a slow success
         # instead of a silent no-op. Only ever retried for CONNECTION problems —
         # bad SQL would fail identically forever.
-        attempts = 3
+        attempts = 2
         for attempt in range(1, attempts + 1):
             try:
                 with self._pool.connection() as conn:
@@ -434,6 +447,32 @@ class Store:
             self._consecutive_failures = 0
             return result
         return default
+
+    def pool_stats(self) -> Dict[str, Any]:
+        """The pool's own counters — the only way to tell WHY a checkout failed.
+
+        A PoolTimeout has two completely different causes that read identically
+        in the error text:
+          * connections cannot be ESTABLISHED — `connections_errors` climbs and
+            psycopg_pool logs the real reason (captured in last_error).
+          * the pool is STARVED — `pool_size` is at max, `pool_available` is 0
+            and `requests_waiting` is high, with no connection errors at all.
+        Without these numbers the two are indistinguishable, which is how this
+        went a week without a diagnosis.
+        """
+        pool = self._pool
+        if pool is None:
+            return {}
+        try:
+            raw = pool.get_stats()
+        except Exception:
+            return {}
+        keep = ('pool_size', 'pool_available', 'requests_waiting', 'requests_errors',
+                'connections_num', 'connections_errors', 'connections_lost',
+                'requests_num', 'requests_queued')
+        stats = {k: raw[k] for k in keep if k in raw}
+        stats['pool_max'] = _pool_max()
+        return stats
 
     def health(self) -> Dict[str, Any]:
         if not self.enabled:
