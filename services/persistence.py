@@ -347,7 +347,9 @@ class Store:
                 },
             )
             with self._pool.connection() as conn:
-                conn.execute(_SCHEMA)
+                # Bounded like every other operation: a hung schema check at
+                # boot would otherwise block the whole app from starting.
+                self._bounded(lambda c: c.execute(_SCHEMA), conn)
             self.enabled = True
             self.last_error = None
             days = retention_days()
@@ -396,6 +398,44 @@ class Store:
         logger.info("💾 Retrying durable storage startup...")
         return self.init()
 
+    # How long any single database operation may run before it is cancelled.
+    # Nothing this store does legitimately takes this long — the widest write is
+    # a ~0.5 MB snapshot upsert. The cap exists for the pathological case.
+    OP_TIMEOUT_S = 30
+
+    def _bounded(self, fn, conn):
+        """Run fn(conn), cancelling the query if it exceeds OP_TIMEOUT_S.
+
+        THE LEAK THIS PREVENTS: a query through a pooler can hang forever with a
+        perfectly healthy TCP socket — PgBouncer keeps ACKing while the Neon
+        backend it forwarded to never answers (compute stuck mid-wake, backend
+        gone). TCP keepalives cannot fire, because the peer is alive; psycopg
+        has no read timeout; and PgBouncer rejects a statement_timeout startup
+        option. So the thread blocks forever INSIDE the pool's context manager,
+        and its connection is never returned.
+
+        Each hung call eats one connection. Enough of them exhaust the pool, and
+        every later checkout raises PoolTimeout with ZERO connection errors —
+        the exact production signature ("couldn't get a connection" with nothing
+        captured from the pool's logger, meaning no connect attempt ever
+        failed). The cancel is delivered OUT-OF-BAND on its own socket, which is
+        why it can interrupt a send/recv that is stuck.
+        """
+        def _cancel():
+            try:
+                # cancel_safe (psycopg >= 3.2) is designed to be called from
+                # another thread; older psycopg falls back to cancel().
+                getattr(conn, 'cancel_safe', getattr(conn, 'cancel', lambda: None))()
+            except Exception:
+                pass
+        watchdog = threading.Timer(self.OP_TIMEOUT_S, _cancel)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            return fn(conn)
+        finally:
+            watchdog.cancel()
+
     def _run(self, fn, default=None, label='db'):
         """Execute fn(conn), swallowing every failure. The app must survive a
         database outage — degraded persistence beats a failed analysis."""
@@ -410,7 +450,7 @@ class Store:
         for attempt in range(1, attempts + 1):
             try:
                 with self._pool.connection() as conn:
-                    result = fn(conn)
+                    result = self._bounded(fn, conn)
             except Exception as e:
                 if attempt < attempts and _is_connection_problem(e):
                     logger.info(f"💾 {label}: {e} — retry {attempt}/{attempts - 1} "
@@ -479,7 +519,10 @@ class Store:
             return {'enabled': False, 'error': self.last_error}
         ok = self._run(lambda c: c.execute('SELECT 1').fetchone() is not None,
                        default=False, label='health')
-        return {'enabled': True, 'reachable': bool(ok), 'error': self.last_error}
+        # Report enabled AS IT IS NOW, not as it was on entry: the SELECT above
+        # can be the failure that disables the store, and reporting the stale
+        # True produced the contradictory "connected but (disabled: ...)" line.
+        return {'enabled': self.enabled, 'reachable': bool(ok), 'error': self.last_error}
 
     # ---- analyses ------------------------------------------------------------
 
@@ -540,7 +583,10 @@ class Store:
         history was being silently dropped. It now exercises the analysis write
         as well, because that is the write anyone actually cares about.
         """
-        if not self.enabled:
+        if not self.enabled and not self._try_reinit():
+            # Reinit first: "disabled" is frequently just "the self-heal
+            # discarded a wedged pool a moment ago", and the dashboard should
+            # show the recovery, not the corpse.
             return {'ok': False, 'reason': 'disabled', 'error': self.last_error}
         # Cache briefly: the admin dashboard calls this on every load, and a
         # write per page view is needless traffic against the connection budget.

@@ -186,10 +186,43 @@
   function storageLine(info) {
     if (!info) return null;
     var status = storageStatusText(info);
-    return ui.el('p', {
-      class: status.ok ? 'bb-caption' : 'bb-beta-quota-full',
-      style: 'margin-top:8px'
-    }, (status.ok ? '● ' : '▲ ') + status.text);
+    return ui.el('div', { style: 'margin-top:8px' }, [
+      ui.el('p', {
+        class: status.ok ? 'bb-caption' : 'bb-beta-quota-full'
+      }, (status.ok ? '● ' : '▲ ') + status.text),
+      ui.el('button', {
+        class: 'bb-btn-ghost', type: 'button', style: 'margin-top:6px',
+        onclick: runStorageE2E
+      }, '⛁  Verify storage end-to-end'),
+      ui.el('div', { id: 'bb-storage-e2e' })
+    ]);
+  }
+
+  /** One real round-trip against the real database — write a snapshot, read it
+      back, list it, delete it — with each step's verdict and timing painted
+      here. This is the verification that matters; no mock can fake it. */
+  function runStorageE2E() {
+    var host = ui.qs('#bb-storage-e2e');
+    if (host) ui.fill(host, [ui.el('p', { class: 'bb-caption' }, 'Running the round-trip…')]);
+    window.fetch('/api/admin/storage/e2e', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (out) {
+        var rows = (out.steps || []).map(function (s) {
+          return ui.el('p', { class: s.ok ? 'bb-caption' : 'bb-beta-quota-full' },
+            (s.ok ? '✓ ' : '✗ ') + s.step + ' · ' + s.ms + 'ms' +
+            (s.ok ? '' : ' — ' + (s.detail || 'failed')));
+        });
+        rows.push(ui.el('p', {
+          class: out.success ? 'bb-caption-lit' : 'bb-beta-quota-full'
+        }, out.success
+          ? 'Storage verified: a snapshot was written to and read from the live database.'
+          : 'Storage FAILED at the step above. Last error: ' + (out.last_error || 'unknown')));
+        if (host) ui.fill(host, rows);
+      })
+      .catch(function (e) {
+        if (host) ui.fill(host, [ui.el('p', { class: 'bb-beta-quota-full' },
+          '✗ Verification request failed: ' + e.message)]);
+      });
   }
 
   /** The storage check is a DIAGNOSTIC and must never gate the data.

@@ -1278,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.12'
+        'version': '2.5.13'
     })
 
 @app.route('/pics/<path:filename>')
@@ -3521,6 +3521,65 @@ def admin_storage_status():
         'retention_days': retention_days(),
         'retention': 'indefinite' if retention_days() <= 0 else f'{retention_days()} days',
     })
+
+
+@app.route('/api/admin/storage/e2e', methods=['POST'])
+@require_admin
+def admin_storage_e2e():
+    """END-TO-END storage verification against the REAL database, on demand.
+
+    Not a mock, not a parser, not a unit test: it builds a snapshot through the
+    same _build_analysis_snapshot an analysis uses, WRITES it to bb_analyses,
+    reads it back, confirms the index sees it, deletes it, and reports each step
+    with timing. This either proves the pipeline works end to end or names the
+    exact step where it does not.
+    """
+    import time as _time
+    sid = f"e2e_{secrets.token_hex(6)}"
+    steps = []
+
+    def step(name, fn):
+        t0 = _time.monotonic()
+        try:
+            ok, detail = fn()
+        except Exception as e:
+            ok, detail = False, f'{type(e).__name__}: {e}'
+        steps.append({'step': name, 'ok': bool(ok), 'ms': int((_time.monotonic() - t0) * 1000),
+                      'detail': detail})
+        return bool(ok)
+
+    snapshot = _build_analysis_snapshot(
+        sid,
+        {'sections': [{'section_name': 'E2E', 'questions': [
+            {'question': 'Does storage work?', 'answer': 'Proven by this row.'}]}],
+         'document_name': 'e2e-check.pdf'},
+        {'questions_answered': 1, 'total_questions': 1},
+        orchestrator=None, mode='bid_spec', pdf_filename='e2e-check.pdf')
+
+    def _write():
+        ok = persistence_store.save_analysis(
+            sid, owner='__e2e__', pdf_filename='e2e-check.pdf', mode='bid_spec',
+            status='completed', snapshot=snapshot, completed_at=datetime.now())
+        return ok, ('row upserted' if ok else
+                    persistence_store.last_error or 'store disabled — is DATABASE_URL set?')
+
+    ok_write = step('write snapshot to bb_analyses', _write)
+    if ok_write:
+        step('read it back', lambda: (
+            (persistence_store.load_analysis(sid) or {}).get('statistics', {})
+            .get('questions_answered') == 1,
+            'snapshot round-tripped intact'))
+        step('index lists it', lambda: (
+            any(r['session_id'] == sid for r in persistence_store.list_analysis_index(limit=25)),
+            'visible to the boot-restore query'))
+        step('delete the check row', lambda: (
+            persistence_store.delete_analysis(sid), 'cleaned up'))
+
+    success = all(s['ok'] for s in steps)
+    audit_log('storage_e2e', _current_user_info()[0], {'success': success})
+    return jsonify({'success': success, 'steps': steps,
+                    'last_error': persistence_store.last_error,
+                    'pool': persistence_store.pool_stats()})
 
 
 @app.route('/api/admin/sessions', methods=['GET'])
