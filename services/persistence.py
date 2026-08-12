@@ -439,17 +439,29 @@ class Store:
     def _run(self, fn, default=None, label='db'):
         """Execute fn(conn), swallowing every failure. The app must survive a
         database outage — degraded persistence beats a failed analysis."""
-        if not self.enabled or self._pool is None:
-            if not self._try_reinit():
-                return default
         # Two attempts: Neon suspends idle compute, and the request that wakes
         # it can lose the race. A second try turns that into a slow success
         # instead of a silent no-op. Only ever retried for CONNECTION problems —
         # bad SQL would fail identically forever.
         attempts = 2
         for attempt in range(1, attempts + 1):
+            # Snapshot the pool ONCE per attempt and use only the local
+            # reference. self._pool can be nulled at any moment by another
+            # thread's self-heal discard; check-then-use on the attribute
+            # raced that and died with "'NoneType' object has no attribute
+            # 'connection'" — observed in production BETWEEN two successful
+            # steps of the same request. A discarded-but-referenced pool just
+            # raises PoolClosed, which lands in the retry path below and
+            # rebuilds cleanly.
+            pool = self._pool
+            if not self.enabled or pool is None:
+                if not self._try_reinit():
+                    return default
+                pool = self._pool
+                if pool is None:
+                    return default
             try:
-                with self._pool.connection() as conn:
+                with pool.connection() as conn:
                     result = self._bounded(fn, conn)
             except Exception as e:
                 if attempt < attempts and _is_connection_problem(e):

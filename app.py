@@ -1278,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.13'
+        'version': '2.5.14'
     })
 
 @app.route('/pics/<path:filename>')
@@ -3544,6 +3544,11 @@ def admin_storage_e2e():
             ok, detail = fn()
         except Exception as e:
             ok, detail = False, f'{type(e).__name__}: {e}'
+        if not ok and persistence_store.last_error:
+            # Capture the store's error NOW: the next step may succeed and
+            # clear it, which once reduced a failed run to "Last error: unknown"
+            # and destroyed the only evidence of what went wrong.
+            detail = f'{detail} — {persistence_store.last_error}'
         steps.append({'step': name, 'ok': bool(ok), 'ms': int((_time.monotonic() - t0) * 1000),
                       'detail': detail})
         return bool(ok)
