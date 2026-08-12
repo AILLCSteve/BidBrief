@@ -79,3 +79,71 @@ test('normalising never invents tables out of nothing', () => {
   assert.deepStrictEqual(plain(fn({ dynamic_tables: null })), []);
   assert.deepStrictEqual(plain(fn(null)), []);
 });
+
+/* The completion-view bug, reproduced as the backend's REAL event order.
+
+   app.py emits analysis_complete from inside the orchestrator, THEN spends
+   20-60s generating the Document Intelligence tables, THEN appends
+   results_ready carrying them. Treating analysis_complete as terminal stopped
+   the poll before results_ready ever arrived, so the completion view showed
+   every tab except Document Intelligence while the admin view — a fresh fetch
+   of the finished session — had it. */
+const ENGINE_MODULES = [
+  'shared/assets/js/bb-ui.js', 'shared/assets/js/bb-state.js',
+  'shared/assets/js/bb-status.js', 'shared/assets/js/bb-orb.js',
+  'shared/assets/js/bb-shell.js', 'shared/assets/js/bb-engine.js',
+];
+
+/* Timers are stubbed: the engine arms a 4-minute fallback on analysis_complete,
+   and a real one would hold Node's event loop open for four minutes. */
+const NO_TIMERS = { setTimeout: () => 1, clearTimeout: () => {}, clearInterval: () => {} };
+
+test('the real event order lands the DI tables in the completion view', () => {
+  const { BB } = loadModules(ENGINE_MODULES, NO_TIMERS);
+  const handle = BB.engine.handleEvent;
+  assert.ok(handle, 'bb-engine must export handleEvent for this contract to be testable');
+
+  // 1. The orchestrator says it is done — packaging has NOT run yet.
+  handle({ event: 'analysis_complete' });
+  // 2. Packaging finishes and delivers the only payload carrying the tables.
+  handle({
+    event: 'results_ready',
+    result: { sections: [], dynamic_tables: [TABLE], intelligence_focus: 'scope' },
+    statistics: { questions_answered: 1, total_questions: 1 },
+  });
+
+  const results = plain(BB.state.analysis.results || {});
+  assert.ok((results.dynamic_tables || []).length,
+    'results_ready never reached the client — analysis_complete stopped the poll early');
+  assert.ok(sheetIds(results).includes('intelligence'),
+    'the completion view is missing the Document Intelligence tab');
+});
+
+/* THE mechanism, asserted directly: the poll must still be running after
+   analysis_complete. Asserting only on the final payload cannot catch this —
+   a test that hands over results_ready by hand passes even when production
+   would never have received it, because the poll had already been cancelled. */
+test('polling survives analysis_complete, or results_ready is never received', () => {
+  const cleared = [];
+  const { BB } = loadModules(ENGINE_MODULES, {
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    setInterval: () => 42,
+    clearInterval: (id) => cleared.push(id),
+    fetch: () => Promise.resolve({ json: () => Promise.resolve({ success: true }) }),
+  });
+
+  BB.engine.startPolling('sess_test');
+  cleared.length = 0; // startPolling clears any previous timer first
+
+  BB.engine.handleEvent({ event: 'analysis_complete' });
+  assert.deepStrictEqual(cleared, [],
+    'the poll was cancelled on analysis_complete — results_ready, the only event ' +
+    'carrying the Document Intelligence tables, could never arrive');
+
+  BB.engine.handleEvent({
+    event: 'results_ready',
+    result: { sections: [], dynamic_tables: [TABLE] },
+  });
+  assert.deepStrictEqual(cleared, [42], 'results_ready should end the poll');
+});

@@ -90,6 +90,31 @@
     }
   }
 
+  /* Waiting for results_ready is right, but it must not be an unbounded wait:
+     if packaging dies before appending it, the user would watch a spinner
+     forever. Fall back to a direct fetch after a generous window — packaging is
+     20-60s in normal operation. */
+  var finalizeFallback = null;
+
+  function clearFinalizeFallback() {
+    if (finalizeFallback) {
+      window.clearTimeout(finalizeFallback);
+      finalizeFallback = null;
+    }
+  }
+
+  function startFinalizeFallback() {
+    if (finalizeFallback) return;
+    finalizeFallback = window.setTimeout(function () {
+      finalizeFallback = null;
+      if (state().phase !== 'done') {
+        note('warning', 'Results packaging is taking longer than expected - fetching directly');
+        stopPolling();
+        fetchResults();
+      }
+    }, 240000);
+  }
+
   function poll() {
     var sessionId = state().sessionId;
     if (!sessionId) return;
@@ -125,6 +150,13 @@
             if (data.result.optimized_scan_data) a.optimizedScan = data.result.optimized_scan_data;
           }
           note('success', 'Results received');
+          /* THE terminal event. app.py appends it only after packaging is done
+             — browser transform plus the Document Intelligence pass — so this
+             payload is the only one that carries dynamic_tables. Finish here,
+             on the richest payload we will ever be handed. */
+          clearFinalizeFallback();
+          stopPolling();
+          finish(a.results, false, data.statistics);
           break;
 
         case 'key_requirements_complete':
@@ -138,7 +170,27 @@
           }
           break;
 
-        case 'analysis_complete': case 'done':
+        case 'analysis_complete':
+          /* NOT terminal, however much the name suggests it. The ORCHESTRATOR
+             emits this; app.py then spends 20-60s transforming the payload and
+             generating the Document Intelligence tables before appending
+             results_ready. Stopping the poll here meant never seeing that
+             event, and fetching /api/results while the session was still
+             `active` returned a payload built before the tables existed — which
+             is exactly why the completion view had no Document Intelligence tab
+             while the admin view, a fresh fetch of the finished session, did.
+             bb-status.js has always known this ("fires BEFORE results are
+             packaged"); the engine now agrees with it. */
+          note('info', 'Finalizing - building Document Intelligence tables...');
+          startFinalizeFallback();
+          break;
+
+        case 'done':
+          /* Emitted after the session dict transition, so it is safe as an
+             end-of-stream signal. results_ready normally arrives first and has
+             already finished; this is the backstop for runs that never emit
+             one (a stopped run, say). */
+          clearFinalizeFallback();
           stopPolling();
           if (a.results && a.results.sections) finish(a.results, false);
           else fetchResults();
@@ -226,6 +278,7 @@
 
   function finish(result, isPartial, statistics) {
     var a = state();
+    clearFinalizeFallback();
     a.results = mergeResults(a.results, result);
     a.isPartial = !!isPartial;
     if (statistics) a.statistics = statistics;
