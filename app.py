@@ -682,21 +682,93 @@ def _build_analysis_snapshot(session_id, legacy_result, statistics, orchestrator
     return snapshot
 
 
-def _persist_analysis(session_id, snapshot, owner, status, completed_at=None):
-    """Write a snapshot to durable storage. Never raises — a database problem
-    must not fail an analysis that already succeeded."""
+# Snapshots whose write did not land, kept so a transient database problem
+# costs a retry instead of the analysis. Bounded by how many analyses one
+# process can run, and each entry is already held in completed_analyses anyway.
+_pending_persist: dict = {}
+_pending_persist_lock = threading.Lock()
+
+
+def _write_snapshot(session_id, record) -> bool:
+    """The single save call. One place, so the first write and every retry
+    cannot drift apart."""
+    snapshot = record['snapshot']
     try:
-        persistence_store.save_analysis(
+        return bool(persistence_store.save_analysis(
             session_id,
-            owner=owner,
+            owner=record['owner'],
             pdf_filename=snapshot.get('pdf_filename', 'Unknown.pdf'),
             mode=snapshot.get('mode', 'bid_spec'),
-            status=status,
+            status=record['status'],
             snapshot=snapshot,
-            completed_at=completed_at or datetime.now(),
-        )
+            completed_at=record['completed_at'],
+        ))
     except Exception as e:
         logger.warning(f"💾 Could not persist analysis {session_id[:12]}: {e}")
+        return False
+
+
+def _persist_analysis(session_id, snapshot, owner, status, completed_at=None):
+    """Write a snapshot to durable storage, and REMEMBER IT IF THAT FAILS.
+
+    save_analysis() returns False on failure rather than raising — that is
+    deliberate, so a database problem can never fail an analysis that already
+    succeeded. But this function ignored the return value, which threw away the
+    only signal there was: an analysis that finished while the database was
+    briefly unreachable was gone for good, with a warning in the log and no way
+    to recover it.
+
+    Queue it instead. The whole promise of this feature is that a finished
+    analysis is kept, and a 20-minute run is far too expensive to drop because a
+    connection blinked at the wrong moment.
+    """
+    record = {
+        'snapshot': snapshot,
+        'owner': owner,
+        'status': status,
+        'completed_at': completed_at or datetime.now(),
+    }
+    if _write_snapshot(session_id, record):
+        with _pending_persist_lock:
+            _pending_persist.pop(session_id, None)
+        return True
+    with _pending_persist_lock:
+        _pending_persist[session_id] = record
+        depth = len(_pending_persist)
+    logger.warning(f"💾 Analysis {session_id[:12]} NOT saved yet — queued for retry "
+                   f"({depth} pending). Last error: {persistence_store.last_error}")
+    return False
+
+
+def _flush_pending_persists():
+    """Retry queued snapshots, then reschedule.
+
+    Runs on its own short timer rather than the 15-minute cleanup sweep: an
+    analysis the user just ran should land within a minute of the database
+    coming back, not a quarter of an hour later.
+    """
+    try:
+        with _pending_persist_lock:
+            items = list(_pending_persist.items())
+        for session_id, record in items:
+            if _write_snapshot(session_id, record):
+                with _pending_persist_lock:
+                    _pending_persist.pop(session_id, None)
+                logger.info(f"💾 Retry succeeded — analysis {session_id[:12]} is now stored")
+    except Exception as e:
+        logger.warning(f"💾 Pending-persist flush failed (non-fatal): {e}")
+
+    timer = threading.Timer(60, _flush_pending_persists)
+    timer.daemon = True
+    timer.start()
+
+
+# Start the retry loop. Defined here rather than beside the other boot work
+# because it has to follow the function it schedules. Deferred a minute so it
+# never competes with boot for the first connections.
+_pending_persist_timer = threading.Timer(60, _flush_pending_persists)
+_pending_persist_timer.daemon = True
+_pending_persist_timer.start()
 
 
 def _persist_partial_analysis(session_id, status):
@@ -1206,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.10'
+        'version': '2.5.11'
     })
 
 @app.route('/pics/<path:filename>')
@@ -3436,6 +3508,9 @@ def admin_storage_status():
         # Both raise the identical PoolTimeout, so without these two states are
         # indistinguishable from the error text alone.
         'pool': persistence_store.pool_stats(),
+        # Analyses that finished but whose write has not landed yet. Anything
+        # above zero for more than a minute means saves are still failing.
+        'pending_writes': len(_pending_persist),
         # A round-trip write, so this answers "is history really being kept?"
         # rather than only "did a socket open?"
         'write_test': persistence_store.self_test(),
