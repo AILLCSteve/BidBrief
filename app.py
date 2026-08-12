@@ -1278,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.19'
+        'version': '2.5.20'
     })
 
 @app.route('/pics/<path:filename>')
@@ -4181,8 +4181,22 @@ def _vision_read_page(pdf_path: str, page_index: int, model: str = '',
         return ''
 
 
+def _qgen_vision_all_max_pages() -> int:
+    """Page cap when the user asks for EVERY context page to be seen.
+
+    Higher than the text-less budget because the user opted in, but still
+    bounded — the context scan selects at most a dozen pages by design, so this
+    is a ceiling rather than a throttle.
+    """
+    try:
+        return max(1, int(os.environ.get('BIDBRIEF_QGEN_VISION_ALL_MAX_PAGES', '12')))
+    except ValueError:
+        return 12
+
+
 def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
-                         model: str = '', vision_stats: dict = None) -> str:
+                         model: str = '', vision_stats: dict = None,
+                         vision_all: bool = False) -> str:
     """
     Lightly extract context from a PDF for question generation guidance.
     Pulls title page, first few pages, and scans for TOC / glossary / appendix pages.
@@ -4199,21 +4213,26 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
                 # First 4 pages + last 3 pages
                 indices = list(range(min(4, total))) + list(range(max(0, total - 3), total))
                 seen = set()
-                budget = _qgen_vision_max_pages()
+                budget = (_qgen_vision_all_max_pages() if vision_all
+                          else _qgen_vision_max_pages())
                 for i in indices:
                     if i in seen:
                         continue
                     seen.add(i)
-                    t = pdf.pages[i].extract_text() or ''
-                    if t.strip():
-                        pages_text.append(f"[Page {i+1}]\n{t.strip()}")
-                    elif budget > 0:
-                        # Same scanned-page fallback as the PyMuPDF path.
-                        seen_text = _vision_read_page(pdf_path, i, model)
-                        if seen_text:
-                            budget -= 1
-                            pages_text.append(
-                                f"[Page {i+1} - read from the page image]\n{seen_text}")
+                    t = (pdf.pages[i].extract_text() or '').strip()
+                    # Same rules as the PyMuPDF path above.
+                    want = budget > 0 and (vision_all or not t)
+                    seen_text = _vision_read_page(pdf_path, i, model) if want else ''
+                    if seen_text:
+                        budget -= 1
+                    if t and seen_text:
+                        pages_text.append(f"[Page {i+1}]\n{t}\n"
+                                          f"[Page {i+1} - what the page image shows]\n{seen_text}")
+                    elif t:
+                        pages_text.append(f"[Page {i+1}]\n{t}")
+                    elif seen_text:
+                        pages_text.append(
+                            f"[Page {i+1} - read from the page image]\n{seen_text}")
                 raw = '\n\n'.join(pages_text)
                 return raw[:max_chars]
         except Exception:
@@ -4255,20 +4274,30 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
         # questions — read it with the vision model, bounded so the context scan
         # stays the light pass it is meant to be.
         selected = sorted(set(context_pages))
-        vision_budget = _qgen_vision_max_pages()
+        vision_budget = (_qgen_vision_all_max_pages() if vision_all
+                         else _qgen_vision_max_pages())
         vision_pages = []
 
         parts = []
         for i in selected:
             t = doc[i].get_text('text').strip()
-            if t:
+            # vision_all: read the page image even when text WAS extracted. A
+            # page is routinely both — a paragraph of scope plus the drawing or
+            # table that actually carries the detail — and text extraction
+            # returns the words while silently discarding everything drawn.
+            want_vision = vision_budget > 0 and (vision_all or not t)
+            seen_text = _vision_read_page(pdf_path, i, model) if want_vision else ''
+            if seen_text:
+                vision_budget -= 1
+                vision_pages.append(i + 1)
+            if t and seen_text:
+                # Both: keep the text verbatim and append what the image shows.
+                parts.append(f"[Page {i+1}]\n{t}\n"
+                             f"[Page {i+1} - what the page image shows]\n{seen_text}")
+            elif t:
                 parts.append(f"[Page {i+1}]\n{t}")
-            elif vision_budget > 0:
-                seen_text = _vision_read_page(pdf_path, i, model)
-                if seen_text:
-                    vision_budget -= 1
-                    vision_pages.append(i + 1)
-                    parts.append(f"[Page {i+1} - read from the page image]\n{seen_text}")
+            elif seen_text:
+                parts.append(f"[Page {i+1} - read from the page image]\n{seen_text}")
 
         doc.close()
         if vision_pages:
@@ -4415,12 +4444,19 @@ def generate_question_set():
     # 'questions_source' (derive questions FROM the uploaded material).
     # source_intent is the user's one-line description of what the attached
     # material should shape — it feeds the Persona Architect and rationale.
+    # visual_context: read EVERY context page's image, not just the text-less
+    # ones. Mirrors the analysis stage's "Analyze drawings, maps & images"
+    # switch — a page is often text AND a drawing, and text extraction returns
+    # the words while discarding what is drawn.
     if request.content_type and 'multipart' in request.content_type:
         source_kind = request.form.get('source_kind', 'context').strip().lower()
         source_intent = request.form.get('source_intent', '').strip()
+        visual_context = request.form.get(
+            'visual_context', '').strip().lower() in ('true', '1', 'yes', 'on')
     else:
         source_kind = 'context'
         source_intent = (data.get('source_intent', '') or '').strip()
+        visual_context = bool(data.get('visual_context', False))
 
     # Extract text from any uploaded files. Two independent slots may arrive and
     # are used TOGETHER (bug 2026-07-06: a PDF questions-source used to displace
@@ -4448,7 +4484,8 @@ def generate_question_set():
                     tmp_path = tmp.name
                 try:
                     return _extract_doc_context(
-                        tmp_path, model=gen_model, vision_stats=vision_stats) or ''
+                        tmp_path, model=gen_model, vision_stats=vision_stats,
+                        vision_all=visual_context) or ''
                 finally:
                     try:
                         os.unlink(tmp_path)

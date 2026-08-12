@@ -19,6 +19,7 @@
     userText: '',
     contextFile: null,
     grounding: null,
+    visualContext: false,
     questionsSourceFile: null,
     questionsSourceText: '',
     sourceIntent: '',
@@ -72,6 +73,9 @@
 
     var intent = (opts.sourceIntent || '').trim();
     if (intent) fields.source_intent = intent;
+
+    /* Read every context page's image, not only the ones with no text layer. */
+    if (opts.visualContext) fields.visual_context = 'true';
 
     if (sourcePdf) {
       files.file = sourcePdf;
@@ -151,6 +155,7 @@
     draft.personas = [];
     draft.documentReading = '';
     draft.grounding = null;
+    draft.visualContext = false;
     draft.suggestions = [];
     draft.selectedSuggestions = {};
     draft.suggesting = false;
@@ -193,7 +198,17 @@
     children.push(ui.card('Questions Source (Optional)', questionsSourceBody(host, onBack)));
 
     /* 3. Document context (auto-adopted from the Analyzer) */
-    children.push(ui.card('Document Context', documentContextBody(host, onBack)));
+    children.push(ui.card('Document Context', documentContextBody(host, onBack).concat([
+      ui.toggleRow({
+        title: 'Read drawings, maps & images on every page',
+        subtitle: 'Pages with no text at all are always read from their image. ' +
+          'Turn this on and BidBrief also reads the image of pages that DO have ' +
+          'text - a page is often a paragraph plus the drawing or table that ' +
+          'carries the real detail, and text alone misses what is drawn.',
+        checked: !!draft.visualContext,
+        onChange: function (on) { draft.visualContext = on; }
+      })
+    ])));
 
     /* 4. Mode */
     children.push(ui.card('Mode', [
@@ -417,8 +432,10 @@
           /* Name the page images when a scan had to be READ rather than parsed —
              the user should know the grounding came from vision, not a text
              layer, because that is the one case worth spot-checking. */
-          var via = (g.vision_pages && g.vision_pages.length)
-            ? ' · page ' + g.vision_pages.join(', ') + ' read from the page image'
+          var vp = g.vision_pages || [];
+          var via = vp.length
+            ? ' · page' + (vp.length === 1 ? ' ' : 's ') + vp.join(', ') +
+              ' also read as image' + (vp.length === 1 ? '' : 's')
             : '';
           ui.banner('info', 'Imported ' + summary.questions + ' questions across ' +
             summary.sections + ' sections · grounded in ' +
