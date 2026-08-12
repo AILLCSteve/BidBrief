@@ -5,6 +5,45 @@ Read this before debugging anything in this repo. Also read
 
 ---
 
+## 2026-08-12 (c) — The E2E button settled it: the database was fine, the store was racing itself (2.5.13 → 2.5.14)
+
+**What one click of `/api/admin/storage/e2e` proved that a week of reasoning
+could not:** write 36ms · read 31ms · delete 44ms against live Neon. The
+database, credentials, and pooled endpoint were healthy the entire time. Every
+"cannot connect" this week was self-inflicted.
+
+**The hang-leak (2.5.13).** The status line's error had NO `[pool: …]` suffix —
+the psycopg_pool logger capture heard nothing — so connections were not failing
+to open; they were being taken and never returned. A query through PgBouncer can
+hang forever on a healthy socket (the pooler ACKs while the backend never
+answers): keepalives can't fire, psycopg has no read timeout, statement_timeout
+is rejected at startup. Fix: every operation runs under a 30s watchdog firing
+`conn.cancel_safe()` (out-of-band on its own socket — the only thing that can
+interrupt a stuck recv). **Absence of a captured pool error + PoolTimeout =
+leak, not connectivity.**
+
+**The TOCTOU race (2.5.14).** The three-strike self-heal nulls `self._pool` from
+whatever thread trips it. `_run` checked the attribute then dereferenced it
+AGAIN → `'NoneType' object has no attribute 'connection'`, observed in
+production BETWEEN two successful steps of one request (the dashboard's parallel
+status fetch tripped the discard). Fix: snapshot the pool reference once per
+attempt; a discarded-but-referenced pool raises PoolClosed, already retriable.
+**Rule: any attribute a self-healing path can null must be read exactly once
+into a local.**
+
+**Evidence destroyed by success (2.5.14).** The E2E reported "Last error:
+unknown" for a failed run because the LATER delete step succeeded and cleared
+`last_error` before the report read it. Diagnostic steps must capture error
+state at the instant of failure, not at the end.
+
+**Contradictory status line (2.5.13).** `health()` reported `enabled` from
+before its own probe — which was itself the failure that disabled the store —
+while `self_test()` saw the new state, producing "connected but (disabled: …)".
+Status endpoints must report one consistent moment, and "disabled" should
+attempt the reinit before being reported.
+
+---
+
 ## 2026-08-12 (b) — "couldn't get a connection" says NOTHING, and four ways to lose an analysis (2.5.9 → 2.5.12)
 
 After 2.5.8 fixed the malformed INSERT, storage still reported

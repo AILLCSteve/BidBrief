@@ -1,9 +1,37 @@
 # HANDOFF — BidBrief (Flask backend + web front-end)
 
-> Updated: 2026-08-12 — **live on 2.5.12.** Four separate ways an analysis could
-> be lost are fixed, and the storage subsystem can finally say what is wrong.
-> Read `memory/debug_history.md` § 2026-08-12 (b) before touching
+> Updated: 2026-08-12 — **live on 2.5.14.** The E2E storage check on production
+> proved the database healthy (write 36ms / read 31ms / delete 44ms against live
+> Neon) — every "cannot connect" was the store's own doing. Read
+> `memory/debug_history.md` §§ 2026-08-12 (b) and (c) before touching
 > `services/persistence.py`.
+
+## 2.5.13 → 2.5.14 — hung-query watchdog, the self-heal race, one-click E2E
+
+- **Hung queries can no longer eat the pool** (2.5.13): a query through
+  PgBouncer can hang forever on a healthy socket (pooler ACKs, backend silent) —
+  keepalives can't fire, psycopg has no read timeout, statement_timeout is
+  rejected at startup. Every op now runs under a 30s watchdog firing
+  `cancel_safe()`. Signature to remember: PoolTimeout with NO `[pool: …]`
+  suffix = leak, not connectivity.
+- **The self-heal raced every caller** (2.5.14): the 3-strike discard nulls
+  `self._pool` from any thread; `_run` did check-then-use on the attribute and
+  production died with `'NoneType' … 'connection'` between two successful steps
+  of one request. `_run` now snapshots the pool reference once per attempt.
+- **`POST /api/admin/storage/e2e` + the "Verify storage end-to-end" button**:
+  builds a snapshot via `_build_analysis_snapshot`, writes/reads/lists/deletes
+  against the REAL database, per-step verdict + ms. Failed steps capture
+  `last_error` at that instant (a later success used to clear it → "unknown").
+- `health()` reports current state (was stale-on-entry); `self_test()` attempts
+  reinit before reporting "disabled".
+
+**Per the user's directive: verification is END-TO-END on production, not more
+unit tests.** The suites (284 py / 146 js) are a regression floor only.
+
+**Awaiting user confirmation:** a clean 4-check E2E run on 2.5.14, then a real
+analysis surviving in `bb_analyses`.
+
+> Previous round below.
 
 ## 2.5.9 → 2.5.12 — why storage looked intermittent for a week
 
