@@ -5,6 +5,46 @@ Read this before debugging anything in this repo. Also read
 
 ---
 
+## 2026-08-12 (d) — DI missing ONLY on the completion view: a rule we had already written, broken again (2.5.16)
+
+**STORAGE IS WORKING** as of this round — E2E green and a real analysis landed
+in Neon.
+
+**The user's own split diagnosis solved this one:** the admin session modal
+showed the Document Intelligence tab, the completion view did not, and both
+render through the same `buildWorkbook`. Identical view code + different result
+⇒ the VIEW is innocent, the PAYLOAD differs. Ask that question first next time.
+
+**Root cause.** `analysis_complete` is emitted from INSIDE the orchestrator;
+app.py then spends 20-60s on the legacy transform and the Document Intelligence
+pass before appending `results_ready` — the only event carrying
+`dynamic_tables`. `bb-engine.handleEvent` treated `analysis_complete` as
+terminal: `stopPolling()` + `fetchResults()`, which hit `/api/results` while the
+session was still `active` and returned a payload built before the tables
+existed. `results_ready` was then appended to a poll nobody was reading. The
+admin view works because it is a fresh fetch of the finished session.
+
+**This exact rule was already in this file** (2026-07-04, the "0/0 questions"
+race): *never treat an orchestrator-internal completion event as "results are
+fetchable" — only an event emitted after the session-dict transition.*
+`bb-status.js` honoured it all along (0.97 "wrapping up", with a comment saying
+it fires BEFORE packaging). The 2.2.0 web rebuild reintroduced it in the engine,
+so two modules in the same client disagreed about what "complete" means.
+
+**Fix:** `analysis_complete` → progress note only; `results_ready` → terminal
+(stop poll, finish on the richest payload); `done` → backstop; plus a 4-minute
+fallback fetch so waiting can never become waiting forever.
+
+**Testing lesson worth more than the fix.** The first reproduction PASSED
+against the broken engine, because it handed `results_ready` to the client by
+hand — the very event production never delivers. A test that supplies the
+missing input cannot detect the input going missing. Rewritten to assert the
+MECHANISM (spy on `clearInterval`: the poll must still be live after
+`analysis_complete`), it fails on the old code with the exact diagnosis. **Always
+run a new regression test against the BROKEN code before trusting it.**
+
+---
+
 ## 2026-08-12 (c) — The E2E button settled it: the database was fine, the store was racing itself (2.5.13 → 2.5.14)
 
 **What one click of `/api/admin/storage/e2e` proved that a week of reasoning

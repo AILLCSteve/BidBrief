@@ -1,12 +1,44 @@
 # HANDOFF — BidBrief (Flask backend + web front-end)
 
-> Updated: 2026-08-12 — **live on 2.5.14.** The E2E storage check on production
-> proved the database healthy (write 36ms / read 31ms / delete 44ms against live
-> Neon) — every "cannot connect" was the store's own doing. Read
-> `memory/debug_history.md` §§ 2026-08-12 (b) and (c) before touching
-> `services/persistence.py`.
+> Updated: 2026-08-12 — **live on 2.5.16. DURABLE STORAGE IS WORKING**: the E2E
+> check passes on production and a real analysis is stored in Neon. Read
+> `memory/debug_history.md` §§ 2026-08-12 (b)(c)(d) before touching
+> `services/persistence.py` or the results event flow.
+
+## 2.5.15 → 2.5.16 — the last two blockers
+
+**2.5.15 — the boot-restore query never ran.** The probe-exclusion pattern
+`NOT LIKE '\_\_%probe%'` was inlined into a statement that also binds `LIMIT %s`,
+and psycopg parses every `%` as a placeholder once params are present:
+*"only '%s', '%b', '%t' are allowed as placeholders, got '%p'"*. `count_analyses`
+carried the same pattern and never tripped because it passes no params — whether
+this detonates depends on which sibling query you copy it into. Pattern is now a
+bound PARAMETER. **This class is invisible to pglast** (it is a psycopg client
+rule, not SQL grammar), so every statement now also runs through psycopg's own
+`PostgresQuery` converter with its real params.
+
+**2.5.16 — DI missing ONLY on the completion view.** The admin modal had the tab
+and the completion view did not, through the SAME `buildWorkbook` — so the
+payload differed, not the view. `analysis_complete` comes from inside the
+orchestrator; app.py then spends 20-60s building the DI tables before appending
+`results_ready`. The engine stopped polling on `analysis_complete`, so it never
+received that event and fetched `/api/results` while the session was still
+`active`. Now: `analysis_complete` = progress note, `results_ready` = terminal,
+`done` = backstop, 4-minute fallback fetch. **`bb-status.js` had this right all
+along** — when two modules disagree about "done", the one after the state
+transition wins.
+
+**Verification is END-TO-END on production** (user directive): the admin storage
+panel's **"⛁ Verify storage end-to-end"** button writes a real snapshot to
+`bb_analyses`, reads it back, confirms the index sees it, and deletes it, with
+per-step verdict and ms. Suites (307 py / 148 js) are a regression floor only.
+
+> Previous round below.
 
 ## 2.5.13 → 2.5.14 — hung-query watchdog, the self-heal race, one-click E2E
+
+> The E2E check proved the database healthy (write 36ms / read 31ms / delete
+> 44ms against live Neon) — every "cannot connect" was the store's own doing.
 
 - **Hung queries can no longer eat the pool** (2.5.13): a query through
   PgBouncer can hang forever on a healthy socket (pooler ACKs, backend silent) —
