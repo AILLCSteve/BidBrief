@@ -38,21 +38,43 @@ def _auth(client, role='user', username='webtester'):
         return {'Cookie': f'bidbrief_auth={token}'}
 
 
-def test_health_reports_2_5_7(client):
+def test_health_reports_2_5_8(client):
     resp = client.get('/health')
     assert resp.status_code == 200
-    assert resp.get_json()['version'] == '2.5.7'
+    assert resp.get_json()['version'] == '2.5.8'
 
 
 @pytest.mark.parametrize('name', [
     'btools-titlelogo-transparent.png',
     'btools-iconlogo-transparent.png',
     'btools-logo.svg',
+    'btools-aperture.svg',
+    'btools-aperture-16.png',
+    'btools-aperture-32.png',
+    'btools-aperture-180.png',
 ])
 def test_brand_assets_are_served(client, name):
     resp = client.get(f'/pics/brand/{name}')
     assert resp.status_code == 200, f'{name} not served'
     assert len(resp.data) > 200, f'{name} looks empty'
+
+
+@pytest.mark.parametrize('page', ['/', '/login'])
+def test_the_tab_icon_is_the_btools_aperture(client, page):
+    """A favicon fails silently — the browser just keeps showing a stale or
+    generic icon — so assert the link tags AND that every one resolves."""
+    headers = _auth(client) if page == '/' else {}
+    html = client.get(page, headers=headers).data.decode('utf-8')
+    assert 'AILLCfavicon' not in html, 'the old AI LLC favicon is still referenced'
+
+    icons = re.findall(r'<link[^>]+rel="(?:icon|apple-touch-icon)"[^>]*>', html)
+    assert icons, 'the page declares no favicon at all'
+    hrefs = [re.search(r'href="([^"]+)"', tag).group(1) for tag in icons]
+    assert any(h.endswith('.svg') for h in hrefs), 'no scalable SVG favicon'
+    assert any(h.endswith('.png') for h in hrefs), 'no PNG fallback for older browsers'
+    for href in hrefs:
+        assert 'btools-aperture' in href, f'{href} is not the aperture mark'
+        assert client.get(href).status_code == 200, f'{href} 404s'
 
 
 def _png_colour_type(data):
@@ -105,7 +127,9 @@ def test_js_modules_are_served_and_own_their_responsibilities(client, filename, 
 
 
 @pytest.mark.parametrize('path,needle', [
-    ('/shared/assets/css/bb-theme.css', '--bb-glow-ice: #45B4F2'),
+    # Pinned deliberately: the accent is the brand, so a silent revert to the
+    # pre-2.5.7 ice blue should fail here. Update it only WITH a re-theme.
+    ('/shared/assets/css/bb-theme.css', '--bb-glow-ice: #ECC766'),
     ('/shared/assets/js/bb-ui.js', 'BB.ui ='),
     ('/shared/assets/css/bb-orb.css', '.bb-orb-planet'),
     ('/shared/assets/js/bb-orb.js', 'starPoints'),
@@ -178,7 +202,10 @@ def test_starter_question_set_is_served_and_well_formed(client):
 def test_login_page_wears_the_orb_and_the_btools_lockup(client):
     html = client.get('/login').data.decode('utf-8')
     assert 'bb-orb-host' in html, 'the login page must sit on the planet field'
-    assert '/pics/brand/btools-titlelogo-transparent.png' in html, 'btools lockup missing'
+    # The lockup is drawn INLINE (aperture mark + wordmark) rather than shipped
+    # as a PNG — no white-background risk, crisp at any density.
+    assert 'bb-lockup' in html, 'btools lockup missing'
+    assert 'btools' in html and 'bb-lockup-ai' in html, 'the wordmark is incomplete'
     assert '/shared/assets/css/bb-theme.css' in html
     # The form contract the backend depends on must survive the restyle.
     assert 'action="/auth/login"' in html and 'method="POST"' in html

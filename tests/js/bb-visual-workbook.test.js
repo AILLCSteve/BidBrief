@@ -347,6 +347,9 @@ test('patent attribution names the filer, company credit stays', () => {
   assert.match(settings, /Patent Pending — Stephen Bartlett/);
   assert.match(login, /Patent Pending — Stephen Bartlett/);
   assert.ok(!/Patent Pending — Additional Intelligence/.test(settings));
-  assert.match(settings, /Additional Intelligence LLC/, 'company credit remains');
-  assert.match(login, /Additional Intelligence LLC/, 'company credit remains');
+  // Comma-tolerant: the login footer writes the legal name "Additional
+  // Intelligence, LLC" while Settings writes it without the comma. The credit
+  // is what must survive, not one file's punctuation.
+  assert.match(settings, /Additional Intelligence,? LLC/, 'company credit remains');
+  assert.match(login, /Additional Intelligence,? LLC/, 'company credit remains');
 });

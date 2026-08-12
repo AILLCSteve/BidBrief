@@ -5,6 +5,60 @@ Read this before debugging anything in this repo. Also read
 
 ---
 
+## 2026-08-12 — Every analysis write failed for six releases: a Python call inside SQL (2.5.8)
+
+**Symptom, as reported:** storage behaved erratically for over a week — "at times
+working, then suddenly claiming it cannot write, then claiming in-session memory
+again." In Neon: `bb_settings` and `bb_beta_testers` held rows, **`bb_analyses`
+was empty**, and no analysis ever survived a deploy.
+
+**Root cause — one line, `services/persistence.py:328`:**
+
+```sql
+INSERT INTO bb_analyses
+    (session_id, owner, pdf_filename, mode, status, _aware_utc(completed_at),
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+The 2.5.3 timezone hotfix (`97582e9`) wrapped the completed_at **parameter** in
+`_aware_utc(...)` — correct — and the same edit also rewrote the matching text
+inside the **column list**, where it is not a column but a syntax error.
+Postgres rejected every analysis write with `syntax error at or near "("`,
+`_run()` swallowed it exactly as designed, and the analysis went on succeeding
+for the user. Shipped in 2.5.3 and live through 2.5.7.
+
+**Why the symptoms looked intermittent (two separate reporting defects):**
+1. `self_test()` round-tripped a **bb_settings** row. Settings writes were
+   always valid, so the dashboard certified "storage writable" the entire time
+   analyses were being dropped. *A probe must exercise the statement it speaks
+   for* — the INSERT now lives in one `_INSERT_ANALYSIS` constant that both
+   `save_analysis()` and the probe use, and the probe runs it for real inside a
+   transaction it then rolls back (`psycopg.Rollback` is swallowed by the block,
+   confirmed against psycopg 3.3.4 `_rollback_gen`), so it can never leave a row.
+2. `last_error` was **sticky** — set on every failure, never cleared on success.
+   One transient blip was reported forever, so the status line contradicted a
+   store that was healthy at that moment. It now clears on success and names the
+   failing operation (`save_analysis: ...`, not a bare driver message).
+
+**How it was found — no database required.** Every statement the Store can
+execute was captured through a recording fake, `%s` replaced with `NULL`, and
+parsed by **pglast** (libpg_query — the real Postgres parser): 21 valid, 1
+invalid, and the one invalid statement was the one table with no rows. That is
+now `tests/test_persistence_sql.py`, which fails on the shipped code and passes
+on the fix.
+
+**The lesson that matters most:** the suite had 223 passing tests over this
+module and could not see this, because **every fake connection recorded SQL
+without ever parsing it**. A fake will happily "execute" anything. The project's
+own recorded standing gap — "validated against reproductions and instrumented
+fakes, never against a real database" — was exactly the blind spot, and the fix
+is not the corrected line but the parser in the test path.
+
+**Also note:** a failure-safe wrapper is correct (a Neon hiccup must never fail a
+15-minute analysis) but it converts *every* bug beneath it into silence. Anything
+swallowed that way needs a probe that runs the real statement, plus a status
+readout that cannot go stale.
+
 ## 2026-07-26 — "Transparent" brand PNGs were white-backed RGB (web 2.2.0)
 
 **Symptom:** the btools mark on the login page and behind every screen rendered as a pale grey

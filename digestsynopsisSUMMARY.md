@@ -1158,3 +1158,43 @@ dashboard renders while the storage check hangs, zero console errors.
 **Standing gap:** no query has ever run against the real Neon database from the
 dev machine — `DATABASE_URL='...' python -m services.persistence` is the
 pre-flight for any connection-parameter change.
+
+---
+
+## Δ 2026-08-12 — The analysis write was malformed SQL all along (2.5.8)
+
+**`bb_analyses` had never received a single row.** `services/persistence.py`
+carried `_aware_utc(completed_at)` **inside the INSERT's column list** — a Python
+call pasted into SQL by the 2.5.3 timezone hotfix (`97582e9`). Postgres rejected
+every analysis write with `syntax error at or near "("`; `_run()` swallowed it
+exactly as designed, so analyses succeeded for users while persisting nothing.
+Live from 2.5.3 through 2.5.7.
+
+**The diagnostic signature to remember:** sibling tables (`bb_settings`,
+`bb_beta_testers`) holding rows while one table stays empty means connection,
+credentials and schema are all fine — suspect that table's *statement*.
+
+**Two reporting defects made it look intermittent, both fixed:**
+- `self_test()` round-tripped a **bb_settings** row, so the admin status line
+  certified "storage writable" the whole time analyses were being dropped. The
+  INSERT is now one shared `_INSERT_ANALYSIS` constant, and the probe executes
+  the real statement inside a transaction it rolls back (`psycopg.Rollback` is
+  swallowed by the block — verified against psycopg 3.3.4), leaving no row.
+- `last_error` was sticky (set on failure, never cleared), so one blip was
+  reported forever. Now cleared on success and prefixed with the operation name.
+
+**The structural fix — `tests/test_persistence_sql.py` (NEW).** Every persistence
+test drove a fake connection that RECORDED sql without parsing it, so 223 passing
+tests could not see malformed SQL at all. Each statement the Store can emit is
+now parsed by **pglast** (libpg_query, the real Postgres parser), `%s` → `NULL`.
+Fails on the shipped code, passes on the fix. `pglast` is in the new
+`requirements-dev.txt` — test-only, never installed on Render.
+
+**Also:** the browser-tab icon is the **btools.ai aperture**
+(`pics/brand/btools-aperture.svg`, blades widened and a deep-space disc added so
+it survives 16px on light and dark tab chrome) with 16/32 PNG fallbacks and a
+180px apple-touch icon, replacing `AILLCfavicon.png` on all three pages.
+
+**Verified:** `pytest -q` → **266 passed**, `node --test` → **139 passed**
+(three stale assertions left by the brass/gold re-theme and the brand-footer
+rewrite repaired along the way). `/health` → **2.5.8**.

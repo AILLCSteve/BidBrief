@@ -1,5 +1,57 @@
 # HANDOFF — BidBrief (Flask backend + web front-end)
 
+> Updated: 2026-08-12 — **2.5.8: durable storage actually stores now.** The
+> analysis INSERT had been malformed SQL since 2.5.3, so `bb_analyses` took zero
+> rows for six releases while every other table worked. Read
+> `memory/debug_history.md` § 2026-08-12 before touching `services/persistence.py`.
+
+## 2.5.8 — the analysis write was broken the whole time (this round)
+
+**One line.** `services/persistence.py` had `_aware_utc(completed_at)` inside the
+INSERT's **column list** — a Python call pasted into SQL by the 2.5.3 timezone
+hotfix. Postgres answered `syntax error at or near "("` for every analysis,
+`_run()` swallowed it by design, and the user saw results normally while nothing
+was ever persisted. Symptom that names it: **`bb_settings` and `bb_beta_testers`
+hold rows, `bb_analyses` is empty.**
+
+Found with no database: every statement the Store can emit was captured through a
+recording connection and parsed by **pglast** (libpg_query, the real Postgres
+parser) — 21 valid, 1 invalid.
+
+**What changed**
+| Area | Change |
+|---|---|
+| `services/persistence.py` | the malformed column list fixed; the INSERT extracted to one `_INSERT_ANALYSIS` constant |
+| write probe | `self_test()` now runs the **real** analysis INSERT (rolled back via `psycopg.Rollback`, so it never leaves a row). It used to round-trip a `bb_settings` row and therefore certified storage healthy the entire time analyses were failing |
+| `last_error` | no longer sticky — cleared on success, and prefixed with the failing operation. This is what made a permanent failure look intermittent |
+| `tests/test_persistence_sql.py` (NEW) | parses every statement the store can execute; fails on the shipped code, passes on the fix |
+| `requirements-dev.txt` (NEW) | `pglast`, test-only — NOT installed on Render |
+| favicon | the tab icon is now the **btools.ai aperture** (`pics/brand/btools-aperture.svg` + 16/32/180 PNG fallbacks) on all three pages, replacing `AILLCfavicon.png` |
+
+**Why the suite never caught it:** every persistence test drove a fake connection
+that RECORDED sql without parsing it. A fake executes anything. 223 passing tests
+were structurally incapable of seeing malformed SQL — the parser in the test path
+is the real fix, not the corrected line.
+
+**Verified:** `pytest -q` → **266 passed** (two stale assertions from the
+brass/gold re-theme repaired: `--bb-glow-ice` is `#ECC766` now, and the login
+lockup is inline SVG rather than a PNG); `node --test` → **139 passed** (the
+patent-attribution test wanted "Additional Intelligence LLC" while the login
+footer writes the legal name with a comma — now comma-tolerant, the credit was
+never missing). Favicon rendered by Chromium at 16/24/32/48/64 on light and dark
+chrome and inspected; all four icon references return 200 with real image bodies.
+
+### What only the user can confirm
+1. **That an analysis now lands in `bb_analyses`.** Run one on production and
+   watch the row appear — this has never once succeeded on the live database.
+2. **That it survives a deploy** and appears in the admin Session Dashboard.
+3. Optionally `DATABASE_URL='...' python -m services.persistence` with the real
+   connection string — it round-trips connect → schema → write → read → cleanup.
+   **On the pre-2.5.8 code this fails at "could not write an analysis row"**,
+   which is the whole bug in one command.
+
+> Previous rounds below.
+
 > Updated: 2026-08-03 — **live on 2.5.6.** Durable storage (Neon) is wired and
 > `DATABASE_URL` IS set on Render. Read `memory/debug_history.md` before touching
 > `services/persistence.py`: four separate defects were found and fixed the night
