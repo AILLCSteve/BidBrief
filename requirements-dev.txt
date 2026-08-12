@@ -1,0 +1,10 @@
+# Test-only dependencies. NOT installed on Render — keep production lean.
+#   pip install -r requirements.txt -r requirements-dev.txt
+
+-r requirements.txt
+
+# libpg_query bindings: the real PostgreSQL parser. tests/test_persistence_sql.py
+# parses every statement services/persistence.py can execute, because a fake
+# connection will happily "run" SQL that Postgres rejects — which is how a
+# malformed INSERT silently dropped every analysis for six releases.
+pglast>=7.0

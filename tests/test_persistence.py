@@ -71,7 +71,10 @@ class TestFailureIsAlwaysSafe:
                                    status='completed', snapshot={}) is False
         assert store.load_analysis('s') is None
         assert store.list_analysis_index() == []
-        assert store.last_error == 'neon is asleep'
+        # The failing OPERATION is named: an unattributed "syntax error at or
+        # near (" in the admin panel is a diagnosis nobody can act on.
+        assert store.last_error == 'list_analysis_index: neon is asleep'
+        assert 'neon is asleep' in store.last_error
 
     def test_health_reports_unreachable_instead_of_raising(self):
         store = Store()
@@ -85,6 +88,77 @@ class TestFailureIsAlwaysSafe:
         health = store.health()
         assert health['enabled'] is True
         assert health['reachable'] is False
+
+
+class TestTheStatusLineTellsTheTruthRightNow:
+    """The 2.5.7 diagnosis: a constant failure LOOKED intermittent.
+
+    Two separate reporting defects made the admin status line untrustworthy —
+    it kept reporting an error long after the store recovered, and it certified
+    "writable" from a table that was never the one failing.
+    """
+
+    def _pool(self, fail=False):
+        class Conn:
+            def execute(self, sql, params=None):
+                if fail:
+                    raise RuntimeError('boom')
+                class Cur:
+                    rowcount = 0
+                    def fetchone(self): return (1,)
+                    def fetchall(self): return []
+                return Cur()
+        class Pool:
+            def connection(self):
+                class Ctx:
+                    def __enter__(s): return Conn()
+                    def __exit__(s, *a): return False
+                return Ctx()
+        return Pool()
+
+    def test_a_successful_call_clears_a_stale_error(self):
+        """A sticky error reports one blip forever, so the panel contradicts a
+        store that is healthy right now."""
+        store = Store()
+        store.enabled = True
+        store._pool = self._pool(fail=True)
+        store.count_analyses()
+        assert store.last_error is not None
+
+        store._pool = self._pool(fail=False)
+        store.count_analyses()
+        assert store.last_error is None, 'a recovered store must stop reporting an old error'
+
+    def test_the_write_check_exercises_the_analysis_statement(self, monkeypatch):
+        """A probe against bb_settings certified storage healthy for six
+        releases while every bb_analyses write was failing. The probe must run
+        the statement it speaks for."""
+        store = Store()
+        store.enabled = True
+        store._pool = self._pool(fail=False)
+        # The settings round-trip must SUCCEED, so the only thing under test is
+        # whether a failing analysis write can still be reported as healthy.
+        written = {}
+        monkeypatch.setattr(store, 'set_setting',
+                            lambda k, v: (written.__setitem__(k, v), True)[1])
+        monkeypatch.setattr(store, 'get_setting',
+                            lambda k, default=None: written.get(k, default))
+        monkeypatch.setattr(store, '_analysis_write_probe', lambda: False)
+
+        result = store.self_test()
+        assert result['ok'] is False
+        assert result['reason'] == 'analysis_write_failed', \
+            'a broken analysis write must never be reported as healthy storage'
+
+    def test_the_probe_and_production_share_one_statement(self):
+        """DRY here is a correctness property, not tidiness: a probe running a
+        different INSERT than production proves nothing about production."""
+        import inspect
+        from services.persistence import _INSERT_ANALYSIS
+        assert 'INSERT INTO bb_analyses' in _INSERT_ANALYSIS
+        for method in (Store.save_analysis, Store._analysis_write_probe):
+            assert '_INSERT_ANALYSIS' in inspect.getsource(method), \
+                f'{method.__name__} must use the shared statement'
 
 
 class TestSnapshotSerialization:

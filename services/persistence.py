@@ -99,6 +99,26 @@ CREATE TABLE IF NOT EXISTS bb_settings (
 );
 """
 
+# The analysis upsert lives here rather than inline so save_analysis() and the
+# write probe in self_test() cannot drift apart. A probe that exercises a
+# DIFFERENT statement than production proves nothing about production: this one
+# was reporting storage healthy (via a bb_settings round-trip) for six releases
+# while every analysis write failed on malformed SQL.
+_INSERT_ANALYSIS = """
+INSERT INTO bb_analyses
+    (session_id, owner, pdf_filename, mode, status, completed_at,
+     updated_at, snapshot)
+VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
+ON CONFLICT (session_id) DO UPDATE SET
+    owner = EXCLUDED.owner,
+    pdf_filename = EXCLUDED.pdf_filename,
+    mode = EXCLUDED.mode,
+    status = EXCLUDED.status,
+    completed_at = EXCLUDED.completed_at,
+    updated_at = NOW(),
+    snapshot = EXCLUDED.snapshot
+"""
+
 
 def database_url() -> str:
     return (os.environ.get('DATABASE_URL') or '').strip()
@@ -302,11 +322,19 @@ class Store:
                 return default
         try:
             with self._pool.connection() as conn:
-                return fn(conn)
+                result = fn(conn)
         except Exception as e:
-            self.last_error = str(e)
+            # Name the operation. A bare "syntax error at or near (" tells an
+            # admin nothing; "save_analysis: syntax error..." points at the
+            # statement to read.
+            self.last_error = f'{label}: {e}'
             logger.warning(f"💾 {label} failed (non-fatal): {e}")
             return default
+        # Clear on success. A sticky last_error reports one transient blip
+        # forever, so the admin status line contradicts a store that is healthy
+        # right now — which is how a permanent failure came to look intermittent.
+        self.last_error = None
+        return result
 
     def health(self) -> Dict[str, Any]:
         if not self.enabled:
@@ -323,20 +351,7 @@ class Store:
         """Upsert one analysis snapshot. Called at completion, stop and failure."""
         def _op(conn):
             conn.execute(
-                """
-                INSERT INTO bb_analyses
-                    (session_id, owner, pdf_filename, mode, status, _aware_utc(completed_at),
-                     updated_at, snapshot)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
-                ON CONFLICT (session_id) DO UPDATE SET
-                    owner = EXCLUDED.owner,
-                    pdf_filename = EXCLUDED.pdf_filename,
-                    mode = EXCLUDED.mode,
-                    status = EXCLUDED.status,
-                    completed_at = EXCLUDED.completed_at,
-                    updated_at = NOW(),
-                    snapshot = EXCLUDED.snapshot
-                """,
+                _INSERT_ANALYSIS,
                 (session_id, owner, pdf_filename, mode, status, _aware_utc(completed_at),
                  json.dumps(snapshot, default=_json_default)),
             )
@@ -355,13 +370,34 @@ class Store:
             return json.loads(snapshot) if isinstance(snapshot, str) else snapshot
         return self._run(_op, default=None, label='load_analysis')
 
+    def _analysis_write_probe(self) -> bool:
+        """Run the REAL analysis upsert, then roll it back.
+
+        Rolled back, so it can never pollute history — but the statement it
+        exercises is byte-for-byte the one an analysis writes, which is the only
+        way this check can speak for that write path.
+        """
+        def _op(conn):
+            import psycopg
+            with conn.transaction():
+                conn.execute(_INSERT_ANALYSIS, (
+                    '__write_probe__', None, 'probe.pdf', 'bid_spec', 'probe',
+                    _aware_utc(datetime.now(timezone.utc)),
+                    json.dumps({'probe': True})))
+                raise psycopg.Rollback  # swallowed by the block; nothing commits
+            return True
+        return bool(self._run(_op, default=False, label='analysis_write_probe'))
+
     def self_test(self) -> Dict[str, Any]:
         """Prove the store can actually WRITE and read back, not merely connect.
 
         'Connected' is not the same as 'working': a wrong database, a read-only
-        role or a failed schema create all still connect. This round-trips a
-        settings row so the admin panel can state plainly whether history is
-        really being kept.
+        role or a failed schema create all still connect. Neither is "some table
+        works" — this check used to round-trip only a settings row, and settings
+        kept working for six releases while every bb_analyses write failed on
+        malformed SQL, so the dashboard reported storage healthy the whole time
+        history was being silently dropped. It now exercises the analysis write
+        as well, because that is the write anyone actually cares about.
         """
         if not self.enabled:
             return {'ok': False, 'reason': 'disabled', 'error': self.last_error}
@@ -378,6 +414,9 @@ class Store:
         value = self.get_setting(key) or {}
         if value.get('at') != stamp:
             return {'ok': False, 'reason': 'readback_mismatch', 'error': self.last_error}
+        if not self._analysis_write_probe():
+            return {'ok': False, 'reason': 'analysis_write_failed',
+                    'error': self.last_error}
         result = {'ok': True}
         self._self_test_cache = (now, result)
         return result
