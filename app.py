@@ -619,11 +619,16 @@ def _attach_dynamic_intel(legacy_result, session_id):
                   or active_analyses.get(session_id) or {})
     tables = source.get('dynamic_tables') or []
     focus = source.get('intelligence_focus') or ''
+    error = source.get('intelligence_error') or ''
     # Never downgrade a payload that already carries them.
     if tables or not legacy_result.get('dynamic_tables'):
         legacy_result['dynamic_tables'] = tables
     if focus or not legacy_result.get('intelligence_focus'):
         legacy_result['intelligence_focus'] = focus
+    # Carry the failure reason too, so the client can say WHY the tables are
+    # missing instead of hiding the tab and looking broken.
+    if error and not legacy_result.get('intelligence_error'):
+        legacy_result['intelligence_error'] = error
     return legacy_result
 
 
@@ -1201,7 +1206,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.8'
+        'version': '2.5.9'
     })
 
 @app.route('/pics/<path:filename>')
@@ -1769,6 +1774,7 @@ def analyze_document():
                             # Dynamic intelligence tables (served by /api/results + exports)
                             'dynamic_tables': legacy_result.get('dynamic_tables', []),
                             'intelligence_focus': legacy_result.get('intelligence_focus', ''),
+                            'intelligence_error': legacy_result.get('intelligence_error', ''),
                         }
                         del active_analyses[session_id]
                         # Update timestamp so cleanup doesn't delete recently completed analyses
@@ -2054,9 +2060,15 @@ def get_results(session_id):
                 'success': False, 'error': 'Session not found',
                 'message': 'Analysis session does not exist or has been cleaned up'
             }), 404
+        restored_result = snapshot.get('result', {})
+        # Every OTHER branch re-attaches Document Intelligence; this one used to
+        # return before reaching it. Once storage works, a restored session is
+        # what you look at after every deploy — so the DI tab would have gone
+        # missing for essentially every analysis while the Excel export kept it.
+        _attach_dynamic_intel(restored_result, session_id)
         response = {
             'success': True,
-            'result': snapshot.get('result', {}),
+            'result': restored_result,
             'mode': snapshot.get('mode', 'bid_spec'),
             'statistics': snapshot.get('statistics', {}),
             'restored': True,
@@ -3410,10 +3422,15 @@ def admin_delete_analysis(session_id):
 def admin_storage_status():
     """Admin-only: is history actually being kept, and how much of it."""
     health = persistence_store.health()
-    from services.persistence import retention_days, index_limit
+    from services.persistence import retention_days, index_limit, endpoint_kind
     return jsonify({
         'success': True,
         'persistence': health,
+        # Which Neon host is configured. The DIRECT endpoint has a small hard
+        # connection cap and starts refusing new connections once it is hit,
+        # which presents exactly like "couldn't get a connection"; the POOLED
+        # host (…-pooler.…) is built for this. Never exposes the credentials.
+        'endpoint': endpoint_kind(),
         # A round-trip write, so this answers "is history really being kept?"
         # rather than only "did a socket open?"
         'write_test': persistence_store.self_test(),

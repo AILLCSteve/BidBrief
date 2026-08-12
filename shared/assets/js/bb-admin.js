@@ -170,9 +170,13 @@
         (p.error || 'unknown error') + '. Sessions are in memory only.' };
     }
     if (!write.ok) {
+      /* The endpoint is named here because a DIRECT Neon host refusing
+         connections is indistinguishable from any other connection failure in
+         the error text, and swapping it for the pooled one is a URL edit. */
       return { ok: false, text: 'Durable storage connected but NOT writable (' +
         (write.reason || 'unknown') + (write.error ? ': ' + write.error : '') +
-        '). Nothing is being saved.' };
+        ')' + (info.endpoint ? ' · ' + info.endpoint + ' endpoint' : '') +
+        '. Nothing is being saved.' };
     }
     return { ok: ok, text: 'Durable storage active · ' + (info.stored_analyses || 0) +
       ' analysis(es) stored · ' + (info.indexed_in_memory || 0) + ' listed here · retention ' +

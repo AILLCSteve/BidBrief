@@ -112,8 +112,35 @@
     return (payload && payload.visual_findings) || [];
   }
 
+  /** Document Intelligence tables, normalised to an array.
+
+      The Excel generator only asks whether the value is truthy and then
+      iterates it, so a dict of tables renders a sheet there while `.length`
+      here is `undefined` and the tab silently never appears. Two surfaces
+      disagreeing about one payload is precisely the bug this guards. */
   function dynamicTables(payload) {
-    return (payload && (payload.dynamic_tables || payload.dynamicTables)) || [];
+    var raw = payload && (payload.dynamic_tables || payload.dynamicTables);
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'object') {
+      // {name: table} or a single bare table object.
+      if (raw.rows || raw.columns) return [raw];
+      return Object.keys(raw).map(function (k) {
+        var t = raw[k];
+        if (t && !t.title && !t.name) t.title = k;
+        return t;
+      }).filter(Boolean);
+    }
+    return [];
+  }
+
+  /** Whether the payload has anything to say about Document Intelligence —
+      tables, the focus line, or the reason it produced nothing. An empty tab
+      that explains itself beats a tab that silently isn't there. */
+  function hasIntelligence(payload) {
+    return !!(dynamicTables(payload).length ||
+              (payload && payload.intelligence_focus) ||
+              (payload && payload.intelligence_error));
   }
 
   function hasKeyDetails(payload) {
@@ -130,7 +157,7 @@
       { id: 'detailed', label: 'Detailed Results' },
       { id: 'bySection', label: 'By Section' }
     ];
-    if (dynamicTables(payload).length) {
+    if (hasIntelligence(payload)) {
       sheets.push({ id: 'intelligence', label: 'Document Intelligence' });
     }
     if (visualFindings(payload).length) {
@@ -507,6 +534,14 @@
     var blocks = [];
     if (payload.intelligence_focus) {
       blocks.push(ui.el('p', { class: 'bb-caption-lit' }, payload.intelligence_focus));
+    }
+    // Say why there is nothing rather than rendering a blank sheet: an empty
+    // tab reads as a broken app, a stated reason reads as an answer.
+    if (!dynamicTables(payload).length) {
+      blocks.push(ui.el('p', { class: 'bb-caption' },
+        payload.intelligence_error
+          ? 'No tables were generated for this document — ' + payload.intelligence_error
+          : 'No document-specific tables were generated for this analysis.'));
     }
     dynamicTables(payload).forEach(function (table) {
       var columns = table.columns || [];

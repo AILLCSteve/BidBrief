@@ -189,6 +189,65 @@ def _json_default(value):
     return str(value)
 
 
+class _PoolErrorCapture(logging.Handler):
+    """Keep the REAL reason connections are failing.
+
+    psycopg_pool opens connections on a background worker. When that fails it
+    logs the actual cause — "password authentication failed", "too many
+    connections for role", "SSL SYSCALL error", "connection timeout expired" —
+    to its OWN logger, and then hands the caller a bare
+    PoolTimeout("couldn't get a connection after N sec").
+
+    So the exception a caller sees never contains the diagnosis. That is why a
+    week of "cannot write" produced no actionable error: the cause was being
+    logged to a logger nobody listened to. This handler listens.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.last_message: Optional[str] = None
+
+    def emit(self, record):
+        try:
+            self.last_message = record.getMessage()
+        except Exception:
+            pass
+
+
+_pool_errors = _PoolErrorCapture()
+logging.getLogger('psycopg_pool').addHandler(_pool_errors)
+
+
+def endpoint_kind() -> str:
+    """'pooled' | 'direct' | 'unset' — never the credentials.
+
+    Neon exposes two hosts. The POOLED one (…-pooler.…) is PgBouncer and is
+    built for many short-lived connections; the DIRECT one has a small hard
+    connection cap and refuses new connections once it is reached, which looks
+    exactly like this failure. Worth stating plainly in the admin panel, since
+    pasting the wrong one is a two-character difference in the URL.
+    """
+    url = database_url()
+    if not url:
+        return 'unset'
+    host = url.split('@')[-1].split('/')[0].lower()
+    return 'pooled' if '-pooler.' in host else 'direct'
+
+
+def _is_connection_problem(exc: Exception) -> bool:
+    """True when we could not REACH the database, as opposed to bad SQL.
+
+    Neon suspends idle compute, so the first request after a quiet spell has to
+    wake it. That surfaces as a pool timeout ("couldn't get a connection after
+    N sec") — a transient worth one retry, unlike a syntax error, which will
+    fail identically forever and must not be retried.
+    """
+    if type(exc).__name__ in ('PoolTimeout', 'PoolClosed', 'OperationalError',
+                              'InterfaceError'):
+        return True
+    return "couldn't get a connection" in str(exc).lower()
+
+
 class Store:
     """
     The durable store. Construct once at import; call `init()` at boot.
@@ -206,6 +265,7 @@ class Store:
         self.last_error: Optional[str] = None
         self._last_init_attempt = 0.0
         self._self_test_cache = None
+        self._consecutive_failures = 0
 
     # ---- lifecycle -----------------------------------------------------------
 
@@ -249,8 +309,13 @@ class Store:
             # spell can be slow; check connections on checkout and let the pool
             # reopen dead ones rather than handing a broken socket to a request.
             self._pool = ConnectionPool(
+                # timeout/connect_timeout at 20s, not 10: Neon suspends idle
+                # compute and the request that wakes it pays the cold start.
+                # min_size stays 0 deliberately — holding a connection open to
+                # keep the pool warm would keep Neon awake and burn compute
+                # hours, which is a worse problem than a slow first query.
                 conninfo=url, min_size=0, max_size=_pool_max(),
-                timeout=10, max_idle=120, num_workers=1, open=True,
+                timeout=20, max_idle=120, num_workers=1, open=True,
                 check=ConnectionPool.check_connection,
                 # Only libpq CONNECTION parameters here. Neon's pooled endpoint
                 # is PgBouncer, which rejects unknown startup parameters — an
@@ -261,7 +326,7 @@ class Store:
                 # through a pooler.
                 kwargs={
                     'autocommit': True,
-                    'connect_timeout': 10,
+                    'connect_timeout': 20,
                     'keepalives': 1,
                     'keepalives_idle': 30,
                     'keepalives_interval': 10,
@@ -277,7 +342,11 @@ class Store:
                         + (f"(retention {days}d)" if days > 0 else "(analyses kept indefinitely)"))
             return True
         except Exception as e:
+            # Same blindness as _run: a PoolTimeout here says nothing about WHY.
+            # The pool logged the real cause; carry it.
             self.last_error = str(e)
+            if _is_connection_problem(e) and _pool_errors.last_message:
+                self.last_error += f' [pool: {_pool_errors.last_message}]'
             # CLOSE the pool before dropping it. A ConnectionPool runs a
             # background worker that keeps opening connections; discarding the
             # reference leaks that thread AND its server-side connections. With
@@ -320,21 +389,51 @@ class Store:
         if not self.enabled or self._pool is None:
             if not self._try_reinit():
                 return default
-        try:
-            with self._pool.connection() as conn:
-                result = fn(conn)
-        except Exception as e:
-            # Name the operation. A bare "syntax error at or near (" tells an
-            # admin nothing; "save_analysis: syntax error..." points at the
-            # statement to read.
-            self.last_error = f'{label}: {e}'
-            logger.warning(f"💾 {label} failed (non-fatal): {e}")
-            return default
-        # Clear on success. A sticky last_error reports one transient blip
-        # forever, so the admin status line contradicts a store that is healthy
-        # right now — which is how a permanent failure came to look intermittent.
-        self.last_error = None
-        return result
+        # Two attempts: Neon suspends idle compute, and the request that wakes
+        # it can lose the race. A second try turns that into a slow success
+        # instead of a silent no-op. Only ever retried for CONNECTION problems —
+        # bad SQL would fail identically forever.
+        attempts = 3
+        for attempt in range(1, attempts + 1):
+            try:
+                with self._pool.connection() as conn:
+                    result = fn(conn)
+            except Exception as e:
+                if attempt < attempts and _is_connection_problem(e):
+                    logger.info(f"💾 {label}: {e} — retry {attempt}/{attempts - 1} "
+                                "(the database may be waking)")
+                    time.sleep(1.5 * attempt)
+                    continue
+                # Name the operation, and attach the REAL cause. A bare
+                # "couldn't get a connection after 10.00 sec" is the pool's
+                # generic timeout; the actual reason was logged by psycopg_pool
+                # and captured above. Without it this message is undiagnosable.
+                detail = f'{label}: {e}'
+                if _is_connection_problem(e) and _pool_errors.last_message:
+                    detail += f' [pool: {_pool_errors.last_message}]'
+                self.last_error = detail
+                self._consecutive_failures += 1
+                logger.warning(f"💾 {detail} (non-fatal)")
+                if self._consecutive_failures >= 3:
+                    # A pool that keeps refusing never recovers on its own:
+                    # nothing else clears `enabled`, so _try_reinit() can never
+                    # fire and storage stays dead until the next deploy. Drop it
+                    # and let the next call build a fresh one.
+                    logger.warning("💾 Discarding the connection pool after "
+                                   f"{self._consecutive_failures} consecutive failures "
+                                   "— the next call will rebuild it")
+                    self._discard_pool()
+                    self._consecutive_failures = 0
+                    self._last_init_attempt = 0.0  # allow an immediate rebuild
+                return default
+            # Clear on success. A sticky last_error reports one transient blip
+            # forever, so the admin status line contradicts a store that is
+            # healthy right now — which is how a permanent failure came to look
+            # intermittent.
+            self.last_error = None
+            self._consecutive_failures = 0
+            return result
+        return default
 
     def health(self) -> Dict[str, Any]:
         if not self.enabled:
