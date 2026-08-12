@@ -1278,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.18'
+        'version': '2.5.19'
     })
 
 @app.route('/pics/<path:filename>')
@@ -4124,15 +4124,24 @@ _QGEN_VISION_PROMPT = (
 )
 
 
-def _vision_read_page(http_requests, api_key: str, model: str, pdf_path: str,
-                      page_index: int, max_chars: int = 2500) -> str:
+def _vision_read_page(pdf_path: str, page_index: int, model: str = '',
+                      max_chars: int = 2500) -> str:
     """Read ONE text-less page with the vision model. Never raises.
 
     A scanned PDF holds pictures of words. Text extraction returns nothing and
     question generation silently falls back to generic domain questions — so
     the page is transcribed here instead, using the same model family and the
     same render sizing the analysis pipeline's visual pass uses.
+
+    Reads OPENAI_API_KEY itself — the SAME key the analysis and question
+    generation already use. There is no second credential; taking it as a
+    parameter only made callers responsible for something they can all look up,
+    and any caller that forgot silently lost the fallback.
     """
+    import requests as http_requests
+    api_key = os.getenv('OPENAI_API_KEY', '')
+    if not api_key:
+        return ''
     try:
         from services.hotdog.visual_intelligence import render_page_b64, visual_model
         b64 = render_page_b64(pdf_path, page_index)
@@ -4173,7 +4182,6 @@ def _vision_read_page(http_requests, api_key: str, model: str, pdf_path: str,
 
 
 def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
-                         http_requests=None, api_key: str = '',
                          model: str = '', vision_stats: dict = None) -> str:
     """
     Lightly extract context from a PDF for question generation guidance.
@@ -4191,7 +4199,7 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
                 # First 4 pages + last 3 pages
                 indices = list(range(min(4, total))) + list(range(max(0, total - 3), total))
                 seen = set()
-                budget = _qgen_vision_max_pages() if (http_requests and api_key) else 0
+                budget = _qgen_vision_max_pages()
                 for i in indices:
                     if i in seen:
                         continue
@@ -4201,8 +4209,7 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
                         pages_text.append(f"[Page {i+1}]\n{t.strip()}")
                     elif budget > 0:
                         # Same scanned-page fallback as the PyMuPDF path.
-                        seen_text = _vision_read_page(http_requests, api_key, model,
-                                                      pdf_path, i)
+                        seen_text = _vision_read_page(pdf_path, i, model)
                         if seen_text:
                             budget -= 1
                             pages_text.append(
@@ -4248,8 +4255,7 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
         # questions — read it with the vision model, bounded so the context scan
         # stays the light pass it is meant to be.
         selected = sorted(set(context_pages))
-        can_see = bool(http_requests and api_key and _qgen_vision_max_pages())
-        vision_budget = _qgen_vision_max_pages() if can_see else 0
+        vision_budget = _qgen_vision_max_pages()
         vision_pages = []
 
         parts = []
@@ -4258,7 +4264,7 @@ def _extract_doc_context(pdf_path: str, max_chars: int = 4000,
             if t:
                 parts.append(f"[Page {i+1}]\n{t}")
             elif vision_budget > 0:
-                seen_text = _vision_read_page(http_requests, api_key, model, pdf_path, i)
+                seen_text = _vision_read_page(pdf_path, i, model)
                 if seen_text:
                     vision_budget -= 1
                     vision_pages.append(i + 1)
@@ -4442,8 +4448,7 @@ def generate_question_set():
                     tmp_path = tmp.name
                 try:
                     return _extract_doc_context(
-                        tmp_path, http_requests=http_requests, api_key=api_key,
-                        model=gen_model, vision_stats=vision_stats) or ''
+                        tmp_path, model=gen_model, vision_stats=vision_stats) or ''
                 finally:
                     try:
                         os.unlink(tmp_path)
