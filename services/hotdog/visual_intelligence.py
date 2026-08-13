@@ -67,6 +67,132 @@ def render_page_b64(pdf_path: str, page_index: int) -> Optional[str]:
         return None
 
 
+_OCR_SYSTEM_PROMPT = (
+    'You transcribe a single document page that has no machine-readable text '
+    'layer. Output PLAIN TEXT only — no commentary, no markdown, no summary. '
+    'Reproduce what is printed on the page in reading order: titles, headings, '
+    'party names, dates, reference and recording numbers, body text, and the '
+    'contents of tables and title blocks. Keep each form label with its value. '
+    'If a region is genuinely illegible write [illegible]; never guess. Do not '
+    'interpret, summarise, or add anything not printed on the page.'
+)
+
+
+async def read_textless_pages(
+    pdf_path: str,
+    pages: List[PageData],
+    openai_client,
+    model: str,
+    emit: Optional[Callable[[str, dict], None]] = None,
+    max_parallel: int = 3,
+) -> Tuple[List[PageData], List[int]]:
+    """Give a text layer to EVERY page that has none. Never raises.
+
+    A page with no extractable text is invisible to the entire pipeline: it goes
+    into a window as an empty block, the experts see nothing, the second pass
+    re-reads the same nothing, and a scanned document therefore analyses to
+    nothing at all. This reads those pages from their image so they carry their
+    own words.
+
+    EVERY text-less page is read. There is deliberately no page cap: this
+    product's promise is exhaustive analysis, and silently skipping pages past
+    an arbitrary limit would break that promise precisely on the documents that
+    need it most. `max_parallel` bounds concurrency (throughput), never
+    coverage.
+
+    Deliberately NOT visual analysis:
+      * `visual_kind` is left unset, so the <VIS pg N> citation contract and the
+        expert prompts are untouched — experts cite these pages as ordinary
+        <PDF pg N> text, which is what they are.
+      * nothing is added to `visual_findings`, so the Visual Intelligence sheet
+        and every export are unchanged.
+    Run this AFTER the opt-in visual scan: that scan scores pages on text
+    sparsity, so filling text in first would change which pages it selects.
+
+    Returns (pages, page_numbers_read) with pages unchanged on any failure.
+    """
+    def _emit(event, data):
+        if emit:
+            try:
+                emit(event, data)
+            except Exception:
+                pass
+
+    targets = [p for p in pages if not (p.text or '').strip()]
+    if not targets:
+        return pages, []
+
+    _emit('text_recovery_start', {'pages': [p.page_num for p in targets],
+                                  'page_count': len(targets)})
+    logger.info(f'🔤 Reading {len(targets)} page(s) with no text layer from their images')
+
+    from services.ai_models import completion_params
+    semaphore = asyncio.Semaphore(max_parallel)
+    use_model = visual_model() or model
+    done = {'n': 0}
+
+    async def read_one(page: PageData) -> Tuple[int, str]:
+        async with semaphore:
+            try:
+                b64 = await asyncio.to_thread(render_page_b64, pdf_path, page.page_num - 1)
+                if not b64:
+                    return page.page_num, ''
+                response = await openai_client.chat.completions.create(
+                    messages=[
+                        {'role': 'system', 'content': _OCR_SYSTEM_PROMPT},
+                        {'role': 'user', 'content': [
+                            {'type': 'text',
+                             'text': f'Page {page.page_num}. Transcribe it.'},
+                            {'type': 'image_url',
+                             'image_url': {'url': f'data:image/png;base64,{b64}',
+                                           'detail': 'high'}},
+                        ]},
+                    ],
+                    **completion_params(use_model, 4000, temperature=0.1,
+                                        reasoning_effort='low')
+                )
+                text = ''
+                if response.choices:
+                    text = (response.choices[0].message.content or '').strip()
+            except Exception as e:
+                # Per-page failure is survivable: that page stays as it was.
+                logger.warning(f'Text recovery: page {page.page_num} failed '
+                               f'(non-fatal): {e}')
+                text = ''
+            done['n'] += 1
+            _emit('text_recovery_page', {'page': page.page_num,
+                                         'recovered': bool(text),
+                                         'done': done['n'],
+                                         'total': len(targets)})
+            return page.page_num, text
+
+    results = await asyncio.gather(*(read_one(p) for p in targets))
+    recovered = {num: text for num, text in results if text}
+
+    if not recovered:
+        _emit('text_recovery_complete', {'pages_recovered': 0,
+                                         'pages_attempted': len(targets)})
+        return pages, []
+
+    # PageData is frozen — rebuild rather than mutate.
+    rebuilt: List[PageData] = []
+    for p in pages:
+        text = recovered.get(p.page_num)
+        if text:
+            body = f'[This page has no text layer; the following was read from the page image]\n{text}'
+            rebuilt.append(PageData(
+                page_num=p.page_num, text=body, char_count=len(body),
+                has_content=True, visual_kind=p.visual_kind))
+        else:
+            rebuilt.append(p)
+
+    _emit('text_recovery_complete', {'pages_recovered': len(recovered),
+                                     'pages_attempted': len(targets),
+                                     'pages': sorted(recovered)})
+    logger.info(f'🔤 Recovered text for {len(recovered)}/{len(targets)} text-less page(s)')
+    return rebuilt, sorted(recovered)
+
+
 def visual_model() -> str:
     """Model used for vision calls. Defaults to the analysis model the caller
     passes in; BIDBRIEF_MODEL_VISION overrides it ops-side without a deploy."""

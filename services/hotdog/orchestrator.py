@@ -159,6 +159,9 @@ class HotdogOrchestrator:
         # ADDITIVE ONLY: off (the default) leaves the pipeline byte-identical.
         self.enable_visual_analysis = enable_visual_analysis
         self.visual_findings = []
+        # Pages whose text was read from their image because they had no text
+        # layer. Informational only — nothing downstream branches on it.
+        self.recovered_text_pages = []
 
         # Detect model limits using TokenOptimizer
         from services.ai_models import standard_model
@@ -295,6 +298,28 @@ class HotdogOrchestrator:
                 except Exception as e:
                     logger.warning(f"  ⚠️ Visual scan failed (non-fatal): {e}")
                     self._emit_progress('visual_scan_failed', {'error': str(e)})
+
+            # ============================================================
+            # LAYER 0.6: TEXT RECOVERY (always on, additive)
+            # A page with no text layer is invisible to every later layer — it
+            # enters its window empty, the experts see nothing, and the second
+            # pass re-reads the same nothing. Read those pages from their images
+            # so a scanned document analyses like any other.
+            #
+            # Runs AFTER the visual scan on purpose: that scan scores pages on
+            # text sparsity, so recovering text first would change which pages
+            # it selects. Pages it already enriched now carry text and are
+            # skipped here. Failure is non-fatal — `pages` is simply unchanged,
+            # which is exactly today's behaviour.
+            # ============================================================
+            try:
+                from .visual_intelligence import read_textless_pages
+                pages, self.recovered_text_pages = await read_textless_pages(
+                    pdf_path, pages, self.openai_client, self.model,
+                    emit=self._emit_progress)
+            except Exception as e:
+                logger.warning(f"  ⚠️ Text recovery failed (non-fatal): {e}")
+                self._emit_progress('text_recovery_failed', {'error': str(e)})
 
             windows = self.layer0_ingestion.create_windows(pages, window_size=3)
 

@@ -1278,7 +1278,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'BidBrief - AI Document Analysis',
-        'version': '2.5.20'
+        'version': '2.5.21'
     })
 
 @app.route('/pics/<path:filename>')
