@@ -8,7 +8,7 @@ Werkzeug>=3.0.0,<3.1.0
 # WSGI Server for Production
 # CRITICAL: gevent must be installed BEFORE gunicorn for SSE to work
 gevent>=24.2.1
-gunicorn>=22.0.0,<23.0.0
+gunicorn>=25.3.0,<26.0.0
 
 # Document Processing (CIPP Analyzer)
 # PDF extraction - PyMuPDF (fitz) is primary, others are fallbacks
